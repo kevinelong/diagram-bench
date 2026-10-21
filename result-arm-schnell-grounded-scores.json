@@ -1,0 +1,328 @@
+{
+ "n": 10,
+ "paths_median": 149.0,
+ "nodes_median": 1658.0,
+ "axis_median": 100.0,
+ "colours_median": 1.0,
+ "ocr_exact_mean": 0.269,
+ "ocr_full_match": 0,
+ "segments_median": 37.5,
+ "edge_sparse_median": 96.75,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "bar-1",
+   "kind": "chart",
+   "sample": "bar-1-s1234",
+   "paths": 139,
+   "nodes": 1528,
+   "traced_svg_kb": 50.8,
+   "axis_pct": 100.0,
+   "colours_major": 3,
+   "ink_pct": 12.0,
+   "ocr_found": [
+    "2020",
+    "1000",
+    "2000",
+    "2000",
+    "3400",
+    "5300",
+    "480",
+    "350",
+    "Q1",
+    "182",
+    "860",
+    "1104"
+   ],
+   "required": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 1024,
+   "height": 1024,
+   "segments": 13,
+   "edge_sparse_pct": 97.9,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "blueprint-1",
+   "kind": "blueprint",
+   "sample": "blueprint-1-s1234",
+   "paths": 153,
+   "nodes": 1788,
+   "traced_svg_kb": 69.4,
+   "axis_pct": 100.0,
+   "colours_major": 3,
+   "ink_pct": 2.7,
+   "ocr_found": [
+    "200410",
+    "1510000",
+    "00055",
+    "520"
+   ],
+   "required": [
+    "A",
+    "B"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 33,
+   "edge_sparse_pct": 95.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "circuit-1",
+   "kind": "schematic",
+   "sample": "circuit-1-s1234",
+   "paths": 145,
+   "nodes": 1314,
+   "traced_svg_kb": 45.3,
+   "axis_pct": 100.0,
+   "colours_major": 4,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "RC",
+    "09"
+   ],
+   "required": [
+    "R1",
+    "C1"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 204,
+   "edge_sparse_pct": 86.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "floor-1",
+   "kind": "floor plan",
+   "sample": "floor-1-s1234",
+   "paths": 239,
+   "nodes": 2488,
+   "traced_svg_kb": 104.0,
+   "axis_pct": 98.6,
+   "colours_major": 2,
+   "ink_pct": 7.7,
+   "ocr_found": [
+    "BEDROOM",
+    "1ATH",
+    "864",
+    "LIVEY",
+    "\u53e3",
+    "BEDDROOM"
+   ],
+   "required": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 1024,
+   "height": 1024,
+   "segments": 143,
+   "edge_sparse_pct": 92.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s1234",
+   "paths": 168,
+   "nodes": 1827,
+   "traced_svg_kb": 71.1,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 2.9,
+   "ocr_found": [
+    "START",
+    "AILIALATE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 1024,
+   "height": 1024,
+   "segments": 38,
+   "edge_sparse_pct": 95.8,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "network-1",
+   "kind": "network",
+   "sample": "network-1-s1234",
+   "paths": 73,
+   "nodes": 764,
+   "traced_svg_kb": 27.8,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 1.3,
+   "ocr_found": [
+    "SERVER",
+    "21110",
+    "38112"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 1024,
+   "height": 1024,
+   "segments": 37,
+   "edge_sparse_pct": 98.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "org-1",
+   "kind": "org chart",
+   "sample": "org-1-s1234",
+   "paths": 84,
+   "nodes": 1028,
+   "traced_svg_kb": 40.0,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 1.7,
+   "ocr_found": [
+    "CEO",
+    "C:TO",
+    "2610",
+    "C120"
+   ],
+   "required": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.333,
+   "width": 1024,
+   "height": 1024,
+   "segments": 45,
+   "edge_sparse_pct": 97.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "process-1",
+   "kind": "swimlane",
+   "sample": "process-1-s1234",
+   "paths": 194,
+   "nodes": 3121,
+   "traced_svg_kb": 165.8,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 2.1,
+   "ocr_found": [
+    "Requesster",
+    "REVIew",
+    "SUBMIT",
+    "APPROVE"
+   ],
+   "required": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 53,
+   "edge_sparse_pct": 96.8,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "timeline-1",
+   "kind": "timeline",
+   "sample": "timeline-1-s1234",
+   "paths": 78,
+   "nodes": 730,
+   "traced_svg_kb": 27.2,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 0.5,
+   "ocr_found": [
+    "19.20",
+    "2000",
+    "400.50",
+    "680.14",
+    "9023"
+   ],
+   "required": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 4,
+   "edge_sparse_pct": 99.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "tree-1",
+   "kind": "hierarchy",
+   "sample": "tree-1-s1234",
+   "paths": 335,
+   "nodes": 3691,
+   "traced_svg_kb": 165.3,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 2.0,
+   "ocr_found": [
+    "311/150",
+    "592.50",
+    "312/150",
+    "712/150",
+    "721,160",
+    "732.50",
+    "1511/150",
+    "72660",
+    "71330",
+    "811.150",
+    "811/250",
+    "612/250",
+    "822.50",
+    "821.50"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 6,
+   "ocr_exact": 0.857,
+   "width": 1024,
+   "height": 1024,
+   "segments": 26,
+   "edge_sparse_pct": 96.7,
+   "low_contrast_normalised": false
+  }
+ ]
+}

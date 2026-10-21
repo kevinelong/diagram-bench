@@ -1,0 +1,28 @@
+{
+ "arm": "A-flux1-schnell-Q4_K_S",
+ "steps": 4,
+ "cfg": 1.0,
+ "seeds": [
+  1234
+ ],
+ "sampler": "euler/simple",
+ "resolution": 1024,
+ "idle_vram_mib": 8726,
+ "determinism": null,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": null,
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 10.1,
+   "vram_peak_mib": 10999,
+   "status": "success",
+   "error": null,
+   "file": "schnell-grounded-flow-1-s1234.png",
+   "sha256": "2ba8686987bbff75aabcca0ac105e4cda26f4d88aefe0d9a8c72eceb6de5e8df"
+  }
+ ]
+}
