@@ -1,0 +1,58 @@
+{
+ "declared": "2026-10-21",
+ "supersedes": "hard-task-pooltable-v5.json",
+ "source": "github.com/kevinelong/ace-new-site, frontend/index.html (POCKET_ZONES, BALL_RADIUS, layer-diamonds, head/foot spots, generateRackPositions) and render-scenarios.js (aim-line styles)",
+ "frozen": true,
+ "why": "v5 added a prose clause about the butt side and REGRESSED to 9/11: the cue stayed butt-toward-the-rack and flattened from 30 to -18.2 degrees. v6 states the cue as two coordinates, the way the rack was stated as a lattice - it is the last element still described in words.",
+ "prompt": "A top-down billiards shot diagram as flat 2D vector line art, in the coordinate system viewBox=\"-8 -8 116 66\". The playing surface is a rectangle from (0,0) to (100,50) - exactly twice as wide as tall - filled light teal with a dark cushion border 2 units wide around it. Draw six pockets as dark circles: corner pockets at (1.5,1.5), (98.5,1.5), (1.5,48.5) and (98.5,48.5) with radius 3.5, and side pockets at (50,1) and (50,49) with radius 2.5. Draw cream diamond markers (small rotated squares 0.5 units wide, gold outline) on both long rails at x = 12.5, 25, 37.5, 62.5, 75 and 87.5, centred at y = -3 and y = 53, and three on each short rail at y = 12.5, 25 and 37.5, centred at x = -3 and x = 103. Draw the head spot at (25,25) and the foot spot at (75,25) as tiny dark dots. Rack fifteen object balls of radius 1.125 as an equilateral triangle whose apex ball sits exactly on the foot spot at (75,25), widening toward the foot rail.\nFor the rack use EXACTLY these coordinates, computing them with arithmetic rather than estimating:\n  for row k = 0,1,2,3,4:            x_k = 75 + k * 1.9493\n      for ball j = 0..k:            y  = 25 + (j - k/2) * 2.25\n  so row 0 is the single apex ball at (75,25), row 1 is two balls at x=76.949, row 2 three balls at x=78.899,\n  row 3 four balls at x=80.848, and row 4 - the back row - is five balls ALL at x=82.797, running vertically\n  from y=20.5 to y=29.5, so the back row is exactly parallel to the foot rail. Rows advance in +x only; no ball\n  may sit at any other x than its row's x_k. Draw a white cue ball of radius 1.125 at the head spot (25,25) and label it CUE in 2.5-unit Arial text. Draw the cue stick as a single straight line 0.9 units thick from the butt point (x = -0.98, y = 10.00) to the tip point (x = 24.03, y = 24.44): the tip stops 1.125 units short of the cue ball centre (25, 25), the stick axis is 30 degrees above the horizontal, and the butt lies on the head side at x = -0.98, past the head short rail, which is correct. Flat vector style: solid fills, sharp edges, no gradients, no shadows, no 3D, white background outside the table.",
+ "checks": [
+  {
+   "id": "playfield_2to1",
+   "rule": "a rect spanning (0,0)-(100,50), aspect 2.0 +/- 0.05"
+  },
+  {
+   "id": "corners",
+   "rule": "pockets at the four corners within 1 unit of (1.5,1.5),(98.5,1.5),(1.5,48.5),(98.5,48.5), r 3.5 +/- 0.8"
+  },
+  {
+   "id": "sides",
+   "rule": "pockets at (50,1) and (50,49) within 1 unit, r 2.5 +/- 0.8"
+  },
+  {
+   "id": "diamonds_long",
+   "rule": ">=5 markers on a long rail at x in {12.5,25,37.5,62.5,75,87.5} and none at x=50"
+  },
+  {
+   "id": "spots",
+   "rule": "markers at (25,25) and (75,25)"
+  },
+  {
+   "id": "rack_apex",
+   "rule": "a ball within 1 unit of the foot spot (75,25)"
+  },
+  {
+   "id": "rack_equilateral",
+   "rule": "row x-positions separated by 1.95 +/- 0.5 and 5 rows present"
+  },
+  {
+   "id": "back_row_parallel",
+   "rule": "the five rightmost balls share an x within one ball diameter"
+  },
+  {
+   "id": "balls_inside",
+   "rule": "every ball centre at least one radius inside the cloth"
+  },
+  {
+   "id": "cue_angle",
+   "rule": "the cue axis within 20-45 degrees of horizontal"
+  },
+  {
+   "id": "label_CUE",
+   "rule": "text CUE present"
+  },
+  {
+   "id": "cue_butt_side",
+   "rule": "the cue butt end (the end farther from the cue ball) has x < 25, i.e. it lies on the head side of the cue ball at (25,25)"
+  }
+ ]
+}

@@ -47,7 +47,7 @@ FROZEN_PROMPTS = {
     2: "5b04d86015f53d922dbea71c8f47d72eed49a62a75415a2942685ec01117096e",
     3: "ce9aa8be9efa6cc0c6025c5a19bb4f0bd334a796461c72ccf4434a02d9e3dbf4",
     4: "5ecdcb772a772211b44a5767c5c0166132a19831e37ad2a96e6ffaa66e4e41b0",
-    5: "89cefa839b016f6dc53b734a99b6af88e00a97e1725d4754ebb591f580ab0615",
+    5: "89cefa839b016f6dc53b734a99b6af88e00a97e1725d4754ebb591f580ab0615",    6: "2d94a80743b47052697c20d4f32bdfad798f004b91cbf04676183a1fa291db6b",
 }
 
 CUE_OLD = "its butt points toward the head short rail."
@@ -257,7 +257,7 @@ def diff_is_directional():
 @test
 def manifest_covers_v1_to_v5():
     entries = suite.manifest()
-    check_equal([e["version"] for e in entries], [1, 2, 3, 4, 5], "manifest versions")
+    check_equal([e["version"] for e in entries], [1, 2, 3, 4, 5, 6], "manifest versions")
     expected_keys = {"version", "file", "declared", "prompt_sha256", "n_checks", "check_ids"}
     for entry in entries:
         check_equal(set(entry), expected_keys, f"manifest v{entry['version']} keys")
@@ -267,6 +267,7 @@ def manifest_covers_v1_to_v5():
         check_equal(entry["check_ids"], sorted(entry["check_ids"]), f"manifest v{entry['version']} ids sorted")
         check(len(entry["check_ids"]) == len(set(entry["check_ids"])), f"manifest v{entry['version']} ids unique")
     by_version = {e["version"]: e for e in entries}
+    check_equal(by_version[6]["n_checks"], 12, "manifest v6 check count")
     check_equal(by_version[5]["n_checks"], 12, "manifest v5 check count")
     check_equal(by_version[4]["n_checks"], 11, "manifest v4 check count")
     check_equal(by_version[1]["file"], "hard-task-pooltable.json", "manifest v1 file")
@@ -426,14 +427,14 @@ def cli_list_renders_v1_to_v5():
     check("version" in out and "checks" in out and "prompt sha256" in out, "--list header missing")
     table = out.split("\n\n")[0].splitlines()
     data_rows = table[2:]  # header + rule, then one row per version
-    check_equal(len(data_rows), 5, f"--list rendered {len(data_rows)} version rows")
-    for version in range(1, 6):
+    check_equal(len(data_rows), 6, f"--list rendered {len(data_rows)} version rows")
+    for version in range(1, 7):
         fields = data_rows[version - 1].split()
         check_equal(fields[0], str(version), f"--list row order at v{version}")
         check_equal(fields[1], "2026-10-21", f"--list row v{version} date")
         check(str(len(suite.load(version).checks)) == fields[2], f"--list row v{version} check count")
         check(FROZEN_PROMPTS[version] in data_rows[version - 1], f"--list row v{version} misses its sha")
-    check("5 versions" in out, "--list summary line missing")
+    check("6 versions" in out, "--list summary line missing")
     print("    --list: 5 rows, dates, check counts and prompt hashes")
 
 
