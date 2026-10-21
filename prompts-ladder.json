@@ -1,0 +1,65 @@
+{
+ "declared": "2026-10-21",
+ "kind": "experiment corpus (not part of the frozen corpus)",
+ "note": "Density ladder on network-1 - one unchanged target, four increasing levels of numeric specification - plus an identity-binding variant of the tree. bar-1 was rejected as the ladder task: it reads 1/4 in every arm measured, so it has no response to show.",
+ "prompts": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background."
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140."
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140; the three workstation rectangles are 200 by 100 at 112,700, at 412,700 and at 712,700."
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140; the three workstation rectangles are 200 by 100 at 112,700, at 412,700 and at 712,700. Each link starts at 512,250 and ends at the top edge of its workstation: 212,700, 512,700 and 812,700. The labels sit inside their boxes, centred at 512,204, 212,762, 512,762 and 812,762."
+  },
+  {
+   "id": "tree-1-ident",
+   "kind": "hierarchy",
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "prompt": "A binary tree diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. Node 1 is a circle centre 512,150 radius 70 containing the number 1. Node 2 is a circle centre 312,360 radius 70 containing the number 2. Node 3 is a circle centre 712,360 radius 70 containing the number 3. Node 4 is a circle centre 212,620 radius 70 containing the number 4. Node 5 is a circle centre 412,620 radius 70 containing the number 5. Node 6 is a circle centre 612,620 radius 70 containing the number 6. Node 7 is a circle centre 812,620 radius 70 containing the number 7. Connect them with straight lines: node 1 to node 2, node 1 to node 3, node 2 to node 4, node 2 to node 5, node 3 to node 6, node 3 to node 7. Every number is a 60 px Arial digit centred inside its own circle."
+  }
+ ]
+}

@@ -33,8 +33,9 @@ def ocr_texts(png):
     return [r[1] for r in (result or [])]
 
 
-def main(folder, out_name):
-    corpus = json.loads((ROOT / 'prompts-diagrams.json').read_text(encoding='utf-8'))
+def main(folder, out_name, corpus_file='prompts-diagrams.json'):
+    # an experiment corpus can supply its own labels; the frozen corpus stays the default
+    corpus = json.loads((ROOT / corpus_file).read_text(encoding='utf-8'))
     by_id = {p['id']: p for p in corpus['prompts']}
     rows = []
     for png in sorted(Path(folder).glob('*.png')):
@@ -85,4 +86,4 @@ def main(folder, out_name):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else 'prompts-diagrams.json')
