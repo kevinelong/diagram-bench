@@ -5,7 +5,7 @@ Runs a determinism check (same prompt + seed twice, PNG sha256 compared) and nev
 silently - a failure is recorded.
 
 Usage (cmd.exe):
-  .venv\\Scripts\\python.exe klein_arm.py --steps 4 --cfg 1.0 --seeds 1234,5678 --check-determinism
+  .venv\\Scripts\\python.exe zimage_arm.py --steps 4 --cfg 1.0 --seeds 1234,5678 --check-determinism
 """
 import argparse
 import hashlib

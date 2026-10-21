@@ -4,3 +4,4 @@ render/
 hard/*.png
 kicad/*.kicad_prl
 *.tmp
+kicad/*.kicad_pro

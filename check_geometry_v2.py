@@ -1,5 +1,9 @@
 """check_geometry_v2.py - the four geometric checks the v1 test lacked.
 
+TARGET SPACE: this checker is written for the 1024x1024 diagram corpus, where a cue stick is 80+ units long and
+the table is roughly 800x400. It is NOT applicable to the ACE coordinate space (100x50 table in viewBox
+"-8 -8 116 66"), where a cue is ~30 units - use check_ace_geometry.py there. Told apart by the file's viewBox.
+
 v1 counted circles and passed a table whose side pockets were on the short rails. These checks locate things:
 
   pockets      corners vs mid-long-rail vs short-rail, by position
@@ -50,15 +54,26 @@ def table_box(root):
     return (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
 
-def cue_angle(root):
+def rot_of(el):
+    m = re.search(r'rotate\(\s*(-?[\d.]+)', el.get('transform') or '')
+    return float(m.group(1)) if m else 0.0
+
+
+def walk(el, acc=0.0):
+    """yield (element, effective rotation), honouring inherited group transforms."""
+    here = acc + rot_of(el)
+    yield el, here
+    for child in el:
+        yield from walk(child, here)
+
+
+def cue_angle(root, eff=None):
     best = None
     for el in root.iter():
         tag = el.tag.replace(SVG, '')
         if tag not in ('rect', 'line'):
             continue
-        rot = el.get('transform') or ''
-        m = re.search(r'rotate\(\s*(-?[\d.]+)', rot)
-        rot_deg = float(m.group(1)) if m else 0.0
+        rot_deg = (eff or {}).get(id(el), rot_of(el))
         if tag == 'rect':
             w, h = f(el, 'width'), f(el, 'height')
             if w >= 80 and h <= 24:
@@ -81,6 +96,7 @@ def cue_angle(root):
 
 def analyse(path):
     root = ET.fromstring(Path(path).read_text(encoding='utf-8'))
+    eff = {id(el): r for el, r in walk(root)}
     box = table_box(root)
     res = {'file': Path(path).name}
     if not box:
@@ -128,7 +144,7 @@ def analyse(path):
             back_ok = (max(xs) - min(xs)) <= ball_d
     cue_ok = bool(cue_ball) and abs(cue_ball[1] - cy_t) <= 0.06 * th and \
         abs(cue_ball[0] - (tx + 0.25 * tw)) <= 0.10 * tw
-    ang = cue_angle(root)
+    ang = cue_angle(root, eff)
     texts = [' '.join(t.itertext()).upper() for t in root.iter(SVG + 'text')]
 
     res.update({

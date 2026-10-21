@@ -4,6 +4,11 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 FONT = 'C:/Windows/Fonts/segoeui.ttf'
 FONT_B = 'C:/Windows/Fonts/segoeuib.ttf'
 PANEL_W, PAD, CAP = 900, 28, 92
+
+# Captions are parameters, not constants: the scores come from the checker, so they must be passed in rather
+# than baked into the composer (the earlier hard-coded "9/10" was already stale when the direction check landed).
+CAPTION_LEFT = ('v3', 'app constants, rows advance diagonally', 'the rack is a rhombus, not a triangle')
+CAPTION_RIGHT = ('v4', 'lattice formula, back row vertical', 'but the cue butt points at the rack')
 VB = (-8.0, -8.0, 116.0, 66.0)          # the app's viewBox
 
 
@@ -14,15 +19,6 @@ def load(path):
     box = (max(0, box[0] - 6), max(0, box[1] - 6), min(im.width, box[2] + 6), min(im.height, box[3] + 6))
     im = im.crop(box)
     return im.resize((PANEL_W, int(im.height * PANEL_W / im.width)), Image.LANCZOS), box
-
-
-def to_px(ux, uy, crop, panel_h):
-    """ACE user units -> composite pixels, given the crop box of the render."""
-    sx = PANEL_W / (crop[2] - crop[0])
-    sy = panel_h / (crop[3] - crop[1])
-    # the render was 1200x700 CSS px over viewBox 116x66 -> uniform scale; reuse sx for both axes
-    px = (ux - VB[0]) / VB[2] * (1200 * (crop[2] - crop[0]) / 2400) * sx / sx
-    return px, 0
 
 
 def unit_to_panel(ux, uy, crop, panel_h):
@@ -46,11 +42,11 @@ ft, fs = ImageFont.truetype(FONT_B, 22), ImageFont.truetype(FONT, 17)
 
 xl, xr = PAD, PAD * 2 + PANEL_W
 y = H + PAD + 14
-d.text((xl, y), 'v3 · 9/10', font=ft, fill=(20, 20, 20))
-d.text((xl, y + 30), 'app constants, but rows advance diagonally —', font=fs, fill=(90, 90, 90))
-d.text((xl, y + 52), 'the rack is a rhombus, not a triangle', font=fs, fill=(200, 30, 30))
-d.text((xr, y), 'v4 · 10/10 (10/11 with the direction check)', font=ft, fill=(20, 20, 20))
-d.text((xr, y + 30), 'lattice formula → exact triangle, back row vertical —', font=fs, fill=(90, 90, 90))
-d.text((xr, y + 52), 'but the cue butt points at the rack', font=fs, fill=(200, 30, 30))
+d.text((xl, y), CAPTION_LEFT[0], font=ft, fill=(20, 20, 20))
+d.text((xl, y + 30), CAPTION_LEFT[1], font=fs, fill=(90, 90, 90))
+d.text((xl, y + 52), CAPTION_LEFT[2], font=fs, fill=(200, 30, 30))
+d.text((xr, y), CAPTION_RIGHT[0], font=ft, fill=(20, 20, 20))
+d.text((xr, y + 30), CAPTION_RIGHT[1], font=fs, fill=(90, 90, 90))
+d.text((xr, y + 52), CAPTION_RIGHT[2], font=fs, fill=(200, 30, 30))
 canvas.save('hard/pooltable-v3-v4.png')
 print('wrote hard/pooltable-v3-v4.png %dx%d' % canvas.size)
