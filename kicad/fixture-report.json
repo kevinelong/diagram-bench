@@ -1,0 +1,92 @@
+{
+ "fixture": "good",
+ "model": null,
+ "model_contacted": false,
+ "script": "fixture_good.py",
+ "exit": 0,
+ "board_written": true,
+ "run_s": 0.2,
+ "stderr_tail": "",
+ "outline_mm": [
+  24.0,
+  46.0
+ ],
+ "drawings": 11,
+ "export_rc": 0,
+ "export_error": "",
+ "structure": {
+  "boxes": 4,
+  "connectors": 3,
+  "curves": 0,
+  "other": 0,
+  "labels": 4,
+  "text_values": [
+   "START",
+   "VALIDATE",
+   "STORE",
+   "DONE"
+  ]
+ },
+ "checks": {
+  "struct.boxes": {
+   "ok": true,
+   "measured": 4,
+   "expected": 4
+  },
+  "struct.connectors": {
+   "ok": true,
+   "measured": 3,
+   "expected": 3
+  },
+  "struct.labels": {
+   "ok": true,
+   "measured": 4,
+   "expected": 4
+  },
+  "label.START": {
+   "ok": true,
+   "measured": true,
+   "expected": true
+  },
+  "label.VALIDATE": {
+   "ok": true,
+   "measured": true,
+   "expected": true
+  },
+  "label.STORE": {
+   "ok": true,
+   "measured": true,
+   "expected": true
+  },
+  "label.DONE": {
+   "ok": true,
+   "measured": true,
+   "expected": true
+  }
+ },
+ "failed": {},
+ "geometry_applicable": false,
+ "geometry_note": "no table found",
+ "source_score": {
+  "paths": 160,
+  "nodes": 327,
+  "svg_bytes": 9975,
+  "text_nodes": 4,
+  "text_values": [
+   "START",
+   "VALIDATE",
+   "STORE",
+   "DONE"
+  ],
+  "labels_present": 4,
+  "labels_total": 4,
+  "label_hits": {
+   "START": true,
+   "VALIDATE": true,
+   "STORE": true,
+   "DONE": true
+  }
+ },
+ "rendered_for_judging": "fixture_good-black.svg",
+ "verdict": "boxes=4 connectors=3 labels=4 curves=0 -> PASS  [geometry checker: no table found]"
+}
