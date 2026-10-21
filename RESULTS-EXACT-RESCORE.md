@@ -40,6 +40,35 @@ that is exactly the case where a substring matcher turns a failure into a near-p
 - `result-arm-{zimage,klein,flux}-exact-scores.json` are the comparable artifacts. The originals are kept as the
   published record and must not be mixed with re-scored numbers.
 
+## The 512-px arms, and what they overturn
+
+Re-scored the same way (exact tokens, PNGs on disk):
+
+| arm (512 px) | substring | **exact** | delta |
+|---|---|---|---|
+| FLUX.1-schnell Q4_K_S | 0.749 | **0.749** | 0.000 |
+| FLUX.1-dev fp8 | 0.704 | **0.704** | 0.000 |
+| Z-Image Turbo | 0.786 | **0.736** | −0.050 |
+| FLUX.2-klein-4b | 0.613 | **0.565** | −0.048 |
+| code-512 (Method B) | 0.261 | **0.261** | 0.000 |
+
+Three arms are completely unaffected, which is itself the evidence that their labels are genuine: with no substring
+credits to remove, the numbers cannot move.
+
+**And then the finding that matters more than the matcher.** FLUX.1-schnell scores **0.749 at 512** against
+**0.428 at 1024**, and the whole gap is the same task: tree-1 reads **4/7 at 512** and **1/14 at 1024** (two seeds).
+Z-Image reads tree-1 at 6/7 (512) and 12/14 (1024); klein 4/7 and 8/14; dev 2/7 at 512.
+
+So **label binding is resolution-specific, not a property of the model.** That overturns the sentence I wrote an hour
+ago ("schnell cannot bind digits at any density"): at 1024 it cannot, at 512 it can. Every density experiment today
+ran at 1024, so the "budget of ~10 numbers" is a statement about **1024 only** and its interaction with resolution is
+now an open question rather than a settled one. The honest form of the conclusion is:
+
+> At 1024 px, FLUX.1-schnell's label binding collapses (1/14 on tree-1) and coordinate prompts make it worse; the
+> numeric budget measured today (peak ~10, leakage ~18, collapse ~34) applies at 1024. At 512 px the same model
+> binds 4/7 of the same labels with prompts that never changed, so resolution is at least as strong a moderator as
+> prompt density, and it was not controlled for.
+
 ## What this does not establish
 
 - Re-scoring measures labels only. Path economy, axis alignment and trace fidelity were never affected by the

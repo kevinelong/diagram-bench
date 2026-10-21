@@ -72,6 +72,13 @@ The ComfyUI **desktop app self-terminated ~30 s after start**, twice in a row, k
 Arms take `COMFY_HOST=http://127.0.0.1:8001`. The desktop app serves **8000**, not the 8188 the arm scripts
 originally hard-coded.
 
+## Correction: resolution is an uncontrolled moderator
+
+Every experiment here ran at **1024**. The re-scored 512-px arms show FLUX.1-schnell reading tree-1 at **4/7** at 512
+against **1/14** at 1024 with unchanged prompts, so "the tree cannot bind digits" is false as stated - it cannot at
+1024. The budget below is a 1024 measurement; whether it shifts at 512 is unknown and untested.
+See `RESULTS-EXACT-RESCORE.md`.
+
 ## What this does not establish
 
 - One model, one seed, one sampler, 4 steps. Step count is a plausible moderator: 20 steps may hold more of a
