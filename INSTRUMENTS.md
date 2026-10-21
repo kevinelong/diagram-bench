@@ -699,3 +699,16 @@ not a property of the model family, and the arm is recorded as **blocked**, neve
   which way the rack points from the ball cluster. It was the scratch instrument behind the v1 pocket defect.
   **no recorded run**: no RESULT file cites its output, and its verdicts were superseded by
   `check_geometry_v2.py`, which writes a scored table.
+
+## score_arm.py label matching: exact tokens, corrected 2026-10-21
+
+`ocr_hits` originally asked whether a required label was *anywhere inside* a read string:
+`any(label.lower() in found.lower())`. That credits `7` inside `70`, `120` inside `1120`, and `PC1` inside `PC10`.
+On 2026-10-21 a tree render whose nodes were labelled `70, 40, 66, 30, 212, 15` - the prompt's own radius,
+rows and coordinates - still scored 5/7, and the frozen one-liner scored 6/7 on the same task; the true values are
+0/7 and 1/7. Matching is now on whole alphanumeric tokens (`re.split` on non-alphanumerics), which is what
+"label read exactly" was always meant to say.
+
+Consequence: **scores written before 2026-10-21 are inflated** wherever a required label is short or numeric, and
+are not comparable with re-scored arms without a re-run. The four arms of 2026-10-21 were all re-scored; their
+documents carry both numbers and the retraction explicitly.

@@ -51,12 +51,24 @@ def tree_ident():
     return " ".join(parts)
 
 
+def tree_boundary():
+    # boundary + spacing + count, the shape the rack used: no per-node coordinate schema.
+    return ("A binary tree diagram on %s: seven circles of radius 70. Four sit in the bottom row centred at "
+            "y = 620 and evenly spaced in x; two sit above them at y = 360, positioned above the gaps; one sits "
+            "at the top centre at 512,150. Each circle contains its own number, reading left to right: bottom row "
+            "4, 5, 6, 7; middle row 2, 3; top 1. Draw a straight line from every circle down to each of its "
+            "children." % CANVAS)
+
+
 PROMPTS = dict(NETWORK)
+PROMPTS["tree-1-boundary"] = tree_boundary()
 PROMPTS["tree-1-ident"] = tree_ident()
 LABELS = {k: ['SERVER', 'PC1', 'PC2', 'PC3'] for k in NETWORK}
 LABELS["tree-1-ident"] = [str(i) for i in range(1, 8)]
 KIND = {k: 'topology' for k in NETWORK}
 KIND["tree-1-ident"] = 'hierarchy'
+KIND["tree-1-boundary"] = 'hierarchy'
+LABELS["tree-1-boundary"] = [str(i) for i in range(1, 8)]
 
 
 def numbers_in(text):

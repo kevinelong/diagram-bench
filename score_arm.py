@@ -28,6 +28,13 @@ ROOT = Path(__file__).resolve().parent
 ocr = RapidOCR()
 
 
+import re as _re
+
+
+def _tokens(text):
+    return [w.lower() for w in _re.split(r'[^0-9A-Za-z]+', text) if w]
+
+
 def ocr_texts(png):
     result, _ = ocr(str(png))
     return [r[1] for r in (result or [])]
@@ -46,7 +53,9 @@ def main(folder, out_name, corpus_file='prompts-diagrams.json'):
         t = trace_score.score(png, measured=m)
         found = ocr_texts(png)
         need = prompt['labels'] if prompt else []
-        hits = {n: any(n.lower() in f.lower() for f in found) for n in need}
+        # EXACT TOKEN match, not substring: '7' must not be satisfied by '70'. Substring matching inflated
+        # the single-digit labels on tree-1 (found 2026-10-21: a drawing labelled 70,40,66,30 scored 5/7).
+        hits = {n: any(_tokens(f).count(n.lower()) > 0 for f in found) for n in need}
         rows.append({
             'id': pid, 'kind': prompt['kind'] if prompt else '?', 'sample': base,
             'paths': t['paths'], 'nodes': t['nodes'], 'traced_svg_kb': t['svg_kb'],

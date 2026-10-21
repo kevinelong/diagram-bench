@@ -1,13 +1,13 @@
 {
- "n": 5,
- "paths_median": 166,
- "nodes_median": 2833,
- "axis_median": 86.5,
- "colours_median": 1,
- "ocr_exact_mean": 0.486,
+ "n": 6,
+ "paths_median": 176.5,
+ "nodes_median": 2705.5,
+ "axis_median": 86.6,
+ "colours_median": 1.0,
+ "ocr_exact_mean": 0.357,
  "ocr_full_match": 0,
- "segments_median": 41,
- "edge_sparse_median": 97.8,
+ "segments_median": 39.0,
+ "edge_sparse_median": 97.75,
  "low_contrast_rows": 0,
  "rows": [
   {
@@ -134,6 +134,42 @@
    "low_contrast_normalised": false
   },
   {
+   "id": "tree-1-boundary",
+   "kind": "hierarchy",
+   "sample": "tree-1-boundary-s1234",
+   "paths": 249,
+   "nodes": 2417,
+   "traced_svg_kb": 113.3,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "70",
+    "40",
+    "66",
+    "30",
+    "40",
+    "1",
+    "10"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.143,
+   "width": 1024,
+   "height": 1024,
+   "segments": 5,
+   "edge_sparse_pct": 97.7,
+   "low_contrast_normalised": false
+  },
+  {
    "id": "tree-1-ident",
    "kind": "hierarchy",
    "sample": "tree-1-ident-s1234",
@@ -161,8 +197,8 @@
     "6",
     "7"
    ],
-   "ocr_hits": 3,
-   "ocr_exact": 0.429,
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
    "width": 1024,
    "height": 1024,
    "segments": 24,

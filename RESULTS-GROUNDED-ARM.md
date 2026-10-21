@@ -1,4 +1,49 @@
 # The grounded prompts, measured twice: coordinates leak, and the pool table was the easy case
+
+## CORRECTION (same day): the label matcher was counting substrings
+
+Everything below was first scored with `any(label in found_text)`, which credits **`7` inside `70`** and **`120`
+inside `1120`**. Found by looking at the tree render: the model had labelled its nodes `70, 40, 66, 30, 212, 15` —
+the prompt's own radius and coordinates — and the matcher still reported 5/7. `score_arm.py` now matches **exact
+tokens**, and every arm was re-scored. Ordering survives; the absolute numbers and two specific claims do not.
+
+| summary | frozen | v1 coords | v2 words+coords |
+|---|---|---|---|
+| `ocr_exact_mean` (substring) | 0.552 | 0.269 | 0.437 |
+| **`ocr_exact_mean` (exact token)** | **0.406** | **0.183** | **0.337** |
+| `paths_median` | 98 | 149 | 104 |
+
+Retracted, because they were artefacts of substring matching:
+
+- **blueprint-1 v2 "0/2 -> 2/2"** is **0/2 -> 0/2**. The reader had seen `1120`, and `120` is a substring of it.
+- **tree-1 frozen "6/7"** is **1/7**. Every digit was matching inside a coordinate or a radius.
+
+What survives:
+
+- The ordering: frozen > v2 > v1, on both matchers.
+- **network-1 v2 3/4** (SERVER, PC1, PC3 as whole tokens) - a real gain from the link sentence.
+- **timeline-1 v2 2/4** - a real recovery from 0/4.
+- **circuit-1 stays 0/2** in both grounded revisions, and the coordinates still appear as text on the drawing.
+
+Corrected per-prompt table:
+
+| prompt | frozen | v1 | v2 |
+|---|---|---|---|
+| flow-1 | 3/4 | 3/4 | 2/4 |
+| network-1 | 1/4 | 1/4 | **3/4** |
+| timeline-1 | 2/4 | 0/4 | 2/4 |
+| floor-1 | 2/4 | 1/4 | 1/4 |
+| org-1 | 2/3 | 1/3 | 1/3 |
+| process-1 | 1/2 | 0/2 | 1/2 |
+| bar-1 | 1/4 | 1/4 | 1/4 |
+| circuit-1 | 1/2 | 0/2 | 0/2 |
+| blueprint-1 | 0/2 | 0/2 | 0/2 |
+| tree-1 | 1/7 | 0/7 | 2/7 |
+
+**Historical numbers elsewhere in this repo are inflated the same way** wherever a required label is a short token or
+a digit: `result-arm-flux.json`, `result-schnell-512.json` and the rest were scored with the substring matcher. They
+are not comparable to anything re-scored after today without a re-run of that matcher.
+
 ## 2026-10-21 — FLUX.1-schnell Q4_K_S, 1024, seed 1234, 4 steps, identical style suffix
 
 Same model, same seed, same suffix, same scorer. The only difference is the prompt text: the frozen corpus's

@@ -8,6 +8,9 @@ Two experiments from the v2 write-up, run on one unchanged target each.
 Same drawing every time (SERVER linked to PC1/PC2/PC3, four labels); only the amount of that drawing stated as
 numbers changes. Numeric tokens counted with a regex over the prompt text.
 
+All label counts below are **exact-token** (the matcher was corrected the same day - see `RESULTS-GROUNDED-ARM.md`).
+network-1's labels are whole alphanumeric tokens, so these rungs are unaffected by the correction.
+
 | variant | numbers | labels read | paths | axis | what the reader saw |
 |---|---|---|---|---|---|
 | `net-1-words` | 6 | **2/4** | 166 | 87.8 | SERVER, PC, PC, PC3 |
@@ -25,12 +28,17 @@ corrupted (`P811`, `P822`), not merely crowded.
 Only the number sentences changed: "node 3 is the circle at 212,620 containing the number 3", instead of a phrase
 repeated seven times. 51 numeric tokens.
 
-| variant | numbers | labels read | axis | reader saw |
+| variant | numbers | labels (exact) | axis | reader saw |
 |---|---|---|---|---|
-| `tree-1-ident` | 51 | **3/7** | **25.0** | 10, 22, 10, 50, 212, 50, 15 |
+| `tree-1-ident` | 51 | **0/7** | **25.0** | 10, 22, 10, 50, 212, 50, 15 |
+| `tree-1-boundary` | 15 | **1/7** | **100.0** | 70, 40, 66, 30, 1, 40, 10 |
 
-Prediction was "back to 6/7 or better". **Wrong: 3/7**, and axis alignment collapsed from 100 to 25 — the drawing
-itself is ruined, not just its text.
+Prediction was "back to 6/7 or better". **Wrong**, and the render shows why: the tree's *geometry* is correct in both
+variants (seven nodes, three levels, six edges), but the nodes are labelled with **the prompt's own numbers** - the
+radius `70`, the row `40`, `66`, the coordinate `212` - not with 1..7. Under exact matching that is 0/7 and 1/7.
+
+The **boundary shape** (`tree-1-boundary`, 15 numbers) did what was predicted for *structure*: axis **100.0** against
+25.0 for the schema shape, at a quarter of the numbers. What it did not do is bind the labels.
 
 ## What this establishes
 
