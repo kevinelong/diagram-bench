@@ -1,4 +1,4 @@
-# The grounded prompts, measured: coordinates for geometry, words for symbols
+# The grounded prompts, measured twice: coordinates leak, and the pool table was the easy case
 ## 2026-10-21 — FLUX.1-schnell Q4_K_S, 1024, seed 1234, 4 steps, identical style suffix
 
 Same model, same seed, same suffix, same scorer. The only difference is the prompt text: the frozen corpus's
@@ -64,9 +64,68 @@ short fixed strings (CUE), so both survived.
   scores 10/10 structurally and 43/43 on labels, which makes it a usable *target*. It is not, on this evidence, a
   better *prompt*.
 
+## v2: semantic phrases restored — prediction failed
+
+`prompts-diagrams-grounded.json` was regenerated so every element leads with what it *is* ("the resistor body, a
+symbol and not a plain box", "the year label 2020", "an edge of the tree") before its coordinates. Same arm, same
+seed, same scorer. v1's prompts are preserved as `prompts-diagrams-grounded-v1.json`.
+
+| summary | frozen | v1 (coords only) | v2 (words + coords) |
+|---|---|---|---|
+| `ocr_exact_mean` | **0.552** | 0.269 | 0.437 |
+| `ocr_full_match` | 1/10 | 0/10 | 1/10 |
+| `paths_median` | **98** | 149 | 104 |
+| `axis_median` | 100.0 | 100.0 | 100.0 |
+
+| prompt | frozen | v1 | v2 |
+|---|---|---|---|
+| blueprint-1 | 0/2 | 0/2 | **2/2** |
+| network-1 | 1/4 | 1/4 | **3/4** |
+| timeline-1 | 3/4 | 0/4 | 2/4 |
+| process-1 | 1/2 | 0/2 | 1/2 |
+| circuit-1 | 2/2 | 0/2 | **0/2** |
+| tree-1 | 6/7 | 6/7 | **2/7** |
+| flow-1 | 3/4 | 3/4 | 2/4 |
+| floor-1 | 2/4 | 1/4 | 1/4 |
+| bar-1 | 1/4 | 1/4 | 1/4 |
+| org-1 | 2/3 | 1/3 | 1/3 |
+
+**The v2 prediction was wrong on all three counts.** I predicted circuit-1 back to 2/2, timeline-1 to 3/4 and
+`ocr_exact_mean` above 0.552. Actual: 0/2, 2/4, 0.437.
+
+## What the v2 images actually show
+
+- **circuit-1**: still one box labelled `RC` — and now the reader sees **`241`, `864`, `201`, `-500`, `C8`** on the
+  drawing. The coordinates themselves were rendered as text. A 15-element prompt carries ~30 numbers, and at 4
+  steps the model prints some of them.
+- **tree-1**: seven nodes drawn, but the numbers **repeat as 1,1,1,1,5,5**. The phrase "the number inside a node"
+  is generic, so identity is lost: the model keeps the first digit it saw rather than binding 3 to the third node.
+- **blueprint-1**: the one clear win (0/2 -> 2/2) — `BRACKET` and the dimension text are large, isolated strings.
+- **network-1**: 1/4 -> 3/4 — the link sentence ("a link from the server to PC1") is what made the connectors and
+  their targets cohere.
+
+## The refined conclusion: coordinate density, not coordinates
+
+The pool table's v6 succeeded with **two** coordinate pairs and a single short label. Circuit and timeline fail with
+**30**. The mechanism is now consistent across both revisions:
+
+1. Numbers compete with the semantic content for attention, so text legibility drops.
+2. Above some density the model **renders the numbers it was given** (circuit's `241`, `864`, `201`).
+3. Generic repeated phrases lose **identity binding** (tree's repeated `1`s) — each element needs its own identity in
+   the sentence ("node 3: a circle at 212,620 containing 3"), not a phrase shared seven times.
+
+So grounding is not a spectrum from "vague" to "exact" for this model; it has a budget. The frozen one-liners win on
+this corpus not because they are precise but because they are *short*, and they let the model use its own glyph
+conventions.
+
 ## Next action
 
-**Grounded v2**: keep the coordinates, restore the words — one line per element of the form
-"<what it is> drawn from <coords> to <coords>, labelled <string> at <x,y>". Re-run the same arm and the same
-scorer. Prediction on record: circuit-1 and timeline-1 recover to frozen levels (2/2 and 3/4) while tree-1 keeps
-its 100% axis alignment, i.e. `ocr_exact_mean` above 0.552 with `axis_median` still 100.
+Two cheap, separable experiments, both with predictions on record:
+
+1. **Density ladder on one task** (bar-1, already 1/4 in all three): generate the same drawing at 4, 8, 16 and 30
+   stated numbers, everything else fixed. Prediction: `ocr_exact_mean` is flat to ~8 and falls sharply after 16.
+   This sizes the budget instead of guessing at it.
+2. **Identity binding on tree-1**: change only the number sentences to "node N is the circle at X,Y containing N".
+   Prediction: tree returns to 6/7 or better without any other change.
+
+Do not attempt a third grounding revision of all ten until the density ladder says where the budget is.

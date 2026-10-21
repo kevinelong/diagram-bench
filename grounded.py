@@ -210,6 +210,52 @@ SPECS["process-1"] = {
     "boxes": _proc_boxes, "lanes": [(80, 180, 864, 280), (80, 460, 864, 280)],
 }
 
+for _sid, _spec in SPECS.items():
+    _spec["id"] = _sid
+
+# v2: what each element IS, in words, aligned with elements by position (asserted in check_spec).
+# The coordinate list alone made the model draw primitives instead of signs: "Rectangle 140 by 60"
+# turned the whole RC schematic into one box labelled "RC".  The phrase comes first, the numbers confirm it.
+WHATS = {
+ "flow-1": (["the process box labelled " + n for n in _names]
+            + ["an arrow from the box labelled %s down to the box labelled %s" % (_names[i], _names[i + 1])
+               for i in range(3)]
+            + ["the box label " + n for n in _names]),
+ "floor-1": (["a wall"] * 13 + ["the room label BEDROOM", "the room label BEDROOM",
+                               "the room label BATH", "the room label KITCHEN", "the room label LIVING"]),
+ "bar-1": (["the baseline axis"] + ["the bar for " + n for n, _, _ in _bar_ws]
+           + ["the label under the bar for " + n for n, _, _ in _bar_ws]),
+ "org-1": (["the box labelled CEO", "the box labelled CTO", "the box labelled CFO"]
+           + ["a connector line", "a connector line", "a connector line", "a connector line"]
+           + ["the box label CEO", "the box label CTO", "the box label CFO"]),
+ "circuit-1": (["the input wire", "the resistor body, a symbol and not a plain box",
+                "the wire from the resistor to the output node", "the output wire",
+                "the wire from the output node down to the capacitor",
+                "the top capacitor plate", "the bottom capacitor plate",
+                "the wire from the capacitor to ground",
+                "a ground bar", "a ground bar", "a ground bar",
+                "the resistor designator", "the capacitor designator",
+                "the input terminal label", "the output terminal label"]),
+ "blueprint-1": (["the bracket outline", "a circular mounting hole", "a circular mounting hole",
+                  "the dimension line", "a dimension tick", "a dimension tick",
+                  "the dimension text for the bracket width", "the dimension text for the hole diameter",
+                  "the title text"]),
+ "tree-1": (["an edge of the tree"] * 6 + ["a tree node circle"] * 7
+            + ["the number inside a node"] * 7),
+ "timeline-1": (["the timeline axis"] + ["a tick mark"] * 4
+                + ["the year label " + y for y in _years]),
+ "network-1": (["the central server box", "a workstation box", "a workstation box", "a workstation box"]
+               + ["a link from the server to " + n for n in ("PC1", "PC2", "PC3")]
+               + ["the server label", "the label PC1", "the label PC2", "the label PC3"]),
+ "process-1": (["a lane boundary", "a lane boundary",
+                "the activity box labelled SUBMIT", "the activity box labelled REVIEW",
+                "the activity box labelled APPROVE",
+                "the arrow crossing from the top lane into the bottom lane",
+                "an arrow from REVIEW to APPROVE",
+                "the lane header REQUESTER", "the lane header APPROVER",
+                "the activity label SUBMIT", "the activity label REVIEW", "the activity label APPROVE"]),
+}
+
 ORDER = ["flow-1", "floor-1", "bar-1", "org-1", "circuit-1",
          "blueprint-1", "tree-1", "timeline-1", "network-1", "process-1"]
 
@@ -231,27 +277,31 @@ def _c(v):
 
 def prompt_for(spec):
     out = [spec["lead"]]
-    for e in spec["elements"]:
+    whats = WHATS.get(spec.get("id"), [])
+    for idx, e in enumerate(spec["elements"]):
+        what = (whats[idx] if idx < len(whats) else e["kind"])
+        out.append("Draw %s:" % what) if False else None
         k = e["kind"]
         if k == "rect":
             if e["fill"] == "#000000":
-                out.append("Filled black rectangle %s by %s at %s,%s." %
-                           (_n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"])))
+                out.append("%s - a filled black rectangle %s by %s at %s,%s." %
+                           (what.capitalize(), _n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"])))
             elif e["rx"]:
-                out.append("Rounded rectangle %s by %s at %s,%s with corner radius %s, black outline %s thick, no fill."
-                           % (_n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"]), _n(e["rx"]), _n(e["sw"])))
+                out.append("%s - a rounded rectangle %s by %s at %s,%s with corner radius %s, black outline %s thick, no fill."
+                           % (what.capitalize(), _n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"]), _n(e["rx"]), _n(e["sw"])))
             else:
-                out.append("Rectangle %s by %s at %s,%s, %s outline %s thick, no fill." %
-                           (_n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"]), _c(e["stroke"]), _n(e["sw"])))
+                out.append("%s - a rectangle %s by %s at %s,%s, %s outline %s thick, no fill." %
+                           (what.capitalize(), _n(e["w"]), _n(e["h"]), _n(e["x"]), _n(e["y"]), _c(e["stroke"]), _n(e["sw"])))
         elif k == "line":
-            out.append("%s line from %s,%s to %s,%s, %s thick." %
-                       ("Arrow" if e["arrow"] else "Straight", _n(e["x1"]), _n(e["y1"]),
+            out.append("%s - a %s line from %s,%s to %s,%s, %s thick." %
+                       (what.capitalize(), "straight" if not e["arrow"] else "straight", _n(e["x1"]), _n(e["y1"]),
                         _n(e["x2"]), _n(e["y2"]), _n(e["sw"])))
         elif k == "circle":
-            out.append("Circle centre %s,%s radius %s, %s outline %s thick." %
-                       (_n(e["cx"]), _n(e["cy"]), _n(e["r"]), _c(e["stroke"]), _n(e["sw"])))
+            out.append("%s - a circle centre %s,%s radius %s, %s outline %s thick." %
+                       (what.capitalize(), _n(e["cx"]), _n(e["cy"]), _n(e["r"]), _c(e["stroke"]), _n(e["sw"])))
         elif k == "text":
-            out.append("Text %s centred at %s,%s in %s px Arial." % (e["s"], _n(e["x"]), _n(e["y"]), _n(e["size"])))
+            out.append("%s - the text %s centred at %s,%s in %s px Arial." %
+                       (what.capitalize(), e["s"], _n(e["x"]), _n(e["y"]), _n(e["size"])))
     out.append("Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint "
                "states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, "
                "no shadows, no 3D.")
@@ -315,6 +365,12 @@ def _on_box(x, y, box, tol=0.6):
 
 def check_spec(sid, spec, expectations):
     errs = []
+    whats = WHATS.get(spec.get("id"), [])
+    if len(whats) != len(spec["elements"]):
+        errs.append("%s: %d semantic phrases for %d elements" % (sid, len(whats), len(spec["elements"])))
+    for w in whats:
+        if not w.strip():
+            errs.append("%s: an element has no semantic phrase" % sid)
     W, H = CANVAS
     for e in spec["elements"]:
         k = e["kind"]
