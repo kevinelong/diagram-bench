@@ -1,0 +1,74 @@
+<svg viewBox="-8 -8 116 66" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="100" height="50" fill="lightseagreen"/>
+  <rect x="-2" y="-2" width="104" height="54" fill="none" stroke="darkslategray" stroke-width="2"/>
+  
+  <!-- Corner pockets -->
+  <circle cx="1.5" cy="1.5" r="3.5" fill="black"/>
+  <circle cx="98.5" cy="1.5" r="3.5" fill="black"/>
+  <circle cx="1.5" cy="48.5" r="3.5" fill="black"/>
+  <circle cx="98.5" cy="48.5" r="3.5" fill="black"/>
+  
+  <!-- Side pockets -->
+  <circle cx="50" cy="1" r="2.5" fill="black"/>
+  <circle cx="50" cy="49" r="2.5" fill="black"/>
+  
+  <!-- Diamond markers on long rails -->
+  <g>
+    <rect x="11.75" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 12.5 -3)"/>
+    <rect x="24.25" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 25 -3)"/>
+    <rect x="36.75" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 37.5 -3)"/>
+    <rect x="61.75" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 62.5 -3)"/>
+    <rect x="74.25" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 75 -3)"/>
+    <rect x="86.75" y="-5.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 87.5 -3)"/>
+    
+    <rect x="11.75" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 12.5 53)"/>
+    <rect x="24.25" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 25 53)"/>
+    <rect x="36.75" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 37.5 53)"/>
+    <rect x="61.75" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 62.5 53)"/>
+    <rect x="74.25" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 75 53)"/>
+    <rect x="86.75" y="52.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 87.5 53)"/>
+  </g>
+  
+  <!-- Diamond markers on short rails -->
+  <g>
+    <rect x="-5.75" y="11.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 -3 12.5)"/>
+    <rect x="-5.75" y="24.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 -3 25)"/>
+    <rect x="-5.75" y="36.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 -3 37.5)"/>
+    
+    <rect x="102.25" y="11.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 103 12.5)"/>
+    <rect x="102.25" y="24.25" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 103 25)"/>
+    <rect x="102.25" y="36.75" width="0.5" height="0.5" fill="none" stroke="gold" transform="rotate(45 103 37.5)"/>
+  </g>
+  
+  <!-- Head and foot spots -->
+  <circle cx="25" cy="25" r="0.2" fill="black"/>
+  <circle cx="75" cy="25" r="0.2" fill="black"/>
+  
+  <!-- Rack balls -->
+  <g>
+    <circle cx="75" cy="25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="76.9493" cy="23.875" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="76.9493" cy="26.125" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="78.8986" cy="22.75" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="78.8986" cy="25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="78.8986" cy="27.25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="80.8479" cy="21.625" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="80.8479" cy="23.875" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="80.8479" cy="26.125" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="80.8479" cy="28.375" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="82.7972" cy="20.5" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="82.7972" cy="22.75" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="82.7972" cy="25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="82.7972" cy="27.25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+    <circle cx="82.7972" cy="29.5" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+  </g>
+  
+  <!-- Cue ball -->
+  <circle cx="25" cy="25" r="1.125" fill="white" stroke="black" stroke-width="0.1"/>
+  
+  <!-- Cue stick -->
+  <line x1="23.875" y1="25" x2="40.625" y2="19.5" stroke="black" stroke-width="0.9"/>
+  
+  <!-- Label cue ball -->
+  <text x="25" y="22.5" text-anchor="middle" font-family="Arial" font-size="2.5" fill="white">CUE</text>
+</svg>

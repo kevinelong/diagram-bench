@@ -1,0 +1,55 @@
+{
+ "file": "pooltable-v5-bare.svg",
+ "viewBox": [
+  -8.0,
+  -8.0,
+  116.0,
+  66.0
+ ],
+ "viewBox_ok": true,
+ "playfield": [
+  0.0,
+  0.0,
+  100.0,
+  50.0
+ ],
+ "corners_hit": 4,
+ "sides_hit": 2,
+ "balls": 16,
+ "balls_inside": 16,
+ "long_diamonds_found": [
+  12.5,
+  25.0,
+  37.5,
+  62.5,
+  75.0,
+  87.5
+ ],
+ "diamond_at_50": false,
+ "apex_on_foot_spot": true,
+ "rack_rows_detected": 5,
+ "back_row_parallel": true,
+ "cue_axis_deg": 18.2,
+ "cue_length": 17.63,
+ "cue_near_cue_ball": true,
+ "label_CUE": true,
+ "pass": {
+  "playfield_2to1": true,
+  "corners": true,
+  "sides": true,
+  "diamonds_long": true,
+  "rack_apex": true,
+  "rack_rows": true,
+  "back_row_parallel": true,
+  "balls_inside": true,
+  "cue_angle": false,
+  "label_CUE": true,
+  "cue_butt_side": false
+ },
+ "cue_butt_x": 40.62,
+ "cue_tip_x": 23.88,
+ "score": "9/11",
+ "valid": true,
+ "warnings": [],
+ "gen_s": 50.7
+}
