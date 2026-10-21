@@ -10,6 +10,7 @@ Usage (cmd.exe):
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-HOST = 'http://127.0.0.1:8188'
+HOST = os.environ.get('COMFY_HOST', 'http://127.0.0.1:8188')  # desktop app serves 8000
 OUTPUT = Path(r'C:\Users\kevin\Documents\ComfyUI\output')
 RENDER = ROOT / 'render' / 'zimage'
 
@@ -112,11 +113,15 @@ def main():
     ap.add_argument('--seeds', default='1234,5678')
     ap.add_argument('--only', default=None)
     ap.add_argument('--check-determinism', action='store_true')
+    ap.add_argument('--prompts', default='prompts-diagrams.json')
+    ap.add_argument('--tag', default='zimage-arm')
     args = ap.parse_args()
 
-    corpus = json.loads((ROOT / 'prompts-diagrams.json').read_text(encoding='utf-8'))
+    corpus = json.loads((ROOT / args.prompts).read_text(encoding='utf-8'))
     prompts = [p for p in corpus['prompts'] if not args.only or p['id'] == args.only]
-    suffix = corpus['params']['style_suffix']
+    params = corpus.get('params') or json.loads(
+        (ROOT / 'prompts-diagrams.json').read_text(encoding='utf-8'))['params']
+    suffix = params['style_suffix']
     seeds = [int(s) for s in args.seeds.split(',')]
     RENDER.mkdir(parents=True, exist_ok=True)
     idle = vram()
@@ -124,15 +129,15 @@ def main():
     rows = []
     for p in prompts:
         for seed in seeds:
-            result = run_one(p['prompt'] + suffix, args.steps, args.cfg, seed, 'zimage-arm')
-            row = {'id': p['id'], 'kind': p['kind'], 'seed': seed, 'steps': args.steps, 'cfg': args.cfg,
+            result = run_one(p['prompt'] + suffix, args.steps, args.cfg, seed, args.tag)
+            row = {'id': p['id'], 'kind': p.get('kind'), 'seed': seed, 'steps': args.steps, 'cfg': args.cfg,
                    'ok': result['ok'], 'wall_s': result['wall_s'], 'vram_peak_mib': result.get('peak'),
                    'status': result.get('status'), 'error': result.get('error')}
             if result['ok']:
                 for img in result['images']:
                     src = OUTPUT / img.get('subfolder', '') / img['filename']
                     if src.exists():
-                        dest = RENDER / ('%s-s%d.png' % (p['id'], seed))
+                        dest = RENDER / ('%s-%s-s%d.png' % (args.tag, p['id'], seed))
                         shutil.copy2(src, dest)
                         row['file'] = dest.name
                         row['sha256'] = sha(dest)
@@ -157,7 +162,8 @@ def main():
     payload = {'arm': 'A-zimage-turbo-nvfp4', 'steps': args.steps, 'cfg': args.cfg, 'seeds': seeds,
                'sampler': 'euler/simple', 'resolution': 1024, 'idle_vram_mib': idle,
                'determinism': determinism, 'rows': rows}
-    out = ROOT / 'result-arm-zimage.json'
+    out = ROOT / ('result-arm-zimage.json' if args.tag == 'zimage-arm'
+                  else 'result-arm-%s.json' % args.tag)
     out.write_text(json.dumps(payload, indent=1), encoding='utf-8')
     ok = sum(1 for r in rows if r['ok'])
     walls = [r['wall_s'] for r in rows if r['ok']]
