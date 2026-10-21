@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#ffffff"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#0b2a5b"/>
+<rect x="200" y="300" width="620" height="420" fill="none" stroke="#ffffff" stroke-width="5"/>
+<circle cx="380" cy="510" r="60" fill="none" stroke="#ffffff" stroke-width="5"/>
+<circle cx="640" cy="510" r="60" fill="none" stroke="#ffffff" stroke-width="5"/>
+<line x1="200" y1="800" x2="820" y2="800" stroke="#ffffff" stroke-width="3" marker-end="url(#ah)"/>
+<line x1="200" y1="780" x2="200" y2="820" stroke="#ffffff" stroke-width="3"/>
+<line x1="820" y1="780" x2="820" y2="820" stroke="#ffffff" stroke-width="3"/>
+<text x="510" y="772" font-family="Arial" font-size="28" fill="#ffffff" text-anchor="middle">620</text>
+<text x="700" y="700" font-family="Arial" font-size="28" fill="#ffffff" text-anchor="middle">120</text>
+<text x="510" y="258" font-family="Arial" font-size="28" fill="#ffffff" text-anchor="middle">BRACKET</text>
+</svg>

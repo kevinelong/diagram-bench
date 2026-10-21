@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#000000"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+<rect x="412" y="140" width="200" height="100" fill="none" stroke="#000000" stroke-width="4"/>
+<rect x="172" y="420" width="200" height="100" fill="none" stroke="#000000" stroke-width="4"/>
+<rect x="652" y="420" width="200" height="100" fill="none" stroke="#000000" stroke-width="4"/>
+<line x1="512" y1="240" x2="512" y2="330" stroke="#000000" stroke-width="4"/>
+<line x1="272" y1="330" x2="752" y2="330" stroke="#000000" stroke-width="4"/>
+<line x1="272" y1="330" x2="272" y2="420" stroke="#000000" stroke-width="4"/>
+<line x1="752" y1="330" x2="752" y2="420" stroke="#000000" stroke-width="4"/>
+<text x="512" y="202" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">CEO</text>
+<text x="272" y="482" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">CTO</text>
+<text x="752" y="482" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">CFO</text>
+</svg>

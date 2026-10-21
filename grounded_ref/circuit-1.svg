@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#000000"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+<line x1="140" y1="420" x2="320" y2="420" stroke="#000000" stroke-width="4"/>
+<rect x="320" y="390" width="140" height="60" fill="none" stroke="#000000" stroke-width="4"/>
+<line x1="460" y1="420" x2="640" y2="420" stroke="#000000" stroke-width="4"/>
+<line x1="640" y1="420" x2="884" y2="420" stroke="#000000" stroke-width="4"/>
+<line x1="640" y1="420" x2="640" y2="520" stroke="#000000" stroke-width="4"/>
+<line x1="600" y1="520" x2="680" y2="520" stroke="#000000" stroke-width="6"/>
+<line x1="600" y1="610" x2="680" y2="610" stroke="#000000" stroke-width="6"/>
+<line x1="640" y1="610" x2="640" y2="680" stroke="#000000" stroke-width="4"/>
+<line x1="596" y1="680" x2="684" y2="680" stroke="#000000" stroke-width="6"/>
+<line x1="614" y1="700" x2="666" y2="700" stroke="#000000" stroke-width="6"/>
+<line x1="632" y1="720" x2="648" y2="720" stroke="#000000" stroke-width="6"/>
+<text x="390" y="372" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">R1</text>
+<text x="716" y="572" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">C1</text>
+<text x="96" y="408" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">IN</text>
+<text x="928" y="408" font-family="Arial" font-size="28" fill="#000000" text-anchor="middle">OUT</text>
+</svg>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#000000"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+<line x1="512" y1="150" x2="312" y2="360" stroke="#000000" stroke-width="3"/>
+<line x1="512" y1="150" x2="712" y2="360" stroke="#000000" stroke-width="3"/>
+<line x1="312" y1="360" x2="212" y2="620" stroke="#000000" stroke-width="3"/>
+<line x1="312" y1="360" x2="412" y2="620" stroke="#000000" stroke-width="3"/>
+<line x1="712" y1="360" x2="612" y2="620" stroke="#000000" stroke-width="3"/>
+<line x1="712" y1="360" x2="812" y2="620" stroke="#000000" stroke-width="3"/>
+<circle cx="512" cy="150" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="312" cy="360" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="712" cy="360" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="212" cy="620" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="412" cy="620" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="612" cy="620" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<circle cx="812" cy="620" r="70" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+<text x="512" y="170" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">1</text>
+<text x="312" y="380" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">2</text>
+<text x="712" y="380" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">3</text>
+<text x="212" y="640" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">4</text>
+<text x="412" y="640" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">5</text>
+<text x="612" y="640" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">6</text>
+<text x="812" y="640" font-family="Arial" font-size="60" fill="#000000" text-anchor="middle">7</text>
+</svg>

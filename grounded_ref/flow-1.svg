@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#000000"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+<rect x="392" y="100" width="240" height="110" fill="none" stroke="#000000" stroke-width="4"/>
+<rect x="392" y="320" width="240" height="110" fill="none" stroke="#000000" stroke-width="4"/>
+<rect x="392" y="540" width="240" height="110" fill="none" stroke="#000000" stroke-width="4"/>
+<rect x="392" y="760" width="240" height="110" fill="none" stroke="#000000" stroke-width="4"/>
+<line x1="512" y1="210" x2="512" y2="320" stroke="#000000" stroke-width="4" marker-end="url(#ah)"/>
+<line x1="512" y1="430" x2="512" y2="540" stroke="#000000" stroke-width="4" marker-end="url(#ah)"/>
+<line x1="512" y1="650" x2="512" y2="760" stroke="#000000" stroke-width="4" marker-end="url(#ah)"/>
+<text x="512" y="166" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">START</text>
+<text x="512" y="386" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">VALIDATE</text>
+<text x="512" y="606" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">STORE</text>
+<text x="512" y="826" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">DONE</text>
+</svg>

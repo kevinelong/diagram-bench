@@ -1,0 +1,57 @@
+{
+ "declared": "2026-10-21",
+ "kind": "grounded revision of prompts-diagrams.json",
+ "note": "Ten prompts restated as coordinates, generated from grounded.py's specs. Same ids as the frozen corpus, which is left untouched: this is a second revision, not an edit. The prompt text carries every number the reference SVG uses, and --selftest proves the two agree.",
+ "prompts": [
+  {
+   "id": "flow-1",
+   "prompt": "A vertical flowchart on a 1024 by 1024 canvas, white background, flat 2D vector style. Rectangle 240 by 110 at 392,100, black outline 4 thick, no fill. Rectangle 240 by 110 at 392,320, black outline 4 thick, no fill. Rectangle 240 by 110 at 392,540, black outline 4 thick, no fill. Rectangle 240 by 110 at 392,760, black outline 4 thick, no fill. Arrow line from 512,210 to 512,320, 4 thick. Arrow line from 512,430 to 512,540, 4 thick. Arrow line from 512,650 to 512,760, 4 thick. Text START centred at 512,166 in 30 px Arial. Text VALIDATE centred at 512,386 in 30 px Arial. Text STORE centred at 512,606 in 30 px Arial. Text DONE centred at 512,826 in 30 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 11
+  },
+  {
+   "id": "floor-1",
+   "prompt": "A two-bedroom apartment floor plan seen from above on a 1024 by 1024 canvas, white background. Filled black rectangle 864 by 16 at 80,80. Filled black rectangle 864 by 16 at 80,848. Filled black rectangle 16 by 784 at 80,80. Filled black rectangle 16 by 784 at 928,80. Filled black rectangle 16 by 204 at 552,96. Filled black rectangle 16 by 190 at 552,390. Filled black rectangle 16 by 188 at 552,660. Filled black rectangle 174 by 16 at 96,462. Filled black rectangle 192 by 16 at 360,462. Filled black rectangle 152 by 16 at 568,332. Filled black rectangle 128 by 16 at 800,332. Filled black rectangle 172 by 16 at 568,602. Filled black rectangle 108 by 16 at 820,602. Text BEDROOM centred at 320,286 in 28 px Arial. Text BEDROOM centred at 320,686 in 28 px Arial. Text BATH centred at 752,221 in 28 px Arial. Text KITCHEN centred at 752,491 in 28 px Arial. Text LIVING centred at 752,751 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 18
+  },
+  {
+   "id": "bar-1",
+   "prompt": "A bar chart on a 1024 by 1024 canvas, white background. Straight line from 140,820 to 940,820, 8 thick. Filled black rectangle 120 by 200 at 200,620. Filled black rectangle 120 by 340 at 380,480. Filled black rectangle 120 by 480 at 560,340. Filled black rectangle 120 by 640 at 740,180. Text Q1 centred at 260,884 in 30 px Arial. Text Q2 centred at 440,884 in 30 px Arial. Text Q3 centred at 620,884 in 30 px Arial. Text Q4 centred at 800,884 in 30 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 9
+  },
+  {
+   "id": "org-1",
+   "prompt": "A three-level org chart on a 1024 by 1024 canvas, white background, boxes with black outlines. Rectangle 200 by 100 at 412,140, black outline 4 thick, no fill. Rectangle 200 by 100 at 172,420, black outline 4 thick, no fill. Rectangle 200 by 100 at 652,420, black outline 4 thick, no fill. Straight line from 512,240 to 512,330, 4 thick. Straight line from 272,330 to 752,330, 4 thick. Straight line from 272,330 to 272,420, 4 thick. Straight line from 752,330 to 752,420, 4 thick. Text CEO centred at 512,202 in 28 px Arial. Text CTO centred at 272,482 in 28 px Arial. Text CFO centred at 752,482 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 10
+  },
+  {
+   "id": "circuit-1",
+   "prompt": "An RC low-pass filter schematic on a 1024 by 1024 canvas, thin black lines on white. Straight line from 140,420 to 320,420, 4 thick. Rectangle 140 by 60 at 320,390, black outline 4 thick, no fill. Straight line from 460,420 to 640,420, 4 thick. Straight line from 640,420 to 884,420, 4 thick. Straight line from 640,420 to 640,520, 4 thick. Straight line from 600,520 to 680,520, 6 thick. Straight line from 600,610 to 680,610, 6 thick. Straight line from 640,610 to 640,680, 4 thick. Straight line from 596,680 to 684,680, 6 thick. Straight line from 614,700 to 666,700, 6 thick. Straight line from 632,720 to 648,720, 6 thick. Text R1 centred at 390,372 in 28 px Arial. Text C1 centred at 716,572 in 28 px Arial. Text IN centred at 96,408 in 28 px Arial. Text OUT centred at 928,408 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 15
+  },
+  {
+   "id": "blueprint-1",
+   "prompt": "A front-view engineering blueprint on a 1024 by 1024 canvas, solid dark blue background, white lines. Rectangle 620 by 420 at 200,300, white outline 5 thick, no fill. Circle centre 380,510 radius 60, white outline 5 thick. Circle centre 640,510 radius 60, white outline 5 thick. Arrow line from 200,800 to 820,800, 3 thick. Straight line from 200,780 to 200,820, 3 thick. Straight line from 820,780 to 820,820, 3 thick. Text 620 centred at 510,772 in 28 px Arial. Text 120 centred at 700,700 in 28 px Arial. Text BRACKET centred at 510,258 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, background #0b2a5b, no gradients, no shadows, no 3D.",
+   "n_elements": 9
+  },
+  {
+   "id": "tree-1",
+   "prompt": "A binary tree on a 1024 by 1024 canvas, white background, circles with black outlines. Straight line from 512,150 to 312,360, 3 thick. Straight line from 512,150 to 712,360, 3 thick. Straight line from 312,360 to 212,620, 3 thick. Straight line from 312,360 to 412,620, 3 thick. Straight line from 712,360 to 612,620, 3 thick. Straight line from 712,360 to 812,620, 3 thick. Circle centre 512,150 radius 70, black outline 4 thick. Circle centre 312,360 radius 70, black outline 4 thick. Circle centre 712,360 radius 70, black outline 4 thick. Circle centre 212,620 radius 70, black outline 4 thick. Circle centre 412,620 radius 70, black outline 4 thick. Circle centre 612,620 radius 70, black outline 4 thick. Circle centre 812,620 radius 70, black outline 4 thick. Text 1 centred at 512,170 in 60 px Arial. Text 2 centred at 312,380 in 60 px Arial. Text 3 centred at 712,380 in 60 px Arial. Text 4 centred at 212,640 in 60 px Arial. Text 5 centred at 412,640 in 60 px Arial. Text 6 centred at 612,640 in 60 px Arial. Text 7 centred at 812,640 in 60 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 20
+  },
+  {
+   "id": "timeline-1",
+   "prompt": "A horizontal timeline on a 1024 by 1024 canvas, white background. Straight line from 120,512 to 904,512, 8 thick. Straight line from 200,472 to 200,512, 6 thick. Straight line from 400,472 to 400,512, 6 thick. Straight line from 600,472 to 600,512, 6 thick. Straight line from 800,472 to 800,512, 6 thick. Text 2020 centred at 200,580 in 30 px Arial. Text 2021 centred at 400,580 in 30 px Arial. Text 2022 centred at 600,580 in 30 px Arial. Text 2023 centred at 800,580 in 30 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 9
+  },
+  {
+   "id": "network-1",
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, black outlines. Rectangle 240 by 110 at 392,140, black outline 4 thick, no fill. Rectangle 200 by 100 at 112,700, black outline 4 thick, no fill. Rectangle 200 by 100 at 412,700, black outline 4 thick, no fill. Rectangle 200 by 100 at 712,700, black outline 4 thick, no fill. Straight line from 512,250 to 212,700, 4 thick. Straight line from 512,250 to 512,700, 4 thick. Straight line from 512,250 to 812,700, 4 thick. Text SERVER centred at 512,204 in 28 px Arial. Text PC1 centred at 212,762 in 28 px Arial. Text PC2 centred at 512,762 in 28 px Arial. Text PC3 centred at 812,762 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 11
+  },
+  {
+   "id": "process-1",
+   "prompt": "A two-lane swimlane process diagram on a 1024 by 1024 canvas, white background, black outlines. Rectangle 864 by 280 at 80,180, black outline 4 thick, no fill. Rectangle 864 by 280 at 80,460, black outline 4 thick, no fill. Rounded rectangle 200 by 90 at 340,280 with corner radius 20, black outline 4 thick, no fill. Rounded rectangle 200 by 90 at 340,560 with corner radius 20, black outline 4 thick, no fill. Rounded rectangle 200 by 90 at 640,560 with corner radius 20, black outline 4 thick, no fill. Arrow line from 440,370 to 440,560, 4 thick. Arrow line from 540,605 to 640,605, 4 thick. Text REQUESTER centred at 200,236 in 26 px Arial. Text APPROVER centred at 200,516 in 26 px Arial. Text SUBMIT centred at 440,336 in 28 px Arial. Text REVIEW centred at 440,616 in 28 px Arial. Text APPROVE centred at 740,616 in 28 px Arial. Use only the stated coordinates; every straight edge horizontal or vertical unless an endpoint states otherwise; flat 2D vector style, sharp edges, solid fills, white background, no gradients, no shadows, no 3D.",
+   "n_elements": 12
+  }
+ ]
+}

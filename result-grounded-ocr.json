@@ -1,0 +1,136 @@
+{
+ "declared": "2026-10-21",
+ "method": "grounded_ref/<id>.svg rasterised 1024x1024 in Chromium, read with RapidOCR; a label counts only if the exact string appears in the read text",
+ "per_prompt": [
+  {
+   "id": "flow-1",
+   "labels_read": 4,
+   "labels_required": 4,
+   "missed": [],
+   "reader_text": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ]
+  },
+  {
+   "id": "floor-1",
+   "labels_read": 5,
+   "labels_required": 5,
+   "missed": [],
+   "reader_text": [
+    "BATH",
+    "BEDROOM",
+    "KITCHEN",
+    "BEDROOM",
+    "LIVING"
+   ]
+  },
+  {
+   "id": "bar-1",
+   "labels_read": 4,
+   "labels_required": 4,
+   "missed": [],
+   "reader_text": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ]
+  },
+  {
+   "id": "org-1",
+   "labels_read": 3,
+   "labels_required": 3,
+   "missed": [],
+   "reader_text": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ]
+  },
+  {
+   "id": "circuit-1",
+   "labels_read": 4,
+   "labels_required": 4,
+   "missed": [],
+   "reader_text": [
+    "R1",
+    "IN",
+    "OUT",
+    "I\u5de5=",
+    "C1"
+   ]
+  },
+  {
+   "id": "blueprint-1",
+   "labels_read": 3,
+   "labels_required": 3,
+   "missed": [],
+   "reader_text": [
+    "BRACKET",
+    "O",
+    "O",
+    "120",
+    "620"
+   ]
+  },
+  {
+   "id": "tree-1",
+   "labels_read": 7,
+   "labels_required": 7,
+   "missed": [],
+   "reader_text": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ]
+  },
+  {
+   "id": "timeline-1",
+   "labels_read": 4,
+   "labels_required": 4,
+   "missed": [],
+   "reader_text": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ]
+  },
+  {
+   "id": "network-1",
+   "labels_read": 4,
+   "labels_required": 4,
+   "missed": [],
+   "reader_text": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ]
+  },
+  {
+   "id": "process-1",
+   "labels_read": 5,
+   "labels_required": 5,
+   "missed": [],
+   "reader_text": [
+    "REQUESTER",
+    "SUBMIT",
+    "APPROVER",
+    "REVIEW",
+    "APPROVE"
+   ]
+  }
+ ],
+ "total": {
+  "read": 43,
+  "required": 43
+ }
+}

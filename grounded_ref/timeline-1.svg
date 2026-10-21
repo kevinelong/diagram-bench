@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#000000"/></marker></defs>
+<rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+<line x1="120" y1="512" x2="904" y2="512" stroke="#000000" stroke-width="8"/>
+<line x1="200" y1="472" x2="200" y2="512" stroke="#000000" stroke-width="6"/>
+<line x1="400" y1="472" x2="400" y2="512" stroke="#000000" stroke-width="6"/>
+<line x1="600" y1="472" x2="600" y2="512" stroke="#000000" stroke-width="6"/>
+<line x1="800" y1="472" x2="800" y2="512" stroke="#000000" stroke-width="6"/>
+<text x="200" y="580" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">2020</text>
+<text x="400" y="580" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">2021</text>
+<text x="600" y="580" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">2022</text>
+<text x="800" y="580" font-family="Arial" font-size="30" fill="#000000" text-anchor="middle">2023</text>
+</svg>
