@@ -1,0 +1,605 @@
+{
+ "n": 20,
+ "paths_median": 28.0,
+ "nodes_median": 820.5,
+ "axis_median": 93.8,
+ "colours_median": 2.0,
+ "ocr_exact_mean": 0.798,
+ "ocr_full_match": 12,
+ "segments_median": 58.5,
+ "edge_sparse_median": 94.65,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "bar-1",
+   "kind": "chart",
+   "sample": "bar-1-s1234",
+   "paths": 22,
+   "nodes": 619,
+   "traced_svg_kb": 39.9,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 12.2,
+   "ocr_found": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "required": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 45,
+   "edge_sparse_pct": 94.6,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "bar-1",
+   "kind": "chart",
+   "sample": "bar-1-s5678",
+   "paths": 21,
+   "nodes": 273,
+   "traced_svg_kb": 15.2,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 34.4,
+   "ocr_found": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "required": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 26,
+   "edge_sparse_pct": 96.2,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "blueprint-1",
+   "kind": "blueprint",
+   "sample": "blueprint-1-s1234",
+   "paths": 588,
+   "nodes": 8101,
+   "traced_svg_kb": 349.0,
+   "axis_pct": 98.8,
+   "colours_major": 8,
+   "ink_pct": 5.3,
+   "ocr_found": [
+    "O",
+    "\u4e09"
+   ],
+   "required": [
+    "A",
+    "B"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 81,
+   "edge_sparse_pct": 91.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "blueprint-1",
+   "kind": "blueprint",
+   "sample": "blueprint-1-s5678",
+   "paths": 358,
+   "nodes": 4345,
+   "traced_svg_kb": 204.5,
+   "axis_pct": 100.0,
+   "colours_major": 10,
+   "ink_pct": 17.3,
+   "ocr_found": [
+    "\u4e09",
+    "\u4e09"
+   ],
+   "required": [
+    "A",
+    "B"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 61,
+   "edge_sparse_pct": 92.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "circuit-1",
+   "kind": "schematic",
+   "sample": "circuit-1-s1234",
+   "paths": 17,
+   "nodes": 551,
+   "traced_svg_kb": 37.2,
+   "axis_pct": 89.3,
+   "colours_major": 2,
+   "ink_pct": 5.0,
+   "ocr_found": [
+    "\u53e3",
+    "\u4e8c",
+    "R1-",
+    "C1"
+   ],
+   "required": [
+    "R1",
+    "C1"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 28,
+   "edge_sparse_pct": 97.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "circuit-1",
+   "kind": "schematic",
+   "sample": "circuit-1-s5678",
+   "paths": 13,
+   "nodes": 377,
+   "traced_svg_kb": 25.2,
+   "axis_pct": 82.1,
+   "colours_major": 3,
+   "ink_pct": 5.3,
+   "ocr_found": [
+    "R1",
+    "C1"
+   ],
+   "required": [
+    "R1",
+    "C1"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 28,
+   "edge_sparse_pct": 97.9,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "floor-1",
+   "kind": "floor plan",
+   "sample": "floor-1-s1234",
+   "paths": 95,
+   "nodes": 1191,
+   "traced_svg_kb": 51.9,
+   "axis_pct": 98.7,
+   "colours_major": 2,
+   "ink_pct": 14.1,
+   "ocr_found": [
+    "BEDROOM",
+    "LIVING",
+    "LIVING",
+    "KITCHIIN"
+   ],
+   "required": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5,
+   "width": 1024,
+   "height": 1024,
+   "segments": 78,
+   "edge_sparse_pct": 93.8,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "floor-1",
+   "kind": "floor plan",
+   "sample": "floor-1-s5678",
+   "paths": 129,
+   "nodes": 1637,
+   "traced_svg_kb": 71.5,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 16.1,
+   "ocr_found": [
+    "BEDROOM",
+    "BEDROOM",
+    "BATH",
+    "KITCHIN",
+    "LIVING"
+   ],
+   "required": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 1024,
+   "height": 1024,
+   "segments": 121,
+   "edge_sparse_pct": 92.6,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s1234",
+   "paths": 43,
+   "nodes": 928,
+   "traced_svg_kb": 54.9,
+   "axis_pct": 87.5,
+   "colours_major": 2,
+   "ink_pct": 19.8,
+   "ocr_found": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 112,
+   "edge_sparse_pct": 92.0,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s5678",
+   "paths": 39,
+   "nodes": 878,
+   "traced_svg_kb": 53.5,
+   "axis_pct": 89.5,
+   "colours_major": 2,
+   "ink_pct": 18.9,
+   "ocr_found": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 114,
+   "edge_sparse_pct": 92.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "network-1",
+   "kind": "network",
+   "sample": "network-1-s1234",
+   "paths": 31,
+   "nodes": 1121,
+   "traced_svg_kb": 77.0,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 17.5,
+   "ocr_found": [
+    "PC1",
+    "PC3",
+    "\u76ee",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5,
+   "width": 1024,
+   "height": 1024,
+   "segments": 110,
+   "edge_sparse_pct": 94.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "network-1",
+   "kind": "network",
+   "sample": "network-1-s5678",
+   "paths": 34,
+   "nodes": 946,
+   "traced_svg_kb": 63.7,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 21.2,
+   "ocr_found": [
+    "PC1",
+    "PC2",
+    "PC2",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 1024,
+   "height": 1024,
+   "segments": 108,
+   "edge_sparse_pct": 93.6,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "org-1",
+   "kind": "org chart",
+   "sample": "org-1-s1234",
+   "paths": 18,
+   "nodes": 767,
+   "traced_svg_kb": 54.6,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 13.8,
+   "ocr_found": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "required": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 56,
+   "edge_sparse_pct": 95.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "org-1",
+   "kind": "org chart",
+   "sample": "org-1-s5678",
+   "paths": 18,
+   "nodes": 588,
+   "traced_svg_kb": 39.9,
+   "axis_pct": 90.1,
+   "colours_major": 2,
+   "ink_pct": 21.5,
+   "ocr_found": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "required": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 71,
+   "edge_sparse_pct": 94.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "process-1",
+   "kind": "swimlane",
+   "sample": "process-1-s1234",
+   "paths": 41,
+   "nodes": 874,
+   "traced_svg_kb": 53.1,
+   "axis_pct": 63.9,
+   "colours_major": 2,
+   "ink_pct": 11.8,
+   "ocr_found": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "required": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 72,
+   "edge_sparse_pct": 95.0,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "process-1",
+   "kind": "swimlane",
+   "sample": "process-1-s5678",
+   "paths": 121,
+   "nodes": 1821,
+   "traced_svg_kb": 98.1,
+   "axis_pct": 66.0,
+   "colours_major": 2,
+   "ink_pct": 43.3,
+   "ocr_found": [
+    "REQUESTER",
+    "CUESS",
+    "APPROVER"
+   ],
+   "required": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 50,
+   "edge_sparse_pct": 94.0,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "timeline-1",
+   "kind": "timeline",
+   "sample": "timeline-1-s1234",
+   "paths": 25,
+   "nodes": 551,
+   "traced_svg_kb": 34.3,
+   "axis_pct": 73.2,
+   "colours_major": 2,
+   "ink_pct": 6.6,
+   "ocr_found": [
+    "+111",
+    "2020",
+    "2021",
+    "2022",
+    "22023"
+   ],
+   "required": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 1024,
+   "height": 1024,
+   "segments": 41,
+   "edge_sparse_pct": 97.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "timeline-1",
+   "kind": "timeline",
+   "sample": "timeline-1-s5678",
+   "paths": 25,
+   "nodes": 613,
+   "traced_svg_kb": 38.3,
+   "axis_pct": 97.5,
+   "colours_major": 2,
+   "ink_pct": 7.2,
+   "ocr_found": [
+    "1TT",
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "required": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 40,
+   "edge_sparse_pct": 97.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "tree-1",
+   "kind": "hierarchy",
+   "sample": "tree-1-s1234",
+   "paths": 21,
+   "nodes": 562,
+   "traced_svg_kb": 35.0,
+   "axis_pct": 50.0,
+   "colours_major": 2,
+   "ink_pct": 7.5,
+   "ocr_found": [
+    "1",
+    "4",
+    "2",
+    "3",
+    "5",
+    "6",
+    "7"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 7,
+   "ocr_exact": 1.0,
+   "width": 1024,
+   "height": 1024,
+   "segments": 20,
+   "edge_sparse_pct": 95.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "tree-1",
+   "kind": "hierarchy",
+   "sample": "tree-1-s5678",
+   "paths": 25,
+   "nodes": 646,
+   "traced_svg_kb": 40.8,
+   "axis_pct": 69.7,
+   "colours_major": 2,
+   "ink_pct": 13.6,
+   "ocr_found": [
+    "1",
+    "1",
+    "2",
+    "3",
+    "8",
+    "6",
+    "7"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 5,
+   "ocr_exact": 0.714,
+   "width": 1024,
+   "height": 1024,
+   "segments": 33,
+   "edge_sparse_pct": 95.2,
+   "low_contrast_normalised": false
+  }
+ ]
+}

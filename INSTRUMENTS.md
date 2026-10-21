@@ -712,3 +712,10 @@ rows and coordinates - still scored 5/7, and the frozen one-liner scored 6/7 on 
 Consequence: **scores written before 2026-10-21 are inflated** wherever a required label is short or numeric, and
 are not comparable with re-scored arms without a re-run. The four arms of 2026-10-21 were all re-scored; their
 documents carry both numbers and the retraction explicitly.
+
+The historical arms were then re-scored from the PNGs on disk (no inference). Ranking unchanged, inflation
+concentrated in one model on one task: Z-Image 0.811 -> **0.798**, klein 0.614 -> **0.595**, schnell 0.552 ->
+**0.428**. The entire schnell difference is tree-1, 9/14 -> **1/14**: its digits were being read out of coordinate
+text, while Z-Image scores 12/14 both ways because it really draws them. `RESULTS-EXACT-RESCORE.md`.
+The 512-px arms (`zimage-512`, `klein-512`, `schnell-512`, `dev-512`, `code-512`) are **not yet re-scored** and carry
+the same caveat.
