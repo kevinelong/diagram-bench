@@ -1,0 +1,51 @@
+{
+ "declared": "2026-10-21",
+ "kind": "experiment corpus (not part of the frozen corpus)",
+ "note": "the four density rungs only, for a repeated-seed measurement",
+ "prompts": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background."
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140."
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140; the three workstation rectangles are 200 by 100 at 112,700, at 412,700 and at 712,700."
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "prompt": "A network topology diagram on a 1024 by 1024 canvas, white background, flat 2D vector style. With one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, black outlines, white background. The server rectangle is 240 by 110 at 392,140; the three workstation rectangles are 200 by 100 at 112,700, at 412,700 and at 712,700. Each link starts at 512,250 and ends at the top edge of its workstation: 212,700, 512,700 and 812,700. The labels sit inside their boxes, centred at 512,204, 212,762, 512,762 and 812,762."
+  }
+ ]
+}

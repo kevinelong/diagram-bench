@@ -1,0 +1,98 @@
+{
+ "arm": "A-flux1-schnell-Q4_K_S",
+ "steps": 4,
+ "cfg": 1.0,
+ "seeds": [
+  1234
+ ],
+ "sampler": "euler/simple",
+ "resolution": 1024,
+ "idle_vram_mib": 1849,
+ "determinism": null,
+ "rows": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 11.2,
+   "vram_peak_mib": 11469,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-net-1-words-s1234.png",
+   "sha256": "14a4407e3fef072a3b3b0c9fd1acaa01b17356974526c340a91727770b219301"
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 6.1,
+   "vram_peak_mib": 11021,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-net-2-server-s1234.png",
+   "sha256": "6bc45d7e2b605ffbf46a3444d238dce94ebb613b30fe52685ca8ac99d8d2b5f7"
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 6.2,
+   "vram_peak_mib": 10989,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-net-3-pcs-s1234.png",
+   "sha256": "f10d30dabc08fde1046015e8e70136b9017936d8fb31e668447e0b045dc2a11d"
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 6.1,
+   "vram_peak_mib": 10925,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-net-4-everything-s1234.png",
+   "sha256": "79cd25040c53f7c0f8889b89276642d8ee9c3003880a31df19e304199f719824"
+  },
+  {
+   "id": "tree-1-boundary",
+   "kind": "hierarchy",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 6.1,
+   "vram_peak_mib": 10925,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-tree-1-boundary-s1234.png",
+   "sha256": "d4fe843ccdb1f0027e5b4d97b56b47cd4af18ed4e1003724490baf7dccd3eda9"
+  },
+  {
+   "id": "tree-1-ident",
+   "kind": "hierarchy",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 6.1,
+   "vram_peak_mib": 10989,
+   "status": "success",
+   "error": null,
+   "file": "ladder512-tree-1-ident-s1234.png",
+   "sha256": "d9020b9e9c060605db0b2e7871dab95fd474185588ea55530bb0d842cd79f5bc"
+  }
+ ]
+}

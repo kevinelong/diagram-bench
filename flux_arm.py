@@ -43,7 +43,7 @@ def vram():
         return None
 
 
-def workflow(prompt, steps, cfg, seed, prefix):
+def workflow(prompt, steps, cfg, seed, prefix, size=1024):
     return {
         "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "flux1-schnell-Q4_K_S.gguf"}},
         "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
@@ -51,7 +51,7 @@ def workflow(prompt, steps, cfg, seed, prefix):
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux1-ae.safetensors"}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
-        "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+        "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": size, "height": size, "batch_size": 1}},
         "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
                                                   "latent_image": ["6", 0], "seed": seed, "steps": steps, "cfg": cfg,
                                                   "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
@@ -60,7 +60,7 @@ def workflow(prompt, steps, cfg, seed, prefix):
     }
 
 
-def run_one(prompt, steps, cfg, seed, prefix, timeout=600):
+def run_one(prompt, steps, cfg, seed, prefix, timeout=600, size=1024):
     peak = {'v': 0}
     stop = threading.Event()
 
@@ -76,7 +76,7 @@ def run_one(prompt, steps, cfg, seed, prefix, timeout=600):
     started = time.monotonic()
     result = None
     try:
-        r = post('/prompt', {"prompt": workflow(prompt, steps, cfg, seed, prefix)})
+        r = post('/prompt', {"prompt": workflow(prompt, steps, cfg, seed, prefix, size)})
         pid = r['prompt_id']
         while True:
             h = get('/history/' + pid)
@@ -117,6 +117,7 @@ def main():
     ap.add_argument('--prompts', default='prompts-diagrams.json',
                     help='corpus file: the frozen corpus or prompts-diagrams-grounded.json')
     ap.add_argument('--tag', default='flux-arm', help='output filename prefix')
+    ap.add_argument('--size', type=int, default=1024, help='square canvas size for EmptySD3LatentImage')
     args = ap.parse_args()
 
     corpus = json.loads((ROOT / args.prompts).read_text(encoding='utf-8'))
@@ -133,7 +134,7 @@ def main():
     rows = []
     for p in prompts:
         for seed in seeds:
-            result = run_one(p['prompt'] + suffix, args.steps, args.cfg, seed, args.tag)
+            result = run_one(p['prompt'] + suffix, args.steps, args.cfg, seed, args.tag, size=args.size)
             row = {'id': p['id'], 'kind': p.get('kind'), 'seed': seed, 'steps': args.steps, 'cfg': args.cfg,
                    'ok': result['ok'], 'wall_s': result['wall_s'], 'vram_peak_mib': result.get('peak'),
                    'status': result.get('status'), 'error': result.get('error')}

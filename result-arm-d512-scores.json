@@ -1,0 +1,368 @@
+{
+ "n": 12,
+ "paths_median": 59.5,
+ "nodes_median": 763.5,
+ "axis_median": 82.6,
+ "colours_median": 1.0,
+ "ocr_exact_mean": 0.625,
+ "ocr_full_match": 1,
+ "segments_median": 26.5,
+ "edge_sparse_median": 96.35,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "sample": "net-1-words-s1234",
+   "paths": 62,
+   "nodes": 779,
+   "traced_svg_kb": 33.1,
+   "axis_pct": 78.6,
+   "colours_major": 1,
+   "ink_pct": 2.4,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC1"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 28,
+   "edge_sparse_pct": 95.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "sample": "net-1-words-s5678",
+   "paths": 59,
+   "nodes": 1066,
+   "traced_svg_kb": 61.4,
+   "axis_pct": 85.7,
+   "colours_major": 1,
+   "ink_pct": 2.1,
+   "ocr_found": [
+    "SERVER",
+    "P+1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5,
+   "width": 512,
+   "height": 512,
+   "segments": 28,
+   "edge_sparse_pct": 96.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "sample": "net-1-words-s9012",
+   "paths": 50,
+   "nodes": 540,
+   "traced_svg_kb": 21.9,
+   "axis_pct": 75.0,
+   "colours_major": 1,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 20,
+   "edge_sparse_pct": 97.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "sample": "net-2-server-s1234",
+   "paths": 46,
+   "nodes": 569,
+   "traced_svg_kb": 25.1,
+   "axis_pct": 85.2,
+   "colours_major": 1,
+   "ink_pct": 2.0,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC2"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 27,
+   "edge_sparse_pct": 96.4,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "sample": "net-2-server-s5678",
+   "paths": 61,
+   "nodes": 1354,
+   "traced_svg_kb": 78.5,
+   "axis_pct": 86.7,
+   "colours_major": 1,
+   "ink_pct": 2.9,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 30,
+   "edge_sparse_pct": 95.4,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "sample": "net-2-server-s9012",
+   "paths": 51,
+   "nodes": 626,
+   "traced_svg_kb": 26.1,
+   "axis_pct": 80.0,
+   "colours_major": 1,
+   "ink_pct": 1.6,
+   "ocr_found": [
+    "SEVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5,
+   "width": 512,
+   "height": 512,
+   "segments": 20,
+   "edge_sparse_pct": 97.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "sample": "net-3-pcs-s1234",
+   "paths": 60,
+   "nodes": 819,
+   "traced_svg_kb": 40.0,
+   "axis_pct": 76.9,
+   "colours_major": 1,
+   "ink_pct": 2.5,
+   "ocr_found": [
+    "SERVER",
+    "122701",
+    "112700",
+    "PC1703"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 512,
+   "height": 512,
+   "segments": 26,
+   "edge_sparse_pct": 95.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "sample": "net-3-pcs-s5678",
+   "paths": 91,
+   "nodes": 1510,
+   "traced_svg_kb": 82.3,
+   "axis_pct": 85.7,
+   "colours_major": 1,
+   "ink_pct": 2.5,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3",
+    "11270",
+    "72270"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 28,
+   "edge_sparse_pct": 95.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "sample": "net-3-pcs-s9012",
+   "paths": 40,
+   "nodes": 521,
+   "traced_svg_kb": 24.0,
+   "axis_pct": 77.8,
+   "colours_major": 1,
+   "ink_pct": 1.6,
+   "ocr_found": [
+    "SLNER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5,
+   "width": 512,
+   "height": 512,
+   "segments": 18,
+   "edge_sparse_pct": 97.1,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "sample": "net-4-everything-s1234",
+   "paths": 45,
+   "nodes": 588,
+   "traced_svg_kb": 25.2,
+   "axis_pct": 76.2,
+   "colours_major": 1,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 21,
+   "edge_sparse_pct": 97.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "sample": "net-4-everything-s5678",
+   "paths": 66,
+   "nodes": 1207,
+   "traced_svg_kb": 65.8,
+   "axis_pct": 90.5,
+   "colours_major": 2,
+   "ink_pct": 2.7,
+   "ocr_found": [
+    "SERVER",
+    "1",
+    "9921441",
+    "7112.70C3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 512,
+   "height": 512,
+   "segments": 42,
+   "edge_sparse_pct": 95.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "sample": "net-4-everything-s9012",
+   "paths": 63,
+   "nodes": 748,
+   "traced_svg_kb": 32.1,
+   "axis_pct": 87.5,
+   "colours_major": 1,
+   "ink_pct": 1.8,
+   "ocr_found": [
+    "PC1",
+    "SERVER",
+    "PC2",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0,
+   "width": 512,
+   "height": 512,
+   "segments": 16,
+   "edge_sparse_pct": 96.7,
+   "low_contrast_normalised": false
+  }
+ ]
+}

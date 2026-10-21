@@ -1,0 +1,28 @@
+{
+ "arm": "A-flux1-schnell-Q4_K_S",
+ "steps": 4,
+ "cfg": 1.0,
+ "seeds": [
+  1234
+ ],
+ "sampler": "euler/simple",
+ "resolution": 1024,
+ "idle_vram_mib": 10509,
+ "determinism": null,
+ "rows": [
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 11.1,
+   "vram_peak_mib": 10982,
+   "status": "success",
+   "error": null,
+   "file": "bridge1024-net-2-server-s1234.png",
+   "sha256": "2edfc8788954a928857da6b75cc4b89881851a274d2233a6586ce251cf11c570"
+  }
+ ]
+}

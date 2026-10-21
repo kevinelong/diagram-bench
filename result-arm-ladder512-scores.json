@@ -1,0 +1,207 @@
+{
+ "n": 6,
+ "paths_median": 61.0,
+ "nodes_median": 799.0,
+ "axis_median": 77.75,
+ "colours_median": 1.0,
+ "ocr_exact_mean": 0.441,
+ "ocr_full_match": 0,
+ "segments_median": 23.5,
+ "edge_sparse_median": 95.6,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "sample": "net-1-words-s1234",
+   "paths": 62,
+   "nodes": 779,
+   "traced_svg_kb": 33.1,
+   "axis_pct": 78.6,
+   "colours_major": 1,
+   "ink_pct": 2.4,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC1"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 28,
+   "edge_sparse_pct": 95.7,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "sample": "net-2-server-s1234",
+   "paths": 46,
+   "nodes": 569,
+   "traced_svg_kb": 25.1,
+   "axis_pct": 85.2,
+   "colours_major": 1,
+   "ink_pct": 2.0,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC2"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 27,
+   "edge_sparse_pct": 96.4,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-3-pcs",
+   "kind": "topology",
+   "sample": "net-3-pcs-s1234",
+   "paths": 60,
+   "nodes": 819,
+   "traced_svg_kb": 40.0,
+   "axis_pct": 76.9,
+   "colours_major": 1,
+   "ink_pct": 2.5,
+   "ocr_found": [
+    "SERVER",
+    "122701",
+    "112700",
+    "PC1703"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.25,
+   "width": 512,
+   "height": 512,
+   "segments": 26,
+   "edge_sparse_pct": 95.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "net-4-everything",
+   "kind": "topology",
+   "sample": "net-4-everything-s1234",
+   "paths": 45,
+   "nodes": 588,
+   "traced_svg_kb": 25.2,
+   "axis_pct": 76.2,
+   "colours_major": 1,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 21,
+   "edge_sparse_pct": 97.3,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "tree-1-boundary",
+   "kind": "hierarchy",
+   "sample": "tree-1-boundary-s1234",
+   "paths": 125,
+   "nodes": 1526,
+   "traced_svg_kb": 70.0,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 3.0,
+   "ocr_found": [
+    "70",
+    "50",
+    "70",
+    "30",
+    "30",
+    "24",
+    "30",
+    "20",
+    "21"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0,
+   "width": 512,
+   "height": 512,
+   "segments": 11,
+   "edge_sparse_pct": 94.5,
+   "low_contrast_normalised": false
+  },
+  {
+   "id": "tree-1-ident",
+   "kind": "hierarchy",
+   "sample": "tree-1-ident-s1234",
+   "paths": 96,
+   "nodes": 1701,
+   "traced_svg_kb": 91.1,
+   "axis_pct": 26.3,
+   "colours_major": 1,
+   "ink_pct": 3.0,
+   "ocr_found": [
+    "1",
+    "61",
+    "12",
+    "40",
+    "16",
+    "22",
+    "20",
+    "25"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.143,
+   "width": 512,
+   "height": 512,
+   "segments": 19,
+   "edge_sparse_pct": 94.1,
+   "low_contrast_normalised": false
+  }
+ ]
+}

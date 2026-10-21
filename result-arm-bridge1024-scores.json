@@ -1,0 +1,44 @@
+{
+ "n": 1,
+ "paths_median": 122,
+ "nodes_median": 2578,
+ "axis_median": 86.5,
+ "colours_median": 1,
+ "ocr_exact_mean": 0.75,
+ "ocr_full_match": 0,
+ "segments_median": 37,
+ "edge_sparse_median": 97.8,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "net-2-server",
+   "kind": "topology",
+   "sample": "net-2-server-s1234",
+   "paths": 122,
+   "nodes": 2578,
+   "traced_svg_kb": 153.4,
+   "axis_pct": 86.5,
+   "colours_major": 1,
+   "ink_pct": 1.5,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 1024,
+   "height": 1024,
+   "segments": 37,
+   "edge_sparse_pct": 97.8,
+   "low_contrast_normalised": false
+  }
+ ]
+}

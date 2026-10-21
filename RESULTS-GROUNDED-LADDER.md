@@ -3,25 +3,38 @@
 
 Two experiments from the v2 write-up, run on one unchanged target each.
 
-## Experiment 1 — density ladder on network-1
+## Experiment 1 — density ladder on network-1 (replicated, 3 seeds)
 
 Same drawing every time (SERVER linked to PC1/PC2/PC3, four labels); only the amount of that drawing stated as
-numbers changes. Numeric tokens counted with a regex over the prompt text.
+numbers changes. **The first pass used one seed per rung and its curve was noise** — see the retraction below.
+These are three seeds each (1234, 5678, 9012), exact-token matching, at both canvas sizes.
 
-All label counts below are **exact-token** (the matcher was corrected the same day - see `RESULTS-GROUNDED-ARM.md`).
-network-1's labels are whole alphanumeric tokens, so these rungs are unaffected by the correction.
-
-| variant | numbers | labels read | paths | axis | what the reader saw |
+| variant | numbers | 512 px per-seed | 512 mean | 1024 px per-seed | 1024 mean |
 |---|---|---|---|---|---|
-| `net-1-words` | 6 | **2/4** | 166 | 87.8 | SERVER, PC, PC, PC3 |
-| `net-2-server` | 10 | **3/4** | 122 | 86.5 | SERVER, PC1, PC1, PC3 |
-| `net-3-pcs` | 18 | 2/4 | 187 | 86.7 | SERVER, PC1, PC1, **PC..33, 39910, 11210, 772, 700** |
-| `net-4-everything` | 34 | **1/4** | 124 | 84.4 | SERVER, **P811, P822, 71/23** |
+| `net-1-words` | 6 | 3, 2, 3 | 2.67/4 | 2, 1, 2 | 1.67/4 |
+| `net-2-server` | 10 | 3, 3, 2 | 2.67/4 | 3, 4, 3 | **3.33/4** |
+| `net-3-pcs` | 18 | 1, 3, 2 | 2.00/4 | 2, 3, 3 | 2.67/4 |
+| `net-4-everything` | 34 | 3, 1, 4 | 2.67/4 | 1, 1, 2 | **1.33/4** |
 
-Prediction was "flat to ~8 numbers, sharp fall after 16". **Half right**: there is no plateau — legibility peaks at
-**10** numbers and then falls (3 -> 2 -> 1). The sharp part is confirmed, and the leakage is now visible at **18**
-numbers: the reader sees `39910`, `11210`, `772`, `700` printed on the drawing. By 34 the labels themselves are
-corrupted (`P811`, `P822`), not merely crowded.
+Overall: **512 px 0.625**, **1024 px 0.562** (12 images each).
+
+What this supports, and what it does not:
+
+- **At 512 px there is no density trend at all.** The four rungs sit inside one band (2.00-2.67) and the 34-number
+  rung scored [3, 1, 4] — the widest seed spread of the whole experiment.
+- **At 1024 px one comparison survives**: the 34-number rung (1.33, range 1-2) is worse than the 10-number rung
+  (3.33, range 3-4) with non-overlapping seed ranges. That is a *top-rung penalty against the best rung*, not a
+  curve. The shape is non-monotone (6 numbers scores *lowest* at 1.67), so "peak at 10" is not established either.
+- n = 3 per rung. Nothing here survives a serious test at that size; it is enough to show the effect is not large
+  and is not a clean function of the count.
+
+### Retraction: the single-seed curve
+
+The first pass ran one seed and produced 6 -> 2/4, 10 -> **3/4**, 18 -> 2/4, 34 -> **1/4** at 1024, and the same
+prompts at 512 produced 3, 3, **1**, **3** — non-monotone within the same four rungs. That is what a noise-dominated
+series looks like. The claims written from it — "the knee is at 10", "leakage at 18", "collapse by 34" — are
+**withdrawn**. What remains true is qualitative and was seen repeatedly at both sizes: **at 18 and 34 numbers the
+prompt's coordinates appear on the drawing as labels** (`39910`, `11210`, `772`, `700`, `122701`, `PC1703`).
 
 ## Experiment 2 — identity binding on tree-1
 
