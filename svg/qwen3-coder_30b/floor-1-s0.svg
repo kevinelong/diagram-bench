@@ -1,0 +1,35 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+  
+  <!-- Walls -->
+  <rect x="64" y="64" width="960" height="32" fill="black"/>
+  <rect x="64" y="64" width="32" height="960" fill="black"/>
+  <rect x="928" y="64" width="32" height="960" fill="black"/>
+  <rect x="64" y="928" width="960" height="32" fill="black"/>
+  
+  <!-- Internal walls -->
+  <rect x="320" y="64" width="32" height="320" fill="black"/>
+  <rect x="640" y="64" width="32" height="320" fill="black"/>
+  <rect x="320" y="416" width="32" height="320" fill="black"/>
+  <rect x="640" y="416" width="32" height="320" fill="black"/>
+  <rect x="320" y="768" width="32" height="224" fill="black"/>
+  <rect x="640" y="768" width="32" height="224" fill="black"/>
+  
+  <!-- Door gaps -->
+  <rect x="192" y="64" width="32" height="32" fill="white"/>
+  <rect x="352" y="64" width="32" height="32" fill="white"/>
+  <rect x="672" y="64" width="32" height="32" fill="white"/>
+  <rect x="832" y="64" width="32" height="32" fill="white"/>
+  <rect x="352" y="416" width="32" height="32" fill="white"/>
+  <rect x="672" y="416" width="32" height="32" fill="white"/>
+  <rect x="352" y="768" width="32" height="32" fill="white"/>
+  <rect x="672" y="768" width="32" height="32" fill="white"/>
+  
+  <!-- Labels -->
+  <text x="128" y="192" font-family="Arial" font-size="32" fill="black">BEDROOM</text>
+  <text x="448" y="192" font-family="Arial" font-size="32" fill="black">BEDROOM</text>
+  <text x="768" y="192" font-family="Arial" font-size="32" fill="black">BATH</text>
+  <text x="128" y="544" font-family="Arial" font-size="32" fill="black">KITCHEN</text>
+  <text x="448" y="544" font-family="Arial" font-size="32" fill="black">LIVING</text>
+  <text x="768" y="544" font-family="Arial" font-size="32" fill="black">BATH</text>
+</svg>

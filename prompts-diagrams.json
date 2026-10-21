@@ -1,0 +1,125 @@
+{
+  "declared": "2026-10-20",
+  "frozen": true,
+  "purpose": "2D diagrams that must auto-trace to vector: charts, blueprints, floor plans, schematics. Score = text legibility (OCR exact) + trace fidelity + path economy + axis-alignment + flatness.",
+  "note": "Frozen before any model runs. Every prompt demands sharp geometry and exact strings, because those are what a tracer can read.",
+  "params": {
+    "width": 1024,
+    "height": 1024,
+    "seeds": [1234, 5678],
+    "style_suffix": ", flat 2D vector style, blueprint design, line art, sharp edges, solid monochrome fills, white background, high contrast, no gradients, no shadows, no 3D",
+    "images_per_arm": 20
+  },
+  "prompts": [
+    {
+      "id": "flow-1",
+      "kind": "flowchart",
+      "prompt": "A vertical flowchart with four rectangular boxes labelled START, VALIDATE, STORE, DONE, connected top to bottom by straight arrows",
+      "labels": ["START", "VALIDATE", "STORE", "DONE"],
+      "structure": [
+        {"id": "f1a", "q": "Are there exactly four rectangular boxes?"},
+        {"id": "f1b", "q": "Are the boxes connected in a single vertical chain by arrows?"},
+        {"id": "f1c", "q": "Are all lines horizontal or vertical, with no diagonals?"}
+      ]
+    },
+    {
+      "id": "floor-1",
+      "kind": "floor plan",
+      "prompt": "A simple two-bedroom apartment floor plan seen from above, thick black walls on a white background, rooms labelled BEDROOM, BEDROOM, BATH, KITCHEN, LIVING, one door gap in each room wall",
+      "labels": ["BEDROOM", "BATH", "KITCHEN", "LIVING"],
+      "structure": [
+        {"id": "p1a", "q": "Are the walls drawn as thick straight black lines forming closed rooms?"},
+        {"id": "p1b", "q": "Are the walls all axis-aligned (horizontal or vertical)?"},
+        {"id": "p1c", "q": "Is every room labelled with text?"}
+      ]
+    },
+    {
+      "id": "bar-1",
+      "kind": "chart",
+      "prompt": "A bar chart with four vertical bars of increasing height, an axis line at the bottom, and the labels Q1, Q2, Q3, Q4 under the bars",
+      "labels": ["Q1", "Q2", "Q3", "Q4"],
+      "structure": [
+        {"id": "b1a", "q": "Are there exactly four bars?"},
+        {"id": "b1b", "q": "Do the bars increase in height from left to right?"},
+        {"id": "b1c", "q": "Are the bars filled with a single solid colour and no gradient?"}
+      ]
+    },
+    {
+      "id": "org-1",
+      "kind": "org chart",
+      "prompt": "A three-level org chart: one box labelled CEO at the top, two boxes labelled CTO and CFO below it, connected by right-angle connector lines",
+      "labels": ["CEO", "CTO", "CFO"],
+      "structure": [
+        {"id": "o1a", "q": "Are there exactly three boxes?"},
+        {"id": "o1b", "q": "Is the CEO box above the other two?"},
+        {"id": "o1c", "q": "Are the connectors right-angle lines rather than curves?"}
+      ]
+    },
+    {
+      "id": "circuit-1",
+      "kind": "schematic",
+      "prompt": "A simple RC low-pass filter schematic: a resistor symbol labelled R1 in series, a capacitor symbol labelled C1 to ground, input and output terminals, drawn as thin black lines on white",
+      "labels": ["R1", "C1"],
+      "structure": [
+        {"id": "c1a", "q": "Is a resistor symbol drawn as a zigzag or rectangle in series?"},
+        {"id": "c1b", "q": "Is a capacitor symbol drawn as two parallel plates?"},
+        {"id": "c1c", "q": "Are the connecting wires straight horizontal or vertical lines?"}
+      ]
+    },
+    {
+      "id": "blueprint-1",
+      "kind": "blueprint",
+      "prompt": "A front-view engineering blueprint of a rectangular metal bracket with two circular mounting holes, dimension lines with arrows, drawn as white lines on a solid dark blue background",
+      "labels": ["A", "B"],
+      "structure": [
+        {"id": "u1a", "q": "Is the drawing white on a solid dark blue background?"},
+        {"id": "u1b", "q": "Are there exactly two circular holes?"},
+        {"id": "u1c", "q": "Are dimension lines with arrows present?"}
+      ]
+    },
+    {
+      "id": "tree-1",
+      "kind": "hierarchy",
+      "prompt": "A binary tree diagram with seven circular nodes arranged in three levels, root at the top, connected by straight lines, each node labelled with a number from 1 to 7",
+      "labels": ["1", "2", "3", "4", "5", "6", "7"],
+      "structure": [
+        {"id": "t1a", "q": "Are there exactly seven circular nodes?"},
+        {"id": "t1b", "q": "Are they arranged in three levels with one node at the top?"},
+        {"id": "t1c", "q": "Are the connectors straight lines?"}
+      ]
+    },
+    {
+      "id": "timeline-1",
+      "kind": "timeline",
+      "prompt": "A horizontal timeline with a single straight axis line, four tick marks, and the year labels 2020, 2021, 2022, 2023 spaced evenly below the ticks",
+      "labels": ["2020", "2021", "2022", "2023"],
+      "structure": [
+        {"id": "l1a", "q": "Is the axis a single straight horizontal line?"},
+        {"id": "l1b", "q": "Are there exactly four tick marks?"},
+        {"id": "l1c", "q": "Are the labels evenly spaced?"}
+      ]
+    },
+    {
+      "id": "network-1",
+      "kind": "network",
+      "prompt": "A network topology diagram with one central rectangle labelled SERVER connected by straight lines to three smaller rectangles labelled PC1, PC2, PC3, white background, black outlines",
+      "labels": ["SERVER", "PC1", "PC2", "PC3"],
+      "structure": [
+        {"id": "w1a", "q": "Is one box central and the other three around it?"},
+        {"id": "w1b", "q": "Are there three connecting lines?"},
+        {"id": "w1c", "q": "Are all boxes rectangular with plain outlines?"}
+      ]
+    },
+    {
+      "id": "process-1",
+      "kind": "swimlane",
+      "prompt": "A two-lane swimlane process diagram, lanes labelled REQUESTER and APPROVER as header rows, with three rounded boxes and straight arrows crossing from the top lane to the bottom lane once",
+      "labels": ["REQUESTER", "APPROVER"],
+      "structure": [
+        {"id": "s1a", "q": "Are there exactly two horizontal lanes?"},
+        {"id": "s1b", "q": "Does exactly one arrow cross between the lanes?"},
+        {"id": "s1c", "q": "Are the lane dividers straight horizontal lines?"}
+      ]
+    }
+  ]
+}

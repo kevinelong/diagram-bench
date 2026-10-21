@@ -1,0 +1,91 @@
+<svg viewBox="0 0 1040 600" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="1040" height="600" fill="#ffffff"/>
+
+  <!-- grid -->
+  <g stroke="#d1d5db" stroke-width="1" opacity="0.6">
+    <line x1="120" y1="74" x2="1000" y2="74"/>
+    <line x1="120" y1="146" x2="1000" y2="146"/>
+    <line x1="120" y1="218" x2="1000" y2="218"/>
+    <line x1="120" y1="290" x2="1000" y2="290"/>
+    <line x1="120" y1="362" x2="1000" y2="362"/>
+  </g>
+
+  <!-- axes -->
+  <g stroke="#1a1a1a" stroke-width="1.5">
+    <line x1="120" y1="60" x2="120" y2="470"/>
+    <line x1="120" y1="470" x2="1000" y2="470"/>
+  </g>
+
+  <!-- y ticks -->
+  <g fill="#6b7280" font-size="12" text-anchor="end">
+    <text x="110" y="78">1.00</text>
+    <text x="110" y="150">0.90</text>
+    <text x="110" y="222">0.80</text>
+    <text x="110" y="294">0.70</text>
+    <text x="110" y="366">0.60</text>
+    <text x="110" y="438">0.50</text>
+  </g>
+
+  <!-- x ticks -->
+  <g fill="#6b7280" font-size="12" text-anchor="middle">
+    <text x="151" y="490">2 s</text>
+    <text x="422" y="490">5 s</text>
+    <text x="630" y="490">10 s</text>
+    <text x="790" y="490">20 s</text>
+  </g>
+
+  <text x="560" y="524" fill="#6b7280" font-size="13" text-anchor="middle">median wall time per diagram (seconds, log scale) &#8594; slower</text>
+  <text x="26" y="265" fill="#6b7280" font-size="13" text-anchor="middle" transform="rotate(-90 26 265)">label accuracy (OCR exact) &#8594; better</text>
+
+  <!-- pareto frontier -->
+  <polyline points="151,228 428,210 705,164 747,74" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="6 5" opacity="0.6"/>
+  <text x="196" y="196" fill="#2563eb" font-size="11">Pareto frontier</text>
+
+  <!-- Z-Image 512 -->
+  <rect x="143" y="220" width="16" height="16" rx="3" fill="none" stroke="#059669" stroke-width="2.5"/>
+  <text x="168" y="212" fill="#1a1a1a" font-size="13" font-weight="600">Z-Image 512&#178;</text>
+  <text x="168" y="228" fill="#6b7280" font-size="11">0.786 &#183; 2.0 s &#183; 9.3 GB VRAM, floor cleared</text>
+
+  <!-- Z-Image 1024 -->
+  <circle cx="428" cy="210" r="8" fill="#059669"/>
+  <text x="448" y="236" fill="#1a1a1a" font-size="13" font-weight="600">Z-Image 1024&#178;</text>
+  <text x="448" y="252" fill="#6b7280" font-size="11">0.811 &#183; 5.1 s &#183; structure 62 % &#183; didactic 60 %</text>
+  <text x="448" y="266" fill="#dc2626" font-size="11">479 MiB free &#8212; under the 512 MiB floor</text>
+
+  <!-- klein -->
+  <circle cx="422" cy="352" r="8" fill="#d97706"/>
+  <text x="440" y="348" fill="#1a1a1a" font-size="13" font-weight="600">klein-4B 1024&#178;</text>
+  <text x="440" y="364" fill="#6b7280" font-size="11">0.614 &#183; 5.0 s &#183; structure 62 % &#183; didactic 47 %</text>
+
+  <!-- schnell -->
+  <circle cx="630" cy="397" r="8" fill="#dc2626"/>
+  <text x="648" y="392" fill="#1a1a1a" font-size="13" font-weight="600">FLUX.1-schnell 1024&#178;</text>
+  <text x="648" y="408" fill="#6b7280" font-size="11">0.552 &#183; 10.1 s &#183; 115 traced paths &#183; didactic 45 %</text>
+
+  <!-- dev 512 -->
+  <rect x="653" y="279" width="16" height="16" rx="3" fill="none" stroke="#0891b2" stroke-width="2.5"/>
+  <text x="678" y="272" fill="#1a1a1a" font-size="13" font-weight="600">FLUX.1-dev 512&#178;</text>
+  <text x="678" y="288" fill="#6b7280" font-size="11">0.704 &#183; 11.2 s &#183; blurred at 1024&#178;, unscored there</text>
+
+  <!-- method B -->
+  <circle cx="705" cy="164" r="8" fill="#7c3aed"/>
+  <g text-anchor="end">
+    <text x="694" y="140" fill="#1a1a1a" font-size="13" font-weight="600">method B &#183; code &#8594; SVG 1024&#178;</text>
+    <text x="694" y="156" fill="#6b7280" font-size="11">0.876 OCR &#183; 13 s &#183; source labels 19/19 &#183; structure 77 % &#183; didactic 79 %</text>
+  </g>
+
+  <!-- method E -->
+  <path d="M747 66 l9 9 -9 9 -9 -9 z" fill="#2563eb"/>
+  <text x="742" y="38" fill="#1a1a1a" font-size="13" font-weight="600" text-anchor="end">method E &#183; code &#8594; KiCad (n=3)</text>
+  <text x="1000" y="54" fill="#6b7280" font-size="11" text-anchor="end">labels 3/3 in source &#183; ~15 s per script &#183; axis 100 % &#183; true vector, no tracing</text>
+  <line x1="756" y1="72" x2="880" y2="60" stroke="#6b7280" stroke-width="1" stroke-dasharray="2 3" opacity="0.8"/>
+
+  <!-- legend -->
+  <g font-size="11" fill="#6b7280">
+    <circle cx="128" cy="570" r="5" fill="#6b7280"/>
+    <text x="140" y="574">1024&#178; corpus</text>
+    <rect x="252" y="565" width="10" height="10" rx="2" fill="none" stroke="#6b7280" stroke-width="2"/>
+    <text x="270" y="574">512&#178; variant &#8212; resolution changes both axes</text>
+    <text x="560" y="574">y = OCR exact on a render; B and E also report source-level labels</text>
+  </g>
+</svg>

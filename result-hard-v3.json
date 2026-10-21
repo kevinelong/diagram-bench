@@ -1,0 +1,33 @@
+{
+ "gen_s": 53.2,
+ "playfield": [
+  0.0,
+  0.0,
+  100.0,
+  50.0
+ ],
+ "corners_hit": 4,
+ "sides_hit": 2,
+ "balls": 16,
+ "balls_inside": 16,
+ "long_diamonds_found": [],
+ "diamond_at_50": false,
+ "apex_on_foot_spot": true,
+ "rack_rows_detected": 6,
+ "back_row_parallel": false,
+ "cue_axis_deg": 0.0,
+ "label_CUE": true,
+ "pass": {
+  "playfield_2to1": true,
+  "corners": true,
+  "sides": true,
+  "diamonds_long": false,
+  "rack_apex": true,
+  "rack_rows": true,
+  "back_row_parallel": false,
+  "balls_inside": true,
+  "cue_angle": false,
+  "label_CUE": true
+ },
+ "score": "7/10"
+}

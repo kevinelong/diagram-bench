@@ -1,0 +1,20 @@
+[
+ {
+  "file": "pooltable-kit-lines-try1.svg",
+  "angled_cue_deg": -11.3,
+  "length_px": 204,
+  "pass": true
+ },
+ {
+  "file": "pooltable-kit-lines-try2.svg",
+  "angled_cue_deg": 30.0,
+  "length_px": 200,
+  "pass": true
+ },
+ {
+  "file": "pooltable-kit-lines-try3.svg",
+  "angled_cue_deg": 30.0,
+  "length_px": 500,
+  "pass": true
+ }
+]

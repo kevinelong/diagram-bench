@@ -1,0 +1,20 @@
+{
+ "arm": "B",
+ "model": "qwen3-coder:30b",
+ "samplesPerPrompt": 1,
+ "corpus": "prompts-diagrams.json",
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": 0,
+   "ok": true,
+   "note": "parsed",
+   "seconds": 49.5,
+   "svg_bytes": 1197,
+   "reply_chars": 1197,
+   "eval_count": 491,
+   "file": "flow-1-s0.svg"
+  }
+ ]
+}

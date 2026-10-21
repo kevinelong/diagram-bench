@@ -1,0 +1,422 @@
+{
+ "arm": "B-repair",
+ "model": "qwen3-coder:30b",
+ "documents": 19,
+ "labels_before": 68,
+ "labels_after": 70,
+ "labels_total": 70,
+ "documents_missing_a_label": 1,
+ "documents_full_after": 19,
+ "rows": [
+  {
+   "id": "bar-1",
+   "sample": "bar-1-s0",
+   "labels": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "found_before": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "bar-1",
+   "sample": "bar-1-s1",
+   "labels": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "found_before": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "blueprint-1",
+   "sample": "blueprint-1-s1",
+   "labels": [
+    "A",
+    "B"
+   ],
+   "found_before": [
+    "100",
+    "100",
+    "100",
+    "100",
+    "40",
+    "40",
+    "500",
+    "500"
+   ],
+   "missing_before": [
+    "A",
+    "B"
+   ],
+   "repaired": true,
+   "repair_s": 54.6,
+   "found_after": [
+    "100",
+    "100",
+    "100",
+    "100",
+    "40",
+    "40",
+    "500",
+    "500",
+    "A",
+    "B"
+   ],
+   "missing_after": [],
+   "labels_ok_before": 0,
+   "labels_ok_after": 2
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s0",
+   "labels": [
+    "R1",
+    "C1"
+   ],
+   "found_before": [
+    "R1",
+    "C1",
+    "Input",
+    "Output"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 2,
+   "labels_ok_after": 2
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s1",
+   "labels": [
+    "R1",
+    "C1"
+   ],
+   "found_before": [
+    "R1",
+    "C1",
+    "IN",
+    "OUT"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 2,
+   "labels_ok_after": 2
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s0",
+   "labels": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "found_before": [
+    "BEDROOM",
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING",
+    "BATH"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s1",
+   "labels": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "found_before": [
+    "BEDROOM",
+    "LIVING",
+    "BEDROOM",
+    "KITCHEN",
+    "BATH"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "flow-1",
+   "sample": "flow-1-s0",
+   "labels": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "found_before": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "flow-1",
+   "sample": "flow-1-s1",
+   "labels": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "found_before": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "network-1",
+   "sample": "network-1-s0",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "found_before": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "network-1",
+   "sample": "network-1-s1",
+   "labels": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "found_before": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "org-1",
+   "sample": "org-1-s0",
+   "labels": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "found_before": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 3,
+   "labels_ok_after": 3
+  },
+  {
+   "id": "org-1",
+   "sample": "org-1-s1",
+   "labels": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "found_before": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 3,
+   "labels_ok_after": 3
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s0",
+   "labels": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "found_before": [
+    "REQUESTER",
+    "APPROVER",
+    "Submit Request",
+    "Review Request",
+    "Approve/Reject",
+    "Send to Approver",
+    "Process Request",
+    "Final Decision"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 2,
+   "labels_ok_after": 2
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s1",
+   "labels": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "found_before": [
+    "REQUESTER",
+    "APPROVER",
+    "Submit Request",
+    "Review Request",
+    "Approve/Reject",
+    "Request Received",
+    "Decision Made",
+    "Notification Sent"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 2,
+   "labels_ok_after": 2
+  },
+  {
+   "id": "timeline-1",
+   "sample": "timeline-1-s0",
+   "labels": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "found_before": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "timeline-1",
+   "sample": "timeline-1-s1",
+   "labels": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "found_before": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 4,
+   "labels_ok_after": 4
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s0",
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "found_before": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 7,
+   "labels_ok_after": 7
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s1",
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "found_before": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "missing_before": [],
+   "repaired": false,
+   "labels_ok_before": 7,
+   "labels_ok_after": 7
+  }
+ ]
+}

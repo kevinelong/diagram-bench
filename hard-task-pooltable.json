@@ -1,0 +1,15 @@
+{
+ "declared": "2026-10-21",
+ "frozen": true,
+ "note": "A harder task than the frozen diagram corpus: real geometry (2:1 table), counting (16 balls in a 5-row triangle), orientation (angled cue stick) and one label. Frozen before any arm ran on it. Kept separate from prompts-diagrams.json so the main corpus stays comparable.",
+ "prompt": "A top-down view of a pool table drawn as flat 2D line art: one rectangle exactly twice as wide as it is tall, with six pockets drawn as small circles (one in each corner and one at the middle of each long side), fifteen object balls arranged in a tight triangle rack near the right end (rows of 1, 2, 3, 4 and 5), a white cue ball to the left of the rack, and a cue stick drawn as a long thin rectangle resting at the left end and angled toward the cue ball. Label the cue ball CUE. Flat 2D vector style, blueprint design, line art, sharp edges, solid monochrome fills, white background, high contrast, no gradients, no shadows, no 3D.",
+ "checks": [
+  {"id": "aspect", "q": "is the table rectangle about twice as wide as it is tall", "measure": "outer_rect_aspect", "expect_between": [1.7, 2.3]},
+  {"id": "pockets", "q": "six pockets as small circles", "measure": "small_circles", "expect_at_least": 6, "expect_at_most": 10},
+  {"id": "balls", "q": "sixteen balls in total (cue plus fifteen)", "measure": "filled_circles", "expect_at_least": 14, "expect_at_most": 18},
+  {"id": "rack_rows", "q": "a triangular rack, 5 rows", "measure": "ball_rows", "expect_at_least": 4},
+  {"id": "cue_stick", "q": "an angled cue stick near the left end", "measure": "angled_long_shape", "expect_at_least": 1},
+  {"id": "label", "q": "the text CUE appears", "measure": "text_contains", "values": ["CUE"]}
+ ],
+ "why_hard": "It forces the model to hold a proportion, a count, a triangular arrangement and an angle at once, and every one of those is machine-checkable from the SVG - unlike a scene prompt."
+}

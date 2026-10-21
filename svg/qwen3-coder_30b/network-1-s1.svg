@@ -1,0 +1,13 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="464" y="464" width="96" height="96" fill="white" stroke="black" stroke-width="2"/>
+  <text x="512" y="528" font-family="Arial" font-size="28" text-anchor="middle" alignment-baseline="middle">SERVER</text>
+  <rect x="160" y="240" width="96" height="48" fill="white" stroke="black" stroke-width="2"/>
+  <text x="208" y="264" font-family="Arial" font-size="28" text-anchor="middle" alignment-baseline="middle">PC1</text>
+  <rect x="160" y="480" width="96" height="48" fill="white" stroke="black" stroke-width="2"/>
+  <text x="208" y="504" font-family="Arial" font-size="28" text-anchor="middle" alignment-baseline="middle">PC2</text>
+  <rect x="160" y="720" width="96" height="48" fill="white" stroke="black" stroke-width="2"/>
+  <text x="208" y="744" font-family="Arial" font-size="28" text-anchor="middle" alignment-baseline="middle">PC3</text>
+  <line x1="256" y1="264" x2="464" y2="512" stroke="black" stroke-width="2"/>
+  <line x1="256" y1="504" x2="464" y2="512" stroke="black" stroke-width="2"/>
+  <line x1="256" y1="744" x2="464" y2="512" stroke="black" stroke-width="2"/>
+</svg>

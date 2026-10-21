@@ -1,0 +1,41 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" fill="white" stroke="black" stroke-width="4">
+  <!-- Pool table -->
+  <rect x="0" y="0" width="1024" height="512" />
+
+  <!-- Pockets -->
+  <circle cx="0" cy="0" r="20"/>
+  <circle cx="1024" cy="0" r="20"/>
+  <circle cx="0" cy="512" r="20"/>
+  <circle cx="1024" cy="512" r="20"/>
+  <circle cx="512" cy="0" r="20"/>
+  <circle cx="512" cy="512" r="20"/>
+
+  <!-- Object balls in triangle rack -->
+  <!-- Row 1 (1 ball) -->
+  <circle cx="800" cy="256" r="16"/>
+  <!-- Row 2 (2 balls) -->
+  <circle cx="768" cy="224" r="16"/>
+  <circle cx="768" cy="288" r="16"/>
+  <!-- Row 3 (3 balls) -->
+  <circle cx="736" cy="192" r="16"/>
+  <circle cx="736" cy="256" r="16"/>
+  <circle cx="736" cy="320" r="16"/>
+  <!-- Row 4 (4 balls) -->
+  <circle cx="704" cy="160" r="16"/>
+  <circle cx="704" cy="224" r="16"/>
+  <circle cx="704" cy="288" r="16"/>
+  <circle cx="704" cy="352" r="16"/>
+  <!-- Row 5 (5 balls) -->
+  <circle cx="672" cy="128" r="16"/>
+  <circle cx="672" cy="192" r="16"/>
+  <circle cx="672" cy="256" r="16"/>
+  <circle cx="672" cy="320" r="16"/>
+  <circle cx="672" cy="384" r="16"/>
+
+  <!-- Cue ball -->
+  <circle cx="600" cy="256" r="16"/>
+  <text x="590" y="250" font-family="Arial" font-size="28">CUE</text>
+
+  <!-- Cue stick -->
+  <rect x="400" y="240" width="150" height="16" transform="rotate(-15 400 240)" />
+</svg>

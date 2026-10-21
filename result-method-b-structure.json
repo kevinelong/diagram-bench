@@ -1,0 +1,199 @@
+{
+ "arm": "B-structure",
+ "model": "qwen3-coder:30b",
+ "documents": 19,
+ "structurally_correct_before": 19,
+ "structurally_correct_after": 19,
+ "rows": [
+  {
+   "id": "bar-1",
+   "sample": "bar-1-s0",
+   "before": {
+    "boxes": 4,
+    "connectors": 1,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "bar-1",
+   "sample": "bar-1-s1",
+   "before": {
+    "boxes": 4,
+    "connectors": 1,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "blueprint-1",
+   "sample": "blueprint-1-s1",
+   "before": {
+    "boxes": 1,
+    "connectors": 27,
+    "labels": 8
+   },
+   "problems_before": []
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s0",
+   "before": {
+    "boxes": 0,
+    "connectors": 9,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s1",
+   "before": {
+    "boxes": 0,
+    "connectors": 13,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s0",
+   "before": {
+    "boxes": 18,
+    "connectors": 0,
+    "labels": 6
+   },
+   "problems_before": []
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s1",
+   "before": {
+    "boxes": 15,
+    "connectors": 0,
+    "labels": 5
+   },
+   "problems_before": []
+  },
+  {
+   "id": "flow-1",
+   "sample": "flow-1-s0",
+   "before": {
+    "boxes": 4,
+    "connectors": 3,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "flow-1",
+   "sample": "flow-1-s1",
+   "before": {
+    "boxes": 4,
+    "connectors": 3,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "network-1",
+   "sample": "network-1-s0",
+   "before": {
+    "boxes": 4,
+    "connectors": 3,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "network-1",
+   "sample": "network-1-s1",
+   "before": {
+    "boxes": 4,
+    "connectors": 3,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "org-1",
+   "sample": "org-1-s0",
+   "before": {
+    "boxes": 3,
+    "connectors": 3,
+    "labels": 3
+   },
+   "problems_before": []
+  },
+  {
+   "id": "org-1",
+   "sample": "org-1-s1",
+   "before": {
+    "boxes": 3,
+    "connectors": 3,
+    "labels": 3
+   },
+   "problems_before": []
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s0",
+   "before": {
+    "boxes": 12,
+    "connectors": 8,
+    "labels": 8
+   },
+   "problems_before": []
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s1",
+   "before": {
+    "boxes": 12,
+    "connectors": 8,
+    "labels": 8
+   },
+   "problems_before": []
+  },
+  {
+   "id": "timeline-1",
+   "sample": "timeline-1-s0",
+   "before": {
+    "boxes": 0,
+    "connectors": 5,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "timeline-1",
+   "sample": "timeline-1-s1",
+   "before": {
+    "boxes": 0,
+    "connectors": 5,
+    "labels": 4
+   },
+   "problems_before": []
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s0",
+   "before": {
+    "boxes": 0,
+    "connectors": 6,
+    "labels": 7
+   },
+   "problems_before": []
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s1",
+   "before": {
+    "boxes": 0,
+    "connectors": 6,
+    "labels": 7
+   },
+   "problems_before": []
+  }
+ ]
+}

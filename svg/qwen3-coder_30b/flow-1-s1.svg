@@ -1,0 +1,13 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="400" y="50" width="224" height="80" fill="white" stroke="black" stroke-width="2"/>
+  <text x="512" y="105" font-family="Arial" font-size="32" text-anchor="middle" alignment-baseline="middle">START</text>
+  <line x1="512" y1="130" x2="512" y2="200" stroke="black" stroke-width="2"/>
+  <rect x="400" y="200" width="224" height="80" fill="white" stroke="black" stroke-width="2"/>
+  <text x="512" y="255" font-family="Arial" font-size="32" text-anchor="middle" alignment-baseline="middle">VALIDATE</text>
+  <line x1="512" y1="280" x2="512" y2="350" stroke="black" stroke-width="2"/>
+  <rect x="400" y="350" width="224" height="80" fill="white" stroke="black" stroke-width="2"/>
+  <text x="512" y="405" font-family="Arial" font-size="32" text-anchor="middle" alignment-baseline="middle">STORE</text>
+  <line x1="512" y1="430" x2="512" y2="500" stroke="black" stroke-width="2"/>
+  <rect x="400" y="500" width="224" height="80" fill="white" stroke="black" stroke-width="2"/>
+  <text x="512" y="555" font-family="Arial" font-size="32" text-anchor="middle" alignment-baseline="middle">DONE</text>
+</svg>

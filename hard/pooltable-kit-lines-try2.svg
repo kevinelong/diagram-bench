@@ -1,0 +1,53 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" stroke="black" fill="none" stroke-width="2">
+  <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+  
+  <!-- Table outline -->
+  <line x1="100" y1="100" x2="924" y2="100"/>
+  <line x1="924" y1="100" x2="924" y2="924"/>
+  <line x1="924" y1="924" x2="100" y2="924"/>
+  <line x1="100" y1="924" x2="100" y2="100"/>
+
+  <!-- Pockets -->
+  <circle cx="100" cy="100" r="20"/>
+  <circle cx="924" cy="100" r="20"/>
+  <circle cx="924" cy="924" r="20"/>
+  <circle cx="100" cy="924" r="20"/>
+  <circle cx="512" cy="100" r="20"/>
+  <circle cx="512" cy="924" r="20"/>
+
+  <!-- Object balls in triangle rack -->
+  <!-- Row 1 -->
+  <circle cx="780" cy="462" r="15"/>
+  <!-- Row 2 -->
+  <circle cx="760" cy="442" r="15"/>
+  <circle cx="800" cy="442" r="15"/>
+  <!-- Row 3 -->
+  <circle cx="740" cy="422" r="15"/>
+  <circle cx="780" cy="422" r="15"/>
+  <circle cx="820" cy="422" r="15"/>
+  <!-- Row 4 -->
+  <circle cx="720" cy="402" r="15"/>
+  <circle cx="760" cy="402" r="15"/>
+  <circle cx="800" cy="402" r="15"/>
+  <circle cx="840" cy="402" r="15"/>
+  <!-- Row 5 -->
+  <circle cx="700" cy="382" r="15"/>
+  <circle cx="740" cy="382" r="15"/>
+  <circle cx="780" cy="382" r="15"/>
+  <circle cx="820" cy="382" r="15"/>
+  <circle cx="860" cy="382" r="15"/>
+
+  <!-- Cue ball -->
+  <circle cx="600" cy="462" r="15"/>
+  <text x="615" y="470" font-family="Arial" font-size="28">CUE</text>
+
+  <!-- Cue stick -->
+  <!-- Compute angle: from (600, 462) to (780, 462) is horizontal, but we want a slight angle.
+       Let's use 30 degrees for the cue stick pointing toward the cue ball.
+       line_at(600, 462, 30, 200) -->
+  <!-- Compute end point: x2 = 600 + 200 * cos(30°), y2 = 462 + 200 * sin(30°) -->
+  <!-- cos(30°) = sqrt(3)/2 ≈ 0.866, sin(30°) = 0.5 -->
+  <!-- x2 = 600 + 200 * 0.866 = 600 + 173.2 = 773.2 -->
+  <!-- y2 = 462 + 200 * 0.5 = 462 + 100 = 562 -->
+  <line x1="600" y1="462" x2="773.2" y2="562"/>
+</svg>

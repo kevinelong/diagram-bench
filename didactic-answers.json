@@ -1,0 +1,57 @@
+{
+ "declared": "2026-10-20",
+ "frozen": true,
+ "note": "Reference answers frozen BEFORE any image was scored with them. Questions were frozen earlier in didactic-questions.json; these answers are facts about the diagram each prompt specifies, not about any model output. A grader answer counts as correct if it matches the reference semantically (the scorer compares meaning, and the comparison prompt is pinned in vlm_score.py).",
+ "answers": {
+  "flow-1": [
+   "START",
+   "STORE",
+   "four"
+  ],
+  "floor-1": [
+   "two",
+   "the living room (accept: any adjacent room named in the plan)",
+   "yes"
+  ],
+  "bar-1": [
+   "Q4",
+   "increase",
+   "four"
+  ],
+  "org-1": [
+   "CEO",
+   "CTO and CFO",
+   "three"
+  ],
+  "circuit-1": [
+   "R1 (the resistor)",
+   "to ground",
+   "low-pass"
+  ],
+  "blueprint-1": [
+   "two",
+   "a dimension of the bracket (accept: width/height/length of a labelled edge)",
+   "yes"
+  ],
+  "tree-1": [
+   "the top node (the root, label 1)",
+   "three",
+   "two"
+  ],
+  "timeline-1": [
+   "2020",
+   "2023",
+   "four"
+  ],
+  "network-1": [
+   "SERVER",
+   "three",
+   "yes"
+  ],
+  "process-1": [
+   "two",
+   "REQUESTER",
+   "yes"
+  ]
+ }
+}

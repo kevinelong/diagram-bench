@@ -1,0 +1,250 @@
+{
+ "n": 10,
+ "paths_median": 50.5,
+ "nodes_median": 811.0,
+ "axis_median": 100.0,
+ "colours_median": 2.0,
+ "ocr_exact_mean": 0.613,
+ "ocr_full_match": 1,
+ "rows": [
+  {
+   "id": "bar-1",
+   "kind": "chart",
+   "sample": "bar-1-s1234",
+   "paths": 10,
+   "nodes": 104,
+   "traced_svg_kb": 4.2,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 27.9,
+   "ocr_found": [
+    "Q1",
+    "Q2",
+    "4"
+   ],
+   "required": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5
+  },
+  {
+   "id": "blueprint-1",
+   "kind": "blueprint",
+   "sample": "blueprint-1-s1234",
+   "paths": 80,
+   "nodes": 982,
+   "traced_svg_kb": 40.8,
+   "axis_pct": 100.0,
+   "colours_major": 4,
+   "ink_pct": 50.6,
+   "ocr_found": [
+    "O"
+   ],
+   "required": [
+    "A",
+    "B"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0
+  },
+  {
+   "id": "circuit-1",
+   "kind": "schematic",
+   "sample": "circuit-1-s1234",
+   "paths": 10,
+   "nodes": 166,
+   "traced_svg_kb": 7.4,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 3.0,
+   "ocr_found": [
+    "R",
+    "R",
+    "C1"
+   ],
+   "required": [
+    "R1",
+    "C1"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.5
+  },
+  {
+   "id": "floor-1",
+   "kind": "floor plan",
+   "sample": "floor-1-s1234",
+   "paths": 115,
+   "nodes": 1288,
+   "traced_svg_kb": 45.7,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 15.1,
+   "ocr_found": [
+    "BEDREOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "required": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75
+  },
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s1234",
+   "paths": 40,
+   "nodes": 931,
+   "traced_svg_kb": 55.0,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 7.8,
+   "ocr_found": [
+    "START",
+    "VAILDATE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75
+  },
+  {
+   "id": "network-1",
+   "kind": "network",
+   "sample": "network-1-s1234",
+   "paths": 61,
+   "nodes": 691,
+   "traced_svg_kb": 27.1,
+   "axis_pct": 91.5,
+   "colours_major": 2,
+   "ink_pct": 5.6,
+   "ocr_found": [
+    "PC1",
+    "SERVER",
+    "SERVER",
+    "PC1",
+    "PC3",
+    "PC2"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "org-1",
+   "kind": "org chart",
+   "sample": "org-1-s1234",
+   "paths": 15,
+   "nodes": 195,
+   "traced_svg_kb": 8.1,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 8.6,
+   "ocr_found": [
+    "CEO",
+    "CTOCF"
+   ],
+   "required": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.667
+  },
+  {
+   "id": "process-1",
+   "kind": "swimlane",
+   "sample": "process-1-s1234",
+   "paths": 87,
+   "nodes": 1698,
+   "traced_svg_kb": 95.8,
+   "axis_pct": 90.5,
+   "colours_major": 3,
+   "ink_pct": 12.3,
+   "ocr_found": [
+    "RESJUEESTER APPROVER"
+   ],
+   "required": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "ocr_hits": 1,
+   "ocr_exact": 0.5
+  },
+  {
+   "id": "timeline-1",
+   "kind": "timeline",
+   "sample": "timeline-1-s1234",
+   "paths": 28,
+   "nodes": 301,
+   "traced_svg_kb": 13.2,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 2.5,
+   "ocr_found": [
+    "2020",
+    "2021",
+    "2023"
+   ],
+   "required": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75
+  },
+  {
+   "id": "tree-1",
+   "kind": "hierarchy",
+   "sample": "tree-1-s1234",
+   "paths": 110,
+   "nodes": 1223,
+   "traced_svg_kb": 63.8,
+   "axis_pct": 42.9,
+   "colours_major": 2,
+   "ink_pct": 9.2,
+   "ocr_found": [
+    "1",
+    "12",
+    "3",
+    "7",
+    "3",
+    "4"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 5,
+   "ocr_exact": 0.714
+  }
+ ]
+}

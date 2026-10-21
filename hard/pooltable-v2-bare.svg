@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Table -->
+  <rect x="0" y="0" width="800" height="400" fill="white" stroke="black" stroke-width="4"/>
+  
+  <!-- Pockets -->
+  <circle cx="0" cy="0" r="15" fill="white" stroke="black" stroke-width="2"/>
+  <circle cx="800" cy="0" r="15" fill="white" stroke="black" stroke-width="2"/>
+  <circle cx="0" cy="400" r="15" fill="white" stroke="black" stroke-width="2"/>
+  <circle cx="800" cy="400" r="15" fill="white" stroke="black" stroke-width="2"/>
+  <circle cx="400" cy="0" r="15" fill="white" stroke="black" stroke-width="2"/>
+  <circle cx="400" cy="400" r="15" fill="white" stroke="black" stroke-width="2"/>
+  
+  <!-- Object balls (triangle) -->
+  <!-- Row 1 (apex) -->
+  <circle cx="600" cy="200" r="12" fill="black" stroke="black" stroke-width="1"/>
+  
+  <!-- Row 2 -->
+  <circle cx="640" cy="180" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="640" cy="220" r="12" fill="black" stroke="black" stroke-width="1"/>
+  
+  <!-- Row 3 -->
+  <circle cx="680" cy="160" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="680" cy="200" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="680" cy="240" r="12" fill="black" stroke="black" stroke-width="1"/>
+  
+  <!-- Row 4 -->
+  <circle cx="720" cy="140" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="720" cy="180" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="720" cy="220" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="720" cy="260" r="12" fill="black" stroke="black" stroke-width="1"/>
+  
+  <!-- Row 5 -->
+  <circle cx="760" cy="120" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="760" cy="160" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="760" cy="200" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="760" cy="240" r="12" fill="black" stroke="black" stroke-width="1"/>
+  <circle cx="760" cy="280" r="12" fill="black" stroke="black" stroke-width="1"/>
+  
+  <!-- Cue ball -->
+  <circle cx="400" cy="200" r="12" fill="white" stroke="black" stroke-width="2"/>
+  <text x="390" y="195" font-family="Arial" font-size="12" fill="black">CUE</text>
+  
+  <!-- Cue stick -->
+  <line x1="400" y1="200" x2="300" y2="150" stroke="black" stroke-width="3"/>
+  <line x1="300" y1="150" x2="280" y2="140" stroke="black" stroke-width="3"/>
+</svg>

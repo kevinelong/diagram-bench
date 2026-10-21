@@ -1,0 +1,254 @@
+{
+ "n": 10,
+ "paths_median": 62.5,
+ "nodes_median": 983.0,
+ "axis_median": 100.0,
+ "colours_median": 1.0,
+ "ocr_exact_mean": 0.749,
+ "ocr_full_match": 5,
+ "rows": [
+  {
+   "id": "bar-1",
+   "kind": "chart",
+   "sample": "bar-1-s1234",
+   "paths": 20,
+   "nodes": 269,
+   "traced_svg_kb": 10.2,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 3.5,
+   "ocr_found": [
+    "Q1",
+    "Q4"
+   ],
+   "required": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.5
+  },
+  {
+   "id": "blueprint-1",
+   "kind": "blueprint",
+   "sample": "blueprint-1-s1234",
+   "paths": 120,
+   "nodes": 1470,
+   "traced_svg_kb": 75.2,
+   "axis_pct": 100.0,
+   "colours_major": 3,
+   "ink_pct": 3.0,
+   "ocr_found": [
+    "150",
+    "005"
+   ],
+   "required": [
+    "A",
+    "B"
+   ],
+   "ocr_hits": 0,
+   "ocr_exact": 0.0
+  },
+  {
+   "id": "circuit-1",
+   "kind": "schematic",
+   "sample": "circuit-1-s1234",
+   "paths": 36,
+   "nodes": 374,
+   "traced_svg_kb": 12.8,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 1.8,
+   "ocr_found": [
+    "R1",
+    "FR1",
+    "CC\u2014\u2192C1"
+   ],
+   "required": [
+    "R1",
+    "C1"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "floor-1",
+   "kind": "floor plan",
+   "sample": "floor-1-s1234",
+   "paths": 155,
+   "nodes": 1963,
+   "traced_svg_kb": 83.6,
+   "axis_pct": 98.6,
+   "colours_major": 3,
+   "ink_pct": 14.1,
+   "ocr_found": [
+    "BEDROOM",
+    "SATH",
+    "KITCHEN",
+    "LIVING",
+    "BATH"
+   ],
+   "required": [
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s1234",
+   "paths": 115,
+   "nodes": 1249,
+   "traced_svg_kb": 46.7,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 5.0,
+   "ocr_found": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "network-1",
+   "kind": "network",
+   "sample": "network-1-s1234",
+   "paths": 54,
+   "nodes": 687,
+   "traced_svg_kb": 30.6,
+   "axis_pct": 76.0,
+   "colours_major": 1,
+   "ink_pct": 2.1,
+   "ocr_found": [
+    "SERVER",
+    "PC1",
+    "PC3"
+   ],
+   "required": [
+    "SERVER",
+    "PC1",
+    "PC2",
+    "PC3"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75
+  },
+  {
+   "id": "org-1",
+   "kind": "org chart",
+   "sample": "org-1-s1234",
+   "paths": 52,
+   "nodes": 1319,
+   "traced_svg_kb": 79.3,
+   "axis_pct": 82.1,
+   "colours_major": 2,
+   "ink_pct": 2.4,
+   "ocr_found": [
+    "CEF",
+    "CTO",
+    "CFO"
+   ],
+   "required": [
+    "CEO",
+    "CTO",
+    "CFO"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 0.667
+  },
+  {
+   "id": "process-1",
+   "kind": "swimlane",
+   "sample": "process-1-s1234",
+   "paths": 82,
+   "nodes": 1127,
+   "traced_svg_kb": 53.4,
+   "axis_pct": 95.5,
+   "colours_major": 1,
+   "ink_pct": 2.1,
+   "ocr_found": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "required": [
+    "REQUESTER",
+    "APPROVER"
+   ],
+   "ocr_hits": 2,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "timeline-1",
+   "kind": "timeline",
+   "sample": "timeline-1-s1234",
+   "paths": 47,
+   "nodes": 502,
+   "traced_svg_kb": 18.1,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 0.9,
+   "ocr_found": [
+    "2020",
+    "2021",
+    "2021",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "required": [
+    "2020",
+    "2021",
+    "2022",
+    "2023"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 1.0
+  },
+  {
+   "id": "tree-1",
+   "kind": "hierarchy",
+   "sample": "tree-1-s1234",
+   "paths": 71,
+   "nodes": 839,
+   "traced_svg_kb": 41.2,
+   "axis_pct": 100.0,
+   "colours_major": 1,
+   "ink_pct": 2.2,
+   "ocr_found": [
+    "8",
+    "1",
+    "2",
+    "3",
+    "0",
+    "5"
+   ],
+   "required": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7"
+   ],
+   "ocr_hits": 4,
+   "ocr_exact": 0.571
+  }
+ ]
+}

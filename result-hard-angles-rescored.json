@@ -1,0 +1,22 @@
+[
+ {
+  "config": "1 bare spec",
+  "cue_deg": null,
+  "angled": false
+ },
+ {
+  "config": "2 + worked example",
+  "cue_deg": null,
+  "angled": false
+ },
+ {
+  "config": "3 + kit line_at",
+  "cue_deg": -15.0,
+  "angled": true
+ },
+ {
+  "config": "4 + rects banned (try2)",
+  "cue_deg": 30.0,
+  "angled": true
+ }
+]

@@ -1,0 +1,51 @@
+{
+ "arm": "B-topology",
+ "model": "qwen3-coder:30b",
+ "rows": [
+  {
+   "id": "blueprint-1",
+   "sample": "blueprint-1-s1",
+   "arrowhead_markers": 0,
+   "pass": false,
+   "rule": "at least one detectable arrowhead for the dimension lines"
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s0",
+   "rooms_enclosed": 1,
+   "wall_bands": 10,
+   "pass": false,
+   "rule": "at least 4 rooms enclosed by walls"
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s1",
+   "rooms_enclosed": 3,
+   "wall_bands": 10,
+   "pass": false,
+   "rule": "at least 4 rooms enclosed by walls"
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s0",
+   "crossing": {
+    "spanning": 1,
+    "downward": 1
+   },
+   "pass": true,
+   "rule": "at least one connector spans downwards"
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s1",
+   "crossing": {
+    "spanning": 2,
+    "downward": 2
+   },
+   "pass": true,
+   "rule": "at least one connector spans downwards"
+  }
+ ],
+ "passed": 2,
+ "documents": 5
+}

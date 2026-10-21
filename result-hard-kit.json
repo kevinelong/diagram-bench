@@ -1,0 +1,88 @@
+{
+ "model": "qwen3-coder:30b",
+ "attempts": [
+  {
+   "attempt": 1,
+   "ok": false,
+   "failed": [
+    "cue_angle"
+   ],
+   "measured": {
+    "aspect": [
+     true,
+     2.0
+    ],
+    "containment": [
+     true,
+     "22/22 inside"
+    ],
+    "cue_angle": [
+     false,
+     0.0
+    ],
+    "label_CUE": [
+     true,
+     "CUE"
+    ]
+   },
+   "gen_s": 12.9,
+   "file": "pooltable-kit-try1.svg"
+  },
+  {
+   "attempt": 2,
+   "ok": false,
+   "failed": [
+    "containment",
+    "cue_angle"
+   ],
+   "measured": {
+    "aspect": [
+     true,
+     2.0
+    ],
+    "containment": [
+     false,
+     "20/22 inside"
+    ],
+    "cue_angle": [
+     false,
+     0.0
+    ],
+    "label_CUE": [
+     true,
+     "CUE"
+    ]
+   },
+   "gen_s": 13.6,
+   "file": "pooltable-kit-try2.svg"
+  },
+  {
+   "attempt": 3,
+   "ok": false,
+   "failed": [
+    "containment",
+    "cue_angle"
+   ],
+   "measured": {
+    "aspect": [
+     true,
+     2.0
+    ],
+    "containment": [
+     false,
+     "20/22 inside"
+    ],
+    "cue_angle": [
+     false,
+     0.0
+    ],
+    "label_CUE": [
+     true,
+     "CUE"
+    ]
+   },
+   "gen_s": 14.0,
+   "file": "pooltable-kit-try3.svg"
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" fill="white"/>
+  <line x1="128" y1="512" x2="384" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="512" x2="384" y2="768" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="768" x2="640" y2="768" stroke="black" stroke-width="4"/>
+  <line x1="640" y1="768" x2="640" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="640" y1="512" x2="896" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="512" x2="384" y2="448" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="448" x2="448" y2="448" stroke="black" stroke-width="4"/>
+  <line x1="448" y1="448" x2="448" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="448" y1="512" x2="512" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="512" y1="512" x2="512" y2="448" stroke="black" stroke-width="4"/>
+  <line x1="512" y1="448" x2="576" y2="448" stroke="black" stroke-width="4"/>
+  <line x1="576" y1="448" x2="576" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="576" y1="512" x2="640" y2="512" stroke="black" stroke-width="4"/>
+  <text x="144" y="480" font-family="Arial" font-size="32" fill="black">R1</text>
+  <text x="656" y="480" font-family="Arial" font-size="32" fill="black">C1</text>
+  <text x="40" y="520" font-family="Arial" font-size="32" fill="black">IN</text>
+  <text x="920" y="520" font-family="Arial" font-size="32" fill="black">OUT</text>
+</svg>

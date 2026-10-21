@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+render/
+hard/*.png
+kicad/*.kicad_prl
+*.tmp

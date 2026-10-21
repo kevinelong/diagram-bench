@@ -1,0 +1,16 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" fill="white"/>
+  <line x1="128" y1="512" x2="384" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="512" x2="640" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="640" y1="512" x2="900" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="512" x2="384" y2="768" stroke="black" stroke-width="4"/>
+  <line x1="380" y1="768" x2="388" y2="768" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="768" x2="384" y2="896" stroke="black" stroke-width="4"/>
+  <line x1="384" y1="896" x2="440" y2="896" stroke="black" stroke-width="4"/>
+  <line x1="440" y1="896" x2="440" y2="768" stroke="black" stroke-width="4"/>
+  <line x1="440" y1="768" x2="384" y2="768" stroke="black" stroke-width="4"/>
+  <text x="140" y="490" font-family="Arial" font-size="32" fill="black">R1</text>
+  <text x="650" y="490" font-family="Arial" font-size="32" fill="black">C1</text>
+  <text x="40" y="520" font-family="Arial" font-size="32" fill="black">Input</text>
+  <text x="870" y="520" font-family="Arial" font-size="32" fill="black">Output</text>
+</svg>

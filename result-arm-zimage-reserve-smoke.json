@@ -1,0 +1,28 @@
+{
+ "arm": "A-zimage-turbo-nvfp4",
+ "steps": 9,
+ "cfg": 1.0,
+ "seeds": [
+  1234
+ ],
+ "sampler": "euler/simple",
+ "resolution": 1024,
+ "idle_vram_mib": 1243,
+ "determinism": null,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "seed": 1234,
+   "steps": 9,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 14.2,
+   "vram_peak_mib": 11210,
+   "status": "success",
+   "error": null,
+   "file": "flow-1-s1234.png",
+   "sha256": "997526ade2fa37d99cd0e8e16a425f12198a1151dc451072235d86e31152d926"
+  }
+ ]
+}

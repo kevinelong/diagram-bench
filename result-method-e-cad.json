@@ -1,0 +1,28 @@
+{
+ "arm": "E-kicad",
+ "model": "qwen3-coder:30b",
+ "rows": [
+  {
+   "id": "hard-task",
+   "attempts": [
+    {
+     "attempt": 1,
+     "gen_s": 42.1,
+     "run_s": 0.2,
+     "exit": 1,
+     "board_written": false,
+     "error": "AttributeError: 'NoneType' object has no attribute 'Add'"
+    },
+    {
+     "attempt": 2,
+     "gen_s": 40.2,
+     "run_s": 0.2,
+     "exit": 1,
+     "board_written": false,
+     "error": "AttributeError: 'NoneType' object has no attribute 'Add'"
+    }
+   ],
+   "script_clean": false
+  }
+ ]
+}

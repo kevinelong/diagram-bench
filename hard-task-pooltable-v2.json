@@ -1,0 +1,17 @@
+{
+ "declared": "2026-10-21",
+ "supersedes": "hard-task-pooltable.json (v1 under-specified the rack: no foot spot, no apex direction, no back-row alignment)",
+ "frozen": true,
+ "note": "v1 let the model choose rack orientation and pocket placement. v2 states the table geometry that a real pool table forces, and adds four GEOMETRIC checks, because v1 only counted circles and passed a table whose side pockets were on the short rails.",
+ "prompt": "A top-down view of a pool table drawn as flat 2D line art. The table is one rectangle exactly twice as wide as it is tall, long axis horizontal. Draw six pockets as small circles: one in each corner and one at the exact midpoint of each LONG rail (top and bottom), with none on the short rails. The foot end is the RIGHT short rail and the head end is the LEFT. Draw fifteen object balls as a tight triangle at the foot end: a single ball as the apex sitting on the foot spot and pointing toward the head end (left), widening to five rows toward the right, with the back row of five parallel to and set just inside the right short rail. Draw a white cue ball on the long centre line, one quarter of the table length from the left short rail. Draw a cue stick whose tip is near the cue ball and whose butt runs toward the left short rail, at about 30 degrees to the long axis. Label the cue ball CUE. Flat 2D vector style, blueprint design, line art, sharp edges, solid monochrome fills, white background, high contrast, no gradients, no shadows, no 3D.",
+ "checks": [
+  {"id": "table_2to1", "q": "the table is twice as wide as tall", "rule": "aspect in 1.8-2.2"},
+  {"id": "pockets_long_rail", "q": "two side pockets at the midpoints of the LONG rails", "rule": "long-rail edge circles == 2, short-rail edge circles == 2 (the corners), corner pockets == 4"},
+  {"id": "rack_apex", "q": "the apex ball is on the centre line pointing at the head end", "rule": "leftmost interior ball within 6% of table height of the centre line"},
+  {"id": "rack_back_row", "q": "the back row of five runs parallel to the foot rail", "rule": "the five rightmost balls share an x within one ball diameter"},
+  {"id": "cue_ball_spot", "q": "the cue ball sits on the centre line at the head quarter", "rule": "leftmost interior ball x within 8% of one quarter of the table length, y within 6% of centre"},
+  {"id": "cue_angle", "q": "the cue is angled about 30 degrees to the long axis", "rule": "20-45 degrees, counting a rotated rect as rotated"},
+  {"id": "label_CUE", "q": "the text CUE appears", "rule": "text contains CUE"}
+ ],
+ "why_v2": "Real tables force all of this. v1 left orientation and placement open, and every model tested chose a valid-looking but wrong table."
+}

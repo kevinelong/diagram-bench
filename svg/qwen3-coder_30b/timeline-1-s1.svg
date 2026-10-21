@@ -1,0 +1,12 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+  <line x1="100" y1="512" x2="924" y2="512" stroke="black" stroke-width="4"/>
+  <line x1="100" y1="480" x2="100" y2="544" stroke="black" stroke-width="4"/>
+  <line x1="340" y1="480" x2="340" y2="544" stroke="black" stroke-width="4"/>
+  <line x1="580" y1="480" x2="580" y2="544" stroke="black" stroke-width="4"/>
+  <line x1="820" y1="480" x2="820" y2="544" stroke="black" stroke-width="4"/>
+  <text x="60" y="600" font-family="Arial" font-size="32" fill="black">2020</text>
+  <text x="300" y="600" font-family="Arial" font-size="32" fill="black">2021</text>
+  <text x="540" y="600" font-family="Arial" font-size="32" fill="black">2022</text>
+  <text x="780" y="600" font-family="Arial" font-size="32" fill="black">2023</text>
+</svg>

@@ -1,0 +1,230 @@
+{
+ "arm": "B-shape",
+ "model": "qwen3-coder:30b",
+ "documents": 9,
+ "documents_passing_all_shape_checks": 8,
+ "rows": [
+  {
+   "id": "process-1",
+   "sample": "process-1-s0",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "lanes",
+     "ok": true,
+     "note": "",
+     "q": "two or more horizontal lines spanning at least 60% of the width"
+    },
+    {
+     "check": "headers",
+     "ok": true,
+     "note": "",
+     "q": "both lane headers present"
+    },
+    {
+     "check": "crossing",
+     "ok": true,
+     "note": "",
+     "q": "a connector spanning the detected lane divider"
+    }
+   ]
+  },
+  {
+   "id": "process-1",
+   "sample": "process-1-s1",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "lanes",
+     "ok": true,
+     "note": "",
+     "q": "two or more horizontal lines spanning at least 60% of the width"
+    },
+    {
+     "check": "headers",
+     "ok": true,
+     "note": "",
+     "q": "both lane headers present"
+    },
+    {
+     "check": "crossing",
+     "ok": true,
+     "note": "",
+     "q": "a connector spanning the detected lane divider"
+    }
+   ]
+  },
+  {
+   "id": "blueprint-1",
+   "sample": "blueprint-1-s1",
+   "passed": 2,
+   "total": 3,
+   "results": [
+    {
+     "check": "holes",
+     "ok": true,
+     "note": "",
+     "q": "exactly two circular holes"
+    },
+    {
+     "check": "dark_ground",
+     "ok": true,
+     "note": "",
+     "q": "a large dark background rectangle"
+    },
+    {
+     "check": "labels",
+     "ok": false,
+     "note": "failed",
+     "q": "labels A and B present"
+    }
+   ]
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s0",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "wires",
+     "ok": true,
+     "note": "",
+     "q": "at least four wire segments"
+    },
+    {
+     "check": "capacitor",
+     "ok": true,
+     "note": "",
+     "q": "two parallel plates within 8% of the width (the capacitor)"
+    },
+    {
+     "check": "labels",
+     "ok": true,
+     "note": "",
+     "q": "both component labels present"
+    }
+   ]
+  },
+  {
+   "id": "circuit-1",
+   "sample": "circuit-1-s1",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "wires",
+     "ok": true,
+     "note": "",
+     "q": "at least four wire segments"
+    },
+    {
+     "check": "capacitor",
+     "ok": true,
+     "note": "",
+     "q": "two parallel plates within 8% of the width (the capacitor)"
+    },
+    {
+     "check": "labels",
+     "ok": true,
+     "note": "",
+     "q": "both component labels present"
+    }
+   ]
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s0",
+   "passed": 2,
+   "total": 2,
+   "results": [
+    {
+     "check": "walls",
+     "ok": true,
+     "note": "",
+     "q": "at least two narrow dark-filled rectangles (walls drawn as solid bands)"
+    },
+    {
+     "check": "rooms",
+     "ok": true,
+     "note": "",
+     "q": "all four room names present"
+    }
+   ]
+  },
+  {
+   "id": "floor-1",
+   "sample": "floor-1-s1",
+   "passed": 2,
+   "total": 2,
+   "results": [
+    {
+     "check": "walls",
+     "ok": true,
+     "note": "",
+     "q": "at least two narrow dark-filled rectangles (walls drawn as solid bands)"
+    },
+    {
+     "check": "rooms",
+     "ok": true,
+     "note": "",
+     "q": "all four room names present"
+    }
+   ]
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s0",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "nodes",
+     "ok": true,
+     "note": "",
+     "q": "exactly seven circular nodes"
+    },
+    {
+     "check": "edges",
+     "ok": true,
+     "note": "",
+     "q": "exactly six edges"
+    },
+    {
+     "check": "root",
+     "ok": true,
+     "note": "",
+     "q": "exactly one node above all others"
+    }
+   ]
+  },
+  {
+   "id": "tree-1",
+   "sample": "tree-1-s1",
+   "passed": 3,
+   "total": 3,
+   "results": [
+    {
+     "check": "nodes",
+     "ok": true,
+     "note": "",
+     "q": "exactly seven circular nodes"
+    },
+    {
+     "check": "edges",
+     "ok": true,
+     "note": "",
+     "q": "exactly six edges"
+    },
+    {
+     "check": "root",
+     "ok": true,
+     "note": "",
+     "q": "exactly one node above all others"
+    }
+   ]
+  }
+ ]
+}

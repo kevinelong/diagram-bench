@@ -1,0 +1,53 @@
+{
+ "declared": "2026-10-20 (revision 2)",
+ "frozen": true,
+ "note": "REVISION after the first pass proved the v1 expectations wrong, not the drawings. v1 used exact counts for every field; measured reality shows the prompt language does not pin them: a two-bedroom plan legitimately has FIVE text elements (BEDROOM twice), a timeline's four tick marks ARE connectors, a right-angle org connector is three segments, and a swimlane's lane rectangles inflate any box count. So: exact where the prompt truly fixes a count, 'at least' where it fixes a minimum, and unconstrained where the geometry is free-form. Any future revision must be recorded the same way - an instrument that calls correct output wrong is a broken instrument, not a strict one.",
+ "expect": {
+  "flow-1": {
+   "boxes_exact": 4,
+   "connectors_exact": 3,
+   "labels_exact": 4
+  },
+  "floor-1": {
+   "labels_at_least": 4,
+   "label_multiplicity": {
+    "BEDROOM": 2,
+    "BATH": 1,
+    "KITCHEN": 1,
+    "LIVING": 1
+   }
+  },
+  "bar-1": {
+   "boxes_exact": 4,
+   "labels_at_least": 4
+  },
+  "org-1": {
+   "boxes_exact": 3,
+   "connectors_at_least": 2,
+   "labels_exact": 3
+  },
+  "circuit-1": {
+   "labels_at_least": 2
+  },
+  "blueprint-1": {
+   "labels_at_least": 2
+  },
+  "tree-1": {
+   "connectors_at_least": 6,
+   "labels_at_least": 7
+  },
+  "timeline-1": {
+   "connectors_at_least": 1,
+   "labels_at_least": 4
+  },
+  "network-1": {
+   "boxes_exact": 4,
+   "connectors_exact": 3,
+   "labels_exact": 4
+  },
+  "process-1": {
+   "labels_at_least": 2
+  }
+ },
+ "revision_3_note": "Closure was the wrong criterion: the floor-1 prompt explicitly asks for 'one door gap in each room wall', so a flood-fill that counts enclosed regions contradicts the specification it is checking (measured 1 and 3 'enclosed' rooms on drawings that are actually correct in that respect). Replaced by a label-multiplicity check, which catches the error the drawing does make: BATH appears twice."
+}

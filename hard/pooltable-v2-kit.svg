@@ -1,0 +1,48 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+  <g stroke="black" fill="none" stroke-width="4">
+    <!-- Pool table -->
+    <rect x="0" y="0" width="1024" height="512"/>
+    
+    <!-- Pockets -->
+    <circle cx="0" cy="0" r="20"/>
+    <circle cx="1024" cy="0" r="20"/>
+    <circle cx="0" cy="512" r="20"/>
+    <circle cx="1024" cy="512" r="20"/>
+    <circle cx="512" cy="0" r="20"/>
+    <circle cx="512" cy="512" r="20"/>
+    
+    <!-- Object balls (triangle) -->
+    <!-- Row 1: 1 ball -->
+    <circle cx="896" cy="256" r="16"/>
+    
+    <!-- Row 2: 2 balls -->
+    <circle cx="848" cy="224" r="16"/>
+    <circle cx="848" cy="288" r="16"/>
+    
+    <!-- Row 3: 3 balls -->
+    <circle cx="800" cy="192" r="16"/>
+    <circle cx="800" cy="256" r="16"/>
+    <circle cx="800" cy="320" r="16"/>
+    
+    <!-- Row 4: 4 balls -->
+    <circle cx="752" cy="160" r="16"/>
+    <circle cx="752" cy="224" r="16"/>
+    <circle cx="752" cy="288" r="16"/>
+    <circle cx="752" cy="352" r="16"/>
+    
+    <!-- Row 5: 5 balls -->
+    <circle cx="704" cy="128" r="16"/>
+    <circle cx="704" cy="192" r="16"/>
+    <circle cx="704" cy="256" r="16"/>
+    <circle cx="704" cy="320" r="16"/>
+    <circle cx="704" cy="384" r="16"/>
+    
+    <!-- Cue ball -->
+    <circle cx="256" cy="256" r="16"/>
+    <text x="240" y="240" font-size="20" fill="black">CUE</text>
+    
+    <!-- Cue stick -->
+    <line x1="256" y1="256" x2="128" y2="192" stroke="black" stroke-width="4"/>
+  </g>
+</svg>

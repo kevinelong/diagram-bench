@@ -1,0 +1,12 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+  <line x1="100" y1="900" x2="900" y2="900" stroke="black" stroke-width="4"/>
+  <rect x="150" y="600" width="80" height="300" fill="black"/>
+  <rect x="270" y="450" width="80" height="450" fill="black"/>
+  <rect x="390" y="300" width="80" height="600" fill="black"/>
+  <rect x="510" y="150" width="80" height="750" fill="black"/>
+  <text x="170" y="940" font-family="Arial" font-size="32" fill="black">Q1</text>
+  <text x="290" y="940" font-family="Arial" font-size="32" fill="black">Q2</text>
+  <text x="410" y="940" font-family="Arial" font-size="32" fill="black">Q3</text>
+  <text x="530" y="940" font-family="Arial" font-size="32" fill="black">Q4</text>
+</svg>

@@ -1,0 +1,181 @@
+{
+ "scorer": "deepseek-flash",
+ "api": "deepseek",
+ "images": 2,
+ "questions": 12,
+ "elapsed_s": 8.2,
+ "structure_pass_total": 5,
+ "structure_checks_total": 6,
+ "didactic_pass_total": 5,
+ "didactic_questions_total": 6,
+ "per_image": {
+  "flow-1-s1234.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "flow-1-d1": {
+     "reader": "START",
+     "reference": "START",
+     "correct": 1
+    },
+    "flow-1-d2": {
+     "reader": "STORE",
+     "reference": "STORE",
+     "correct": 1
+    },
+    "flow-1-d3": {
+     "reader": "Four steps",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "flow-1-s5678.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "flow-1-d1": {
+     "reader": "",
+     "reference": "START",
+     "correct": 0
+    },
+    "flow-1-d2": {
+     "reader": "STORE",
+     "reference": "STORE",
+     "correct": 1
+    },
+    "flow-1-d3": {
+     "reader": "Four steps",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 2,
+   "didactic_total": 3
+  }
+ },
+ "raw": [
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1a",
+   "q": "Are there exactly four rectangular boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1b",
+   "q": "Are the boxes connected in a single vertical chain by arrows?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1c",
+   "q": "Are all lines horizontal or vertical, with no diagonals?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d1",
+   "q": "What is the first step in the flow shown?",
+   "reader_answer": "START",
+   "reference": "START",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d2",
+   "q": "What happens immediately after VALIDATE?",
+   "reader_answer": "STORE",
+   "reference": "STORE",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1234.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d3",
+   "q": "How many steps does the flow have in total?",
+   "reader_answer": "Four steps",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1a",
+   "q": "Are there exactly four rectangular boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1b",
+   "q": "Are the boxes connected in a single vertical chain by arrows?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1c",
+   "q": "Are all lines horizontal or vertical, with no diagonals?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d1",
+   "q": "What is the first step in the flow shown?",
+   "reader_answer": "",
+   "reference": "START",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d2",
+   "q": "What happens immediately after VALIDATE?",
+   "reader_answer": "STORE",
+   "reference": "STORE",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s5678.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d3",
+   "q": "How many steps does the flow have in total?",
+   "reader_answer": "Four steps",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  }
+ ]
+}

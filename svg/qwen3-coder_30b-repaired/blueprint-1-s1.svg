@@ -1,0 +1,43 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1024" height="1024" fill="#001f4d"/>
+  <rect x="200" y="150" width="624" height="724" fill="white"/>
+  <circle cx="300" cy="250" r="40" fill="white" stroke="white" stroke-width="4"/>
+  <circle cx="800" cy="250" r="40" fill="white" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="150" x2="824" y2="150" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="874" x2="824" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="150" x2="200" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="824" y1="150" x2="824" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="210" x2="300" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="210" x2="800" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="800" y2="250" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="150" x2="240" y2="150" stroke="white" stroke-width="4"/>
+  <line x1="824" y1="150" x2="784" y2="150" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="874" x2="240" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="824" y1="874" x2="784" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="300" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="800" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="300" y2="210" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="800" y2="210" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="340" y2="250" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="760" y2="250" stroke="white" stroke-width="4"/>
+  <text x="250" y="130" font-family="Arial" font-size="32" fill="white">100</text>
+  <text x="770" y="130" font-family="Arial" font-size="32" fill="white">100</text>
+  <text x="250" y="890" font-family="Arial" font-size="32" fill="white">100</text>
+  <text x="770" y="890" font-family="Arial" font-size="32" fill="white">100</text>
+  <text x="340" y="240" font-family="Arial" font-size="32" fill="white">40</text>
+  <text x="760" y="240" font-family="Arial" font-size="32" fill="white">40</text>
+  <text x="500" y="240" font-family="Arial" font-size="32" fill="white">500</text>
+  <text x="500" y="890" font-family="Arial" font-size="32" fill="white">500</text>
+  <line x1="200" y1="150" x2="240" y2="150" stroke="white" stroke-width="4"/>
+  <line x1="824" y1="150" x2="784" y2="150" stroke="white" stroke-width="4"/>
+  <line x1="200" y1="874" x2="240" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="824" y1="874" x2="784" y2="874" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="300" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="800" y2="290" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="300" y2="210" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="800" y2="210" stroke="white" stroke-width="4"/>
+  <line x1="300" y1="250" x2="340" y2="250" stroke="white" stroke-width="4"/>
+  <line x1="800" y1="250" x2="760" y2="250" stroke="white" stroke-width="4"/>
+  <text x="200" y="140" font-family="Arial" font-size="28" fill="black">A</text>
+  <text x="820" y="140" font-family="Arial" font-size="28" fill="black">B</text>
+</svg>

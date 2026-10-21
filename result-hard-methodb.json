@@ -1,0 +1,18 @@
+{
+ "svg_bytes": 2355,
+ "rects": 2,
+ "circles": 22,
+ "small_circles": 0,
+ "filled_circles": 0,
+ "ball_sized": 22,
+ "ball_rows": 7,
+ "angled_shapes": 0,
+ "outer_aspect": 2.0,
+ "text_values": [
+  "CUE"
+ ],
+ "has_CUE": true,
+ "model": "qwen3-coder:30b",
+ "gen_s": 59.3,
+ "task": "A top-down view of a pool table drawn as flat 2D line art: o"
+}

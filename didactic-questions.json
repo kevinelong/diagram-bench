@@ -1,0 +1,57 @@
+{
+ "declared": "2026-10-20",
+ "frozen": true,
+ "note": "Frozen before any run. Questions a learner should answer from the image alone; asked of a vision model that sees only the image. Score = correct / 3.",
+ "questions": {
+  "flow-1": [
+   "What is the first step in the flow shown?",
+   "What happens immediately after VALIDATE?",
+   "How many steps does the flow have in total?"
+  ],
+  "floor-1": [
+   "How many bedrooms does the plan show?",
+   "Which room is next to the kitchen?",
+   "Are the rooms separated by walls?"
+  ],
+  "bar-1": [
+   "Which labelled bar is the tallest?",
+   "Does the value increase or decrease from left to right?",
+   "How many bars are shown?"
+  ],
+  "org-1": [
+   "Who is at the top of the chart?",
+   "Who reports to the top box?",
+   "How many levels does the chart show?"
+  ],
+  "circuit-1": [
+   "Which component is in series with the signal path?",
+   "Where does the capacitor connect?",
+   "Is this a low-pass or high-pass filter?"
+  ],
+  "blueprint-1": [
+   "How many mounting holes are dimensioned?",
+   "Which dimension is labelled A?",
+   "Is the part shown in front view?"
+  ],
+  "tree-1": [
+   "Which node is the root?",
+   "How many levels does the tree have?",
+   "How many children does the root have?"
+  ],
+  "timeline-1": [
+   "Which year comes first on the timeline?",
+   "Which year comes last?",
+   "How many years are marked?"
+  ],
+  "network-1": [
+   "Which node is central?",
+   "How many clients connect to it?",
+   "Are the connections direct lines?"
+  ],
+  "process-1": [
+   "How many lanes does the diagram have?",
+   "Which lane starts the process?",
+   "Does the flow cross between lanes?"
+  ]
+ }
+}

@@ -1,0 +1,142 @@
+{
+ "declared": "2026-10-20 (revision 2)",
+ "frozen": true,
+ "note": "REVISION after v1 flagged 7 of 9 documents and inspection showed the proxies - not the drawings - were wrong. Calibrated against how the model actually draws: (1) a cross-lane connector must be measured against the DETECTED lane divider, not the canvas midline - process-1's crossing runs y=220->440 while the divider is near y=360; (2) capacitor plates were 56 px apart against an arbitrary 40 px limit, so the limit becomes 0.08 x width; (3) floor-plan walls are FILLED dark rects 32 px thick, with no stroke-width at all, so 'thick_strokes' was measuring a property the drawing never used; (4) blueprint arrowheads are not emitted as SVG markers, so a marker-based dimension check cannot see them and is dropped, recorded as unmeasurable rather than failed. A proxy must be calibrated against the artifact before it is allowed to judge it.",
+ "rules": {
+  "process-1": {
+   "checks": [
+    {
+     "id": "lanes",
+     "measure": "long_horizontal_lines",
+     "expect_at_least": 2,
+     "tolerance": 0,
+     "q": "two or more horizontal lines spanning at least 60% of the width"
+    },
+    {
+     "id": "headers",
+     "measure": "text_contains_all",
+     "values": [
+      "REQUESTER",
+      "APPROVER"
+     ],
+     "tolerance": 0,
+     "q": "both lane headers present"
+    },
+    {
+     "id": "crossing",
+     "measure": "cross_lane_connectors",
+     "expect_at_least": 1,
+     "expect_at_most": 2,
+     "tolerance": 1,
+     "q": "a connector spanning the detected lane divider"
+    }
+   ]
+  },
+  "blueprint-1": {
+   "checks": [
+    {
+     "id": "holes",
+     "measure": "circles",
+     "expect_at_least": 2,
+     "expect_at_most": 2,
+     "tolerance": 0,
+     "q": "exactly two circular holes"
+    },
+    {
+     "id": "dark_ground",
+     "measure": "background_is_dark",
+     "tolerance": 0,
+     "q": "a large dark background rectangle"
+    },
+    {
+     "id": "labels",
+     "measure": "text_contains_all",
+     "values": [
+      "A",
+      "B"
+     ],
+     "tolerance": 0,
+     "q": "labels A and B present"
+    }
+   ]
+  },
+  "circuit-1": {
+   "checks": [
+    {
+     "id": "wires",
+     "measure": "lines",
+     "expect_at_least": 4,
+     "tolerance": 0,
+     "q": "at least four wire segments"
+    },
+    {
+     "id": "capacitor",
+     "measure": "parallel_close_lines",
+     "expect_at_least": 1,
+     "max_gap_frac": 0.08,
+     "tolerance": 0,
+     "q": "two parallel plates within 8% of the width (the capacitor)"
+    },
+    {
+     "id": "labels",
+     "measure": "text_contains_all",
+     "values": [
+      "R1",
+      "C1"
+     ],
+     "tolerance": 0,
+     "q": "both component labels present"
+    }
+   ]
+  },
+  "floor-1": {
+   "checks": [
+    {
+     "id": "walls",
+     "measure": "filled_narrow_rects",
+     "expect_at_least": 2,
+     "tolerance": 0,
+     "q": "at least two narrow dark-filled rectangles (walls drawn as solid bands)"
+    },
+    {
+     "id": "rooms",
+     "measure": "text_contains_all",
+     "values": [
+      "BEDROOM",
+      "BATH",
+      "KITCHEN",
+      "LIVING"
+     ],
+     "tolerance": 0,
+     "q": "all four room names present"
+    }
+   ]
+  },
+  "tree-1": {
+   "checks": [
+    {
+     "id": "nodes",
+     "measure": "circles",
+     "expect_at_least": 7,
+     "expect_at_most": 7,
+     "tolerance": 0,
+     "q": "exactly seven circular nodes"
+    },
+    {
+     "id": "edges",
+     "measure": "connectors",
+     "expect_at_least": 6,
+     "expect_at_most": 6,
+     "tolerance": 0,
+     "q": "exactly six edges"
+    },
+    {
+     "id": "root",
+     "measure": "one_node_above_rest",
+     "tolerance": 0,
+     "q": "exactly one node above all others"
+    }
+   ]
+  }
+ }
+}

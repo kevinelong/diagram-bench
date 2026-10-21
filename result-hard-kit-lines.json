@@ -1,0 +1,68 @@
+{
+ "model": "qwen3-coder:30b",
+ "lines_only": true,
+ "attempts": [
+  {
+   "attempt": 1,
+   "ok": false,
+   "failed": [
+    "aspect",
+    "cue_angle"
+   ],
+   "measured": {
+    "aspect": [
+     false,
+     1.0
+    ],
+    "containment": [
+     true,
+     "22/22 inside"
+    ],
+    "cue_angle": [
+     false,
+     null
+    ],
+    "label_CUE": [
+     true,
+     "CUE"
+    ]
+   },
+   "gen_s": 18.0,
+   "file": "pooltable-kit-lines-try1.svg"
+  },
+  {
+   "attempt": 2,
+   "ok": false,
+   "failed": [
+    "aspect",
+    "cue_angle"
+   ],
+   "measured": {
+    "aspect": [
+     false,
+     1.0
+    ],
+    "containment": [
+     true,
+     "22/22 inside"
+    ],
+    "cue_angle": [
+     false,
+     null
+    ],
+    "label_CUE": [
+     true,
+     "CUE"
+    ]
+   },
+   "gen_s": 19.5,
+   "file": "pooltable-kit-lines-try2.svg"
+  },
+  {
+   "attempt": 3,
+   "ok": false,
+   "error": "parse: not well-formed (invalid token): line 16, column 31",
+   "gen_s": 18.4
+  }
+ ]
+}

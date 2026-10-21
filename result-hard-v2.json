@@ -1,0 +1,40 @@
+[
+ {
+  "config": "bare",
+  "gen_s": 28.0,
+  "aspect": null,
+  "corners": null,
+  "long_rail_side_pockets": null,
+  "short_rail_side_pockets": null,
+  "apex_on_centre": null,
+  "back_row_parallel": null,
+  "cue_ball_on_spot": null,
+  "cue_deg": null,
+  "label_CUE": null,
+  "score": null,
+  "pass": null
+ },
+ {
+  "config": "kit",
+  "gen_s": 13.9,
+  "aspect": 2.0,
+  "corners": 4,
+  "long_rail_side_pockets": 2,
+  "short_rail_side_pockets": 0,
+  "apex_on_centre": false,
+  "back_row_parallel": false,
+  "cue_ball_on_spot": true,
+  "cue_deg": -153.4,
+  "label_CUE": true,
+  "score": "4/7",
+  "pass": {
+   "table_2to1": true,
+   "pockets_long_rail": true,
+   "rack_apex": false,
+   "rack_back_row": false,
+   "cue_ball_spot": true,
+   "cue_angle": false,
+   "label_CUE": true
+  }
+ }
+]

@@ -1,0 +1,178 @@
+{
+  "declared": "2026-10-20",
+  "frozen": true,
+  "note": "Frozen before any model runs. Do not edit: a changed prompt invalidates every arm scored before it. Checks are yes/no questions a vision model answers; a score is a count, never an opinion.",
+  "params": {
+    "width": 1024,
+    "height": 1024,
+    "seeds": [1234, 5678, 9012],
+    "steps": "per arm, the model's recommended turbo step count, recorded in the arm's result file",
+    "cfg": "per arm, recorded",
+    "images_per_arm": 54
+  },
+  "prompts": [
+    {
+      "id": "text-1",
+      "category": "text",
+      "prompt": "A plain white storefront sign on a brick wall, with the words OPEN 24 HOURS in black capital letters, centered and clearly legible.",
+      "checks": [
+        {"id": "t1a", "q": "Do the words 'OPEN 24 HOURS' appear in the image, spelled exactly, in capital letters?"},
+        {"id": "t1b", "q": "Is all of the text inside a single sign on a wall?"}
+      ]
+    },
+    {
+      "id": "text-2",
+      "category": "text",
+      "prompt": "A red coffee mug on a wooden table with 'COFFEE' printed on it in white letters.",
+      "checks": [
+        {"id": "t2a", "q": "Does the mug show the word 'COFFEE' spelled exactly?"},
+        {"id": "t2b", "q": "Is the printed text white against red?"}
+      ]
+    },
+    {
+      "id": "text-3",
+      "category": "text",
+      "prompt": "A yellow road warning sign with the number '55' printed large and centered, next to a road.",
+      "checks": [
+        {"id": "t3a", "q": "Does the sign show the number '55' and no other number?"},
+        {"id": "t3b", "q": "Is the sign yellow?"}
+      ]
+    },
+    {
+      "id": "count-1",
+      "category": "count",
+      "prompt": "Exactly five red apples in a row on a plain wooden table, nothing else on the table.",
+      "checks": [
+        {"id": "c1a", "q": "Are there exactly five apples?"},
+        {"id": "c1b", "q": "Are all the apples red?"},
+        {"id": "c1c", "q": "Is the table otherwise empty of other objects?"}
+      ]
+    },
+    {
+      "id": "count-2",
+      "category": "count",
+      "prompt": "Three blue balloons tied with strings, floating against a plain grey sky.",
+      "checks": [
+        {"id": "c2a", "q": "Are there exactly three balloons?"},
+        {"id": "c2b", "q": "Are all balloons blue?"}
+      ]
+    },
+    {
+      "id": "count-3",
+      "category": "count",
+      "prompt": "Two paper cups on a desk beside one closed notebook.",
+      "checks": [
+        {"id": "c3a", "q": "Are there exactly two cups?"},
+        {"id": "c3b", "q": "Is there exactly one notebook?"},
+        {"id": "c3c", "q": "Is the notebook closed?"}
+      ]
+    },
+    {
+      "id": "spatial-1",
+      "category": "spatial",
+      "prompt": "A blue square on the left and a red circle on the right, both on a white background.",
+      "checks": [
+        {"id": "s1a", "q": "Is the blue square to the left of the red circle?"},
+        {"id": "s1b", "q": "Is the shape on the left a square?"},
+        {"id": "s1c", "q": "Is the shape on the right a circle?"}
+      ]
+    },
+    {
+      "id": "spatial-2",
+      "category": "spatial",
+      "prompt": "A cat sitting on top of a wooden crate, with a dog standing on the floor below and to the left of the crate.",
+      "checks": [
+        {"id": "s2a", "q": "Is the cat above the crate?"},
+        {"id": "s2b", "q": "Is the dog below the crate?"},
+        {"id": "s2c", "q": "Is the dog to the left of the crate?"}
+      ]
+    },
+    {
+      "id": "spatial-3",
+      "category": "spatial",
+      "prompt": "Three books stacked vertically: the top book is green, the middle is blue, the bottom is red.",
+      "checks": [
+        {"id": "s3a", "q": "Is the top book green?"},
+        {"id": "s3b", "q": "Is the middle book blue?"},
+        {"id": "s3c", "q": "Is the bottom book red?"}
+      ]
+    },
+    {
+      "id": "attr-1",
+      "category": "attribute",
+      "prompt": "A photo of a young woman with green hair wearing a yellow raincoat, standing in rain.",
+      "checks": [
+        {"id": "a1a", "q": "Is the person's hair green?"},
+        {"id": "a1b", "q": "Is the coat yellow?"},
+        {"id": "a1c", "q": "Is it raining in the image?"}
+      ]
+    },
+    {
+      "id": "attr-2",
+      "category": "attribute",
+      "prompt": "A vintage car painted deep purple, parked in front of a white building with blue shutters.",
+      "checks": [
+        {"id": "a2a", "q": "Is the car purple?"},
+        {"id": "a2b", "q": "Are the shutters blue?"},
+        {"id": "a2c", "q": "Is the building white?"}
+      ]
+    },
+    {
+      "id": "attr-3",
+      "category": "attribute",
+      "prompt": "Two bottles side by side: the left one is orange liquid, the right one is clear water.",
+      "checks": [
+        {"id": "a3a", "q": "Is the left bottle's contents orange?"},
+        {"id": "a3b", "q": "Is the right bottle's contents colourless or clear?"}
+      ]
+    },
+    {
+      "id": "neg-1",
+      "category": "negation",
+      "prompt": "A beach at sunset with an empty sky, no birds and no airplanes anywhere in the image.",
+      "checks": [
+        {"id": "n1a", "q": "Are there any birds visible?"},
+        {"id": "n1b", "q": "Are there any airplanes visible?"}
+      ],
+      "expect": {"n1a": "no", "n1b": "no"}
+    },
+    {
+      "id": "neg-2",
+      "category": "negation",
+      "prompt": "A cup of black coffee on a saucer, with no spoon and no sugar cube in the scene.",
+      "checks": [
+        {"id": "n2a", "q": "Is there a spoon visible?"},
+        {"id": "n2b", "q": "Is there a sugar cube visible?"}
+      ],
+      "expect": {"n2a": "no", "n2b": "no"}
+    },
+    {
+      "id": "neg-3",
+      "category": "negation",
+      "prompt": "A snow-covered pine tree in a field, with no people and no buildings anywhere in the image.",
+      "checks": [
+        {"id": "n3a", "q": "Are any people visible?"},
+        {"id": "n3b", "q": "Are any buildings visible?"}
+      ],
+      "expect": {"n3a": "no", "n3b": "no"}
+    },
+    {
+      "id": "scene-1",
+      "category": "scene",
+      "prompt": "A busy farmers market at midday, people browsing stalls of vegetables, warm sunlight.",
+      "checks": []
+    },
+    {
+      "id": "scene-2",
+      "category": "scene",
+      "prompt": "An astronaut standing on a rocky alien hillside under two moons, dust in the air.",
+      "checks": []
+    },
+    {
+      "id": "scene-3",
+      "category": "scene",
+      "prompt": "A close-up portrait of an elderly fisherman with a weathered face, shallow depth of field, natural light.",
+      "checks": []
+    }
+  ]
+}

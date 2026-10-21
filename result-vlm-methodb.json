@@ -1,0 +1,1592 @@
+{
+ "scorer": "deepseek-flash",
+ "api": "deepseek",
+ "images": 19,
+ "questions": 114,
+ "elapsed_s": 59.6,
+ "structure_pass_total": 44,
+ "structure_checks_total": 57,
+ "didactic_pass_total": 45,
+ "didactic_questions_total": 57,
+ "per_image": {
+  "bar-1-s0.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "bar-1-d1": {
+     "reader": "Q4",
+     "reference": "Q4",
+     "correct": 1
+    },
+    "bar-1-d2": {
+     "reader": "The value increases.",
+     "reference": "increase",
+     "correct": 1
+    },
+    "bar-1-d3": {
+     "reader": "Four bars",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "bar-1-s1.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "bar-1-d1": {
+     "reader": "Q4",
+     "reference": "Q4",
+     "correct": 1
+    },
+    "bar-1-d2": {
+     "reader": "Increase.",
+     "reference": "increase",
+     "correct": 1
+    },
+    "bar-1-d3": {
+     "reader": "Four bars",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "blueprint-1-s1.png": {
+   "structure_pass": 1,
+   "structure_total": 3,
+   "didactic": {
+    "blueprint-1-d1": {
+     "reader": "None",
+     "reference": "two",
+     "correct": 0
+    },
+    "blueprint-1-d2": {
+     "reader": "unclear",
+     "reference": "a dimension of the bracket (accept: width/height/length of a labelled edge)",
+     "correct": 0
+    },
+    "blueprint-1-d3": {
+     "reader": "",
+     "reference": "yes",
+     "correct": 0
+    }
+   },
+   "didactic_pass": 0,
+   "didactic_total": 3
+  },
+  "circuit-1-s0.png": {
+   "structure_pass": 1,
+   "structure_total": 3,
+   "didactic": {
+    "circuit-1-d1": {
+     "reader": "",
+     "reference": "R1 (the resistor)",
+     "correct": 0
+    },
+    "circuit-1-d2": {
+     "reader": "",
+     "reference": "to ground",
+     "correct": 0
+    },
+    "circuit-1-d3": {
+     "reader": "",
+     "reference": "low-pass",
+     "correct": 0
+    }
+   },
+   "didactic_pass": 0,
+   "didactic_total": 3
+  },
+  "circuit-1-s1.png": {
+   "structure_pass": 1,
+   "structure_total": 3,
+   "didactic": {
+    "circuit-1-d1": {
+     "reader": "",
+     "reference": "R1 (the resistor)",
+     "correct": 0
+    },
+    "circuit-1-d2": {
+     "reader": "",
+     "reference": "to ground",
+     "correct": 0
+    },
+    "circuit-1-d3": {
+     "reader": "",
+     "reference": "low-pass",
+     "correct": 0
+    }
+   },
+   "didactic_pass": 0,
+   "didactic_total": 3
+  },
+  "floor-1-s0.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "floor-1-d1": {
+     "reader": "Two bedrooms",
+     "reference": "two",
+     "correct": 1
+    },
+    "floor-1-d2": {
+     "reader": "Living room",
+     "reference": "the living room (accept: any adjacent room named in the plan)",
+     "correct": 1
+    },
+    "floor-1-d3": {
+     "reader": "Yes, separated by walls.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "floor-1-s1.png": {
+   "structure_pass": 1,
+   "structure_total": 3,
+   "didactic": {
+    "floor-1-d1": {
+     "reader": "Two bedrooms",
+     "reference": "two",
+     "correct": 1
+    },
+    "floor-1-d2": {
+     "reader": "",
+     "reference": "the living room (accept: any adjacent room named in the plan)",
+     "correct": 0
+    },
+    "floor-1-d3": {
+     "reader": "Yes, separated by walls.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 2,
+   "didactic_total": 3
+  },
+  "flow-1-s0.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "flow-1-d1": {
+     "reader": "START",
+     "reference": "START",
+     "correct": 1
+    },
+    "flow-1-d2": {
+     "reader": "STORE",
+     "reference": "STORE",
+     "correct": 1
+    },
+    "flow-1-d3": {
+     "reader": "Four steps total.",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "flow-1-s1.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "flow-1-d1": {
+     "reader": "START",
+     "reference": "START",
+     "correct": 1
+    },
+    "flow-1-d2": {
+     "reader": "STORE",
+     "reference": "STORE",
+     "correct": 1
+    },
+    "flow-1-d3": {
+     "reader": "Four steps",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "network-1-s0.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "network-1-d1": {
+     "reader": "SERVER",
+     "reference": "SERVER",
+     "correct": 1
+    },
+    "network-1-d2": {
+     "reader": "Three clients",
+     "reference": "three",
+     "correct": 1
+    },
+    "network-1-d3": {
+     "reader": "Yes, they are direct lines.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "network-1-s1.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "network-1-d1": {
+     "reader": "SERVER",
+     "reference": "SERVER",
+     "correct": 1
+    },
+    "network-1-d2": {
+     "reader": "Three clients",
+     "reference": "three",
+     "correct": 1
+    },
+    "network-1-d3": {
+     "reader": "Yes, they are direct lines.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "org-1-s0.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "org-1-d1": {
+     "reader": "CEO",
+     "reference": "CEO",
+     "correct": 1
+    },
+    "org-1-d2": {
+     "reader": "CTO and CFO",
+     "reference": "CTO and CFO",
+     "correct": 1
+    },
+    "org-1-d3": {
+     "reader": "Two levels",
+     "reference": "three",
+     "correct": 0
+    }
+   },
+   "didactic_pass": 2,
+   "didactic_total": 3
+  },
+  "org-1-s1.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "org-1-d1": {
+     "reader": "CEO",
+     "reference": "CEO",
+     "correct": 1
+    },
+    "org-1-d2": {
+     "reader": "CTO and CFO",
+     "reference": "CTO and CFO",
+     "correct": 1
+    },
+    "org-1-d3": {
+     "reader": "Two levels",
+     "reference": "three",
+     "correct": 0
+    }
+   },
+   "didactic_pass": 2,
+   "didactic_total": 3
+  },
+  "process-1-s0.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "process-1-d1": {
+     "reader": "Two lanes",
+     "reference": "two",
+     "correct": 1
+    },
+    "process-1-d2": {
+     "reader": "REQUESTER lane",
+     "reference": "REQUESTER",
+     "correct": 1
+    },
+    "process-1-d3": {
+     "reader": "Yes, it crosses between lanes.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "process-1-s1.png": {
+   "structure_pass": 2,
+   "structure_total": 3,
+   "didactic": {
+    "process-1-d1": {
+     "reader": "2 lanes",
+     "reference": "two",
+     "correct": 1
+    },
+    "process-1-d2": {
+     "reader": "Requester lane",
+     "reference": "REQUESTER",
+     "correct": 1
+    },
+    "process-1-d3": {
+     "reader": "Yes, the flow crosses lanes.",
+     "reference": "yes",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "timeline-1-s0.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "timeline-1-d1": {
+     "reader": "2020",
+     "reference": "2020",
+     "correct": 1
+    },
+    "timeline-1-d2": {
+     "reader": "2023",
+     "reference": "2023",
+     "correct": 1
+    },
+    "timeline-1-d3": {
+     "reader": "Four years",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "timeline-1-s1.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "timeline-1-d1": {
+     "reader": "2020",
+     "reference": "2020",
+     "correct": 1
+    },
+    "timeline-1-d2": {
+     "reader": "2023",
+     "reference": "2023",
+     "correct": 1
+    },
+    "timeline-1-d3": {
+     "reader": "Four years are marked.",
+     "reference": "four",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "tree-1-s0.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "tree-1-d1": {
+     "reader": "Node 1",
+     "reference": "the top node (the root, label 1)",
+     "correct": 1
+    },
+    "tree-1-d2": {
+     "reader": "3",
+     "reference": "three",
+     "correct": 1
+    },
+    "tree-1-d3": {
+     "reader": "2",
+     "reference": "two",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  },
+  "tree-1-s1.png": {
+   "structure_pass": 3,
+   "structure_total": 3,
+   "didactic": {
+    "tree-1-d1": {
+     "reader": "Node 1",
+     "reference": "the top node (the root, label 1)",
+     "correct": 1
+    },
+    "tree-1-d2": {
+     "reader": "Three levels",
+     "reference": "three",
+     "correct": 1
+    },
+    "tree-1-d3": {
+     "reader": "Two",
+     "reference": "two",
+     "correct": 1
+    }
+   },
+   "didactic_pass": 3,
+   "didactic_total": 3
+  }
+ },
+ "raw": [
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1a",
+   "q": "Are there exactly four bars?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1b",
+   "q": "Do the bars increase in height from left to right?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1c",
+   "q": "Are the bars filled with a single solid colour and no gradient?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d1",
+   "q": "Which labelled bar is the tallest?",
+   "reader_answer": "Q4",
+   "reference": "Q4",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d2",
+   "q": "Does the value increase or decrease from left to right?",
+   "reader_answer": "The value increases.",
+   "reference": "increase",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s0.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d3",
+   "q": "How many bars are shown?",
+   "reader_answer": "Four bars",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1a",
+   "q": "Are there exactly four bars?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1b",
+   "q": "Do the bars increase in height from left to right?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "structure",
+   "check": "b1c",
+   "q": "Are the bars filled with a single solid colour and no gradient?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d1",
+   "q": "Which labelled bar is the tallest?",
+   "reader_answer": "Q4",
+   "reference": "Q4",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d2",
+   "q": "Does the value increase or decrease from left to right?",
+   "reader_answer": "Increase.",
+   "reference": "increase",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "bar-1-s1.png",
+   "id": "bar-1",
+   "kind": "didactic",
+   "check": "bar-1-d3",
+   "q": "How many bars are shown?",
+   "reader_answer": "Four bars",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "structure",
+   "check": "u1a",
+   "q": "Is the drawing white on a solid dark blue background?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "structure",
+   "check": "u1b",
+   "q": "Are there exactly two circular holes?",
+   "answer": "unparsed",
+   "correct": 0
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "structure",
+   "check": "u1c",
+   "q": "Are dimension lines with arrows present?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "didactic",
+   "check": "blueprint-1-d1",
+   "q": "How many mounting holes are dimensioned?",
+   "reader_answer": "None",
+   "reference": "two",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "didactic",
+   "check": "blueprint-1-d2",
+   "q": "Which dimension is labelled A?",
+   "reader_answer": "unclear",
+   "reference": "a dimension of the bracket (accept: width/height/length of a labelled edge)",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "blueprint-1-s1.png",
+   "id": "blueprint-1",
+   "kind": "didactic",
+   "check": "blueprint-1-d3",
+   "q": "Is the part shown in front view?",
+   "reader_answer": "",
+   "reference": "yes",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1a",
+   "q": "Is a resistor symbol drawn as a zigzag or rectangle in series?",
+   "answer": "unparsed",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1b",
+   "q": "Is a capacitor symbol drawn as two parallel plates?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1c",
+   "q": "Are the connecting wires straight horizontal or vertical lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d1",
+   "q": "Which component is in series with the signal path?",
+   "reader_answer": "",
+   "reference": "R1 (the resistor)",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d2",
+   "q": "Where does the capacitor connect?",
+   "reader_answer": "",
+   "reference": "to ground",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s0.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d3",
+   "q": "Is this a low-pass or high-pass filter?",
+   "reader_answer": "",
+   "reference": "low-pass",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1a",
+   "q": "Is a resistor symbol drawn as a zigzag or rectangle in series?",
+   "answer": "unparsed",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1b",
+   "q": "Is a capacitor symbol drawn as two parallel plates?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "structure",
+   "check": "c1c",
+   "q": "Are the connecting wires straight horizontal or vertical lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d1",
+   "q": "Which component is in series with the signal path?",
+   "reader_answer": "",
+   "reference": "R1 (the resistor)",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d2",
+   "q": "Where does the capacitor connect?",
+   "reader_answer": "",
+   "reference": "to ground",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "circuit-1-s1.png",
+   "id": "circuit-1",
+   "kind": "didactic",
+   "check": "circuit-1-d3",
+   "q": "Is this a low-pass or high-pass filter?",
+   "reader_answer": "",
+   "reference": "low-pass",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1a",
+   "q": "Are the walls drawn as thick straight black lines forming closed rooms?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1b",
+   "q": "Are the walls all axis-aligned (horizontal or vertical)?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1c",
+   "q": "Is every room labelled with text?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d1",
+   "q": "How many bedrooms does the plan show?",
+   "reader_answer": "Two bedrooms",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d2",
+   "q": "Which room is next to the kitchen?",
+   "reader_answer": "Living room",
+   "reference": "the living room (accept: any adjacent room named in the plan)",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s0.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d3",
+   "q": "Are the rooms separated by walls?",
+   "reader_answer": "Yes, separated by walls.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1a",
+   "q": "Are the walls drawn as thick straight black lines forming closed rooms?",
+   "answer": "unparsed",
+   "correct": 0
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1b",
+   "q": "Are the walls all axis-aligned (horizontal or vertical)?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "structure",
+   "check": "p1c",
+   "q": "Is every room labelled with text?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d1",
+   "q": "How many bedrooms does the plan show?",
+   "reader_answer": "Two bedrooms",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d2",
+   "q": "Which room is next to the kitchen?",
+   "reader_answer": "",
+   "reference": "the living room (accept: any adjacent room named in the plan)",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "floor-1-s1.png",
+   "id": "floor-1",
+   "kind": "didactic",
+   "check": "floor-1-d3",
+   "q": "Are the rooms separated by walls?",
+   "reader_answer": "Yes, separated by walls.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1a",
+   "q": "Are there exactly four rectangular boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1b",
+   "q": "Are the boxes connected in a single vertical chain by arrows?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1c",
+   "q": "Are all lines horizontal or vertical, with no diagonals?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d1",
+   "q": "What is the first step in the flow shown?",
+   "reader_answer": "START",
+   "reference": "START",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d2",
+   "q": "What happens immediately after VALIDATE?",
+   "reader_answer": "STORE",
+   "reference": "STORE",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s0.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d3",
+   "q": "How many steps does the flow have in total?",
+   "reader_answer": "Four steps total.",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1a",
+   "q": "Are there exactly four rectangular boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1b",
+   "q": "Are the boxes connected in a single vertical chain by arrows?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "structure",
+   "check": "f1c",
+   "q": "Are all lines horizontal or vertical, with no diagonals?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d1",
+   "q": "What is the first step in the flow shown?",
+   "reader_answer": "START",
+   "reference": "START",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d2",
+   "q": "What happens immediately after VALIDATE?",
+   "reader_answer": "STORE",
+   "reference": "STORE",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "flow-1-s1.png",
+   "id": "flow-1",
+   "kind": "didactic",
+   "check": "flow-1-d3",
+   "q": "How many steps does the flow have in total?",
+   "reader_answer": "Four steps",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1a",
+   "q": "Is one box central and the other three around it?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1b",
+   "q": "Are there three connecting lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1c",
+   "q": "Are all boxes rectangular with plain outlines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d1",
+   "q": "Which node is central?",
+   "reader_answer": "SERVER",
+   "reference": "SERVER",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d2",
+   "q": "How many clients connect to it?",
+   "reader_answer": "Three clients",
+   "reference": "three",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s0.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d3",
+   "q": "Are the connections direct lines?",
+   "reader_answer": "Yes, they are direct lines.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1a",
+   "q": "Is one box central and the other three around it?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1b",
+   "q": "Are there three connecting lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "structure",
+   "check": "w1c",
+   "q": "Are all boxes rectangular with plain outlines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d1",
+   "q": "Which node is central?",
+   "reader_answer": "SERVER",
+   "reference": "SERVER",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d2",
+   "q": "How many clients connect to it?",
+   "reader_answer": "Three clients",
+   "reference": "three",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "network-1-s1.png",
+   "id": "network-1",
+   "kind": "didactic",
+   "check": "network-1-d3",
+   "q": "Are the connections direct lines?",
+   "reader_answer": "Yes, they are direct lines.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1a",
+   "q": "Are there exactly three boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1b",
+   "q": "Is the CEO box above the other two?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1c",
+   "q": "Are the connectors right-angle lines rather than curves?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d1",
+   "q": "Who is at the top of the chart?",
+   "reader_answer": "CEO",
+   "reference": "CEO",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d2",
+   "q": "Who reports to the top box?",
+   "reader_answer": "CTO and CFO",
+   "reference": "CTO and CFO",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s0.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d3",
+   "q": "How many levels does the chart show?",
+   "reader_answer": "Two levels",
+   "reference": "three",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1a",
+   "q": "Are there exactly three boxes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1b",
+   "q": "Is the CEO box above the other two?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "structure",
+   "check": "o1c",
+   "q": "Are the connectors right-angle lines rather than curves?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d1",
+   "q": "Who is at the top of the chart?",
+   "reader_answer": "CEO",
+   "reference": "CEO",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d2",
+   "q": "Who reports to the top box?",
+   "reader_answer": "CTO and CFO",
+   "reference": "CTO and CFO",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "org-1-s1.png",
+   "id": "org-1",
+   "kind": "didactic",
+   "check": "org-1-d3",
+   "q": "How many levels does the chart show?",
+   "reader_answer": "Two levels",
+   "reference": "three",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1a",
+   "q": "Are there exactly two horizontal lanes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1b",
+   "q": "Does exactly one arrow cross between the lanes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1c",
+   "q": "Are the lane dividers straight horizontal lines?",
+   "answer": "no",
+   "correct": 0
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d1",
+   "q": "How many lanes does the diagram have?",
+   "reader_answer": "Two lanes",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d2",
+   "q": "Which lane starts the process?",
+   "reader_answer": "REQUESTER lane",
+   "reference": "REQUESTER",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s0.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d3",
+   "q": "Does the flow cross between lanes?",
+   "reader_answer": "Yes, it crosses between lanes.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1a",
+   "q": "Are there exactly two horizontal lanes?",
+   "answer": "unparsed",
+   "correct": 0
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1b",
+   "q": "Does exactly one arrow cross between the lanes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "structure",
+   "check": "s1c",
+   "q": "Are the lane dividers straight horizontal lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d1",
+   "q": "How many lanes does the diagram have?",
+   "reader_answer": "2 lanes",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d2",
+   "q": "Which lane starts the process?",
+   "reader_answer": "Requester lane",
+   "reference": "REQUESTER",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "process-1-s1.png",
+   "id": "process-1",
+   "kind": "didactic",
+   "check": "process-1-d3",
+   "q": "Does the flow cross between lanes?",
+   "reader_answer": "Yes, the flow crosses lanes.",
+   "reference": "yes",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1a",
+   "q": "Is the axis a single straight horizontal line?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1b",
+   "q": "Are there exactly four tick marks?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1c",
+   "q": "Are the labels evenly spaced?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d1",
+   "q": "Which year comes first on the timeline?",
+   "reader_answer": "2020",
+   "reference": "2020",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d2",
+   "q": "Which year comes last?",
+   "reader_answer": "2023",
+   "reference": "2023",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s0.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d3",
+   "q": "How many years are marked?",
+   "reader_answer": "Four years",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1a",
+   "q": "Is the axis a single straight horizontal line?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1b",
+   "q": "Are there exactly four tick marks?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "structure",
+   "check": "l1c",
+   "q": "Are the labels evenly spaced?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d1",
+   "q": "Which year comes first on the timeline?",
+   "reader_answer": "2020",
+   "reference": "2020",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d2",
+   "q": "Which year comes last?",
+   "reader_answer": "2023",
+   "reference": "2023",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "timeline-1-s1.png",
+   "id": "timeline-1",
+   "kind": "didactic",
+   "check": "timeline-1-d3",
+   "q": "How many years are marked?",
+   "reader_answer": "Four years are marked.",
+   "reference": "four",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1a",
+   "q": "Are there exactly seven circular nodes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1b",
+   "q": "Are they arranged in three levels with one node at the top?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1c",
+   "q": "Are the connectors straight lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d1",
+   "q": "Which node is the root?",
+   "reader_answer": "Node 1",
+   "reference": "the top node (the root, label 1)",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d2",
+   "q": "How many levels does the tree have?",
+   "reader_answer": "3",
+   "reference": "three",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s0.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d3",
+   "q": "How many children does the root have?",
+   "reader_answer": "2",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1a",
+   "q": "Are there exactly seven circular nodes?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1b",
+   "q": "Are they arranged in three levels with one node at the top?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "structure",
+   "check": "t1c",
+   "q": "Are the connectors straight lines?",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d1",
+   "q": "Which node is the root?",
+   "reader_answer": "Node 1",
+   "reference": "the top node (the root, label 1)",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d2",
+   "q": "How many levels does the tree have?",
+   "reader_answer": "Three levels",
+   "reference": "three",
+   "answer": "yes",
+   "correct": 1
+  },
+  {
+   "image": "tree-1-s1.png",
+   "id": "tree-1",
+   "kind": "didactic",
+   "check": "tree-1-d3",
+   "q": "How many children does the root have?",
+   "reader_answer": "Two",
+   "reference": "two",
+   "answer": "yes",
+   "correct": 1
+  }
+ ]
+}

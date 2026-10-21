@@ -1,0 +1,55 @@
+{
+ "arm": "B-multiplicity",
+ "model": "qwen3-coder:30b",
+ "passed": 1,
+ "documents": 2,
+ "rows": [
+  {
+   "sample": "floor-1-s0",
+   "expected": {
+    "BEDROOM": 2,
+    "BATH": 1,
+    "KITCHEN": 1,
+    "LIVING": 1
+   },
+   "found": {
+    "BEDROOM": 2,
+    "BATH": 2,
+    "KITCHEN": 1,
+    "LIVING": 1
+   },
+   "pass": false,
+   "all_texts": [
+    "BEDROOM",
+    "BEDROOM",
+    "BATH",
+    "KITCHEN",
+    "LIVING",
+    "BATH"
+   ]
+  },
+  {
+   "sample": "floor-1-s1",
+   "expected": {
+    "BEDROOM": 2,
+    "BATH": 1,
+    "KITCHEN": 1,
+    "LIVING": 1
+   },
+   "found": {
+    "BEDROOM": 2,
+    "BATH": 1,
+    "KITCHEN": 1,
+    "LIVING": 1
+   },
+   "pass": true,
+   "all_texts": [
+    "BEDROOM",
+    "LIVING",
+    "BEDROOM",
+    "KITCHEN",
+    "BATH"
+   ]
+  }
+ ]
+}
