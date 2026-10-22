@@ -1,0 +1,261 @@
+{
+ "arm": "E-kicad",
+ "model": "qwen3-coder:30b",
+ "rows": [
+  {
+   "id": "flow-1",
+   "attempts": [
+    {
+     "attempt": 1,
+     "gen_s": 33.4,
+     "run_s": 0.9,
+     "exit": 0,
+     "board_written": true,
+     "outline_mm": [
+      24.0,
+      49.0
+     ],
+     "checks_failed": [],
+     "geometry_applicable": false,
+     "error": ""
+    }
+   ],
+   "script_clean": true,
+   "outline_mm": [
+    24.0,
+    49.0
+   ],
+   "drawings": 11,
+   "export_rc": 0,
+   "export_error": "",
+   "structure": {
+    "boxes": 4,
+    "connectors": 3,
+    "curves": 0,
+    "other": 0,
+    "labels": 4,
+    "text_values": [
+     "START",
+     "VALIDATE",
+     "STORE",
+     "DONE"
+    ]
+   },
+   "failed": {},
+   "geometry_applicable": false,
+   "geometry_note": "no table found",
+   "source_score": {
+    "paths": 160,
+    "nodes": 327,
+    "svg_bytes": 9976,
+    "text_nodes": 4,
+    "text_values": [
+     "START",
+     "VALIDATE",
+     "STORE",
+     "DONE"
+    ],
+    "labels_present": 4,
+    "labels_total": 4,
+    "label_hits": {
+     "START": true,
+     "VALIDATE": true,
+     "STORE": true,
+     "DONE": true
+    }
+   },
+   "rendered_for_judging": "flow-1-corpus-black.svg",
+   "checks": {
+    "struct.boxes": {
+     "ok": true,
+     "measured": 4,
+     "expected": 4
+    },
+    "struct.connectors": {
+     "ok": true,
+     "measured": 3,
+     "expected": 3
+    },
+    "struct.labels": {
+     "ok": true,
+     "measured": 4,
+     "expected": 4
+    },
+    "label.START": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    },
+    "label.VALIDATE": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    },
+    "label.STORE": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    },
+    "label.DONE": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    }
+   }
+  },
+  {
+   "id": "circuit-1",
+   "attempts": [
+    {
+     "attempt": 1,
+     "gen_s": 18.4,
+     "run_s": 0.2,
+     "exit": 0,
+     "board_written": true,
+     "outline_mm": [
+      55.88,
+      19.5
+     ],
+     "checks_failed": [],
+     "geometry_applicable": false,
+     "error": ""
+    }
+   ],
+   "script_clean": true,
+   "outline_mm": [
+    55.88,
+    19.5
+   ],
+   "drawings": 15,
+   "export_rc": 0,
+   "export_error": "",
+   "structure": {
+    "boxes": 0,
+    "connectors": 11,
+    "curves": 0,
+    "other": 0,
+    "labels": 4,
+    "text_values": [
+     "IN",
+     "R1",
+     "C1",
+     "OUT"
+    ]
+   },
+   "failed": {},
+   "geometry_applicable": false,
+   "geometry_note": "no table found",
+   "source_score": {
+    "paths": 78,
+    "nodes": 167,
+    "svg_bytes": 5495,
+    "text_nodes": 4,
+    "text_values": [
+     "IN",
+     "R1",
+     "C1",
+     "OUT"
+    ],
+    "labels_present": 2,
+    "labels_total": 2,
+    "label_hits": {
+     "R1": true,
+     "C1": true
+    }
+   },
+   "rendered_for_judging": "circuit-1-corpus-black.svg",
+   "checks": {
+    "struct.labels": {
+     "ok": true,
+     "measured": 4,
+     "expected": "at least 2"
+    },
+    "label.R1": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    },
+    "label.C1": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    }
+   }
+  },
+  {
+   "id": "blueprint-1",
+   "attempts": [
+    {
+     "attempt": 1,
+     "gen_s": 16.7,
+     "run_s": 0.2,
+     "exit": 0,
+     "board_written": true,
+     "outline_mm": [
+      92.0,
+      62.0
+     ],
+     "checks_failed": [],
+     "geometry_applicable": false,
+     "error": ""
+    }
+   ],
+   "script_clean": true,
+   "outline_mm": [
+    92.0,
+    62.0
+   ],
+   "drawings": 12,
+   "export_rc": 0,
+   "export_error": "",
+   "structure": {
+    "boxes": 2,
+    "connectors": 6,
+    "curves": 0,
+    "other": 0,
+    "labels": 2,
+    "text_values": [
+     "A",
+     "B"
+    ]
+   },
+   "failed": {},
+   "geometry_applicable": false,
+   "geometry_note": "no table found",
+   "source_score": {
+    "paths": 29,
+    "nodes": 63,
+    "svg_bytes": 3208,
+    "text_nodes": 2,
+    "text_values": [
+     "A",
+     "B"
+    ],
+    "labels_present": 2,
+    "labels_total": 2,
+    "label_hits": {
+     "A": true,
+     "B": true
+    }
+   },
+   "rendered_for_judging": "blueprint-1-corpus-black.svg",
+   "checks": {
+    "struct.labels": {
+     "ok": true,
+     "measured": 2,
+     "expected": "at least 2"
+    },
+    "label.A": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    },
+    "label.B": {
+     "ok": true,
+     "measured": true,
+     "expected": true
+    }
+   }
+  }
+ ]
+}
