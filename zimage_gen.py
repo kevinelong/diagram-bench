@@ -90,6 +90,59 @@ def open_output(path):
         return None
 
 
+COMFY_PY = r'C:/Users/kevin/Documents/ComfyUI/.venv/Scripts/python.exe'
+COMFY_MAIN = r'C:/Users/kevin/AppData/Local/Programs/ComfyUI/resources/ComfyUI/main.py'
+COMFY_BASE = r'C:/Users/kevin/Documents/ComfyUI'
+COMFY_PATHS = r'C:/Users/kevin/AppData/Roaming/ComfyUI/extra_models_config.yaml'
+
+
+def server_argv(port, cache_none=True):
+    argv = [COMFY_PY, COMFY_MAIN,
+            '--user-directory', os.path.join(COMFY_BASE, 'user'),
+            '--output-directory', os.path.join(COMFY_BASE, 'output'),
+            '--base-directory', COMFY_BASE,
+            '--extra-model-paths-config', COMFY_PATHS,
+            '--listen', '127.0.0.1', '--port', str(port)]
+    if cache_none:
+        argv.append('--cache-none')
+    return argv
+
+
+def start_server(port, timeout=300, cache_none=True):
+    """Start ComfyUI and wait until it answers. Returns (proc, log_path); raises on failure."""
+    log_path = Path(os.environ.get('TEMP', '.')) / ('comfy-autostart-%d.log' % port)
+    log = open(log_path, 'w', encoding='utf-8', errors='replace')
+    proc = subprocess.Popen(server_argv(port, cache_none), stdout=log, stderr=subprocess.STDOUT,
+                            cwd=os.path.dirname(COMFY_BASE))
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        if proc.poll() is not None:
+            tail = log_path.read_text(encoding='utf-8', errors='replace').splitlines()[-6:]
+            raise RuntimeError('server exited (%s): %s' % (proc.returncode, ' | '.join(tail)))
+        try:
+            urllib.request.urlopen('http://127.0.0.1:%d/system_stats' % port, timeout=2)
+            return proc, log_path
+        except Exception:
+            time.sleep(2)
+    raise RuntimeError('server did not answer on port %d within %ss (log: %s)' % (port, timeout, log_path))
+
+
+def stop_server(port):
+    """Stop whatever owns the port - the tree, not just the launching process.
+
+    The wrapper's exit does not stop its python/engine children (learned the hard way on the Strata A/B), so ask the
+    port who is listening and kill that tree.
+    """
+    ps = ("$p = Get-NetTCPConnection -LocalPort %d -State Listen -ErrorAction SilentlyContinue | "
+          "Select-Object -ExpandProperty OwningProcess -Unique; "
+          "foreach ($x in $p) { taskkill /PID $x /T /F 2>&1 | Out-Null; 'stopped pid ' + $x }" % port)
+    try:
+        out = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=120)
+        return out.stdout.strip() or 'nothing was listening'
+    except Exception as e:
+        return 'stop failed: %s' % type(e).__name__
+
+
 def post(path, obj, timeout=60):
     req = urllib.request.Request(HOST + path, data=json.dumps(obj).encode(),
                                  headers={'Content-Type': 'application/json'})
@@ -128,67 +181,93 @@ def main(argv):
     ap.add_argument('--seed', type=int, default=1234)
     ap.add_argument('--out', default='zimage.png', help='PNG to write (relative to cwd)')
     ap.add_argument('--timeout', type=int, default=900)
+    ap.add_argument('--with-server', action='store_true',
+                    help='if no server is running, start one, use it, then stop it (one command, no leftovers)')
+    ap.add_argument('--keep-server', action='store_true',
+                    help='with --with-server: leave the server running afterwards')
+    ap.add_argument('--server-port', type=int, default=8006, help='port to start the server on (--with-server)')
+    ap.add_argument('--server-timeout', type=int, default=300, help='seconds to wait for the server (--with-server)')
     ap.add_argument('--no-open', dest='open_after', action='store_false',
                     help='do not open the image when it is written (default: open it)')
     args = ap.parse_args(argv)
 
-    prompt = args.prompt if args.prompt else Path(args.prompt_file).read_text(encoding='utf-8').strip()
-    if not prompt:
-        print('empty prompt'); return 2
-
-    host, how = resolve_host()
-    print('server   %s (%s)' % (host, how))
     try:
-        get('/system_stats', timeout=10)
-    except Exception as e:
-        print('ComfyUI is not reachable (%s).' % type(e).__name__)
-        print('tried: %s' % ', '.join([host] if how != 'none answered' else CANDIDATES))
-        print('start it with:  .\\start-comfy.ps1      then re-run, or set COMFY_HOST to its address')
-        return 3
+        prompt = args.prompt if args.prompt else Path(args.prompt_file).read_text(encoding='utf-8').strip()
+        if not prompt:
+            print('empty prompt'); return 2
 
-    prefix = 'zimage-gen-%d' % int(time.time())
-    started = time.monotonic()
-    try:
-        pid = post('/prompt', {'prompt': workflow(prompt, args.width, args.height, args.steps, args.cfg,
-                                                  args.seed, prefix)})['prompt_id']
-    except urllib.error.HTTPError as e:
-        body = e.read().decode('utf-8', 'replace')
-        print('ComfyUI rejected the workflow: %s' % body[:400])
-        if 'value_not_in_list' in body or 'not in []' in body:
-            print()
-            print('That "not in []" means the server has NO model paths: it was started without')
-            print('--extra-model-paths-config (and usually without --base-directory), so ComfyUI cannot see')
-            print('D:\\models\\comfyui. It still answers /system_stats, which is why this looks like a naming')
-            print('problem. Restart it with:  .\\start-comfy.ps1')
-        return 4
+        host, how = resolve_host()
+        print('server   %s (%s)' % (host, how))
+        started_here = False
+        try:
+            get('/system_stats', timeout=10)
+        except Exception as e:
+            if args.with_server:
+                global HOST
+                try:
+                    print('         nothing answering - starting one on port %d (this takes ~20-40 s)' % args.server_port)
+                    start_server(args.server_port, args.server_timeout)
+                    HOST = 'http://127.0.0.1:%d' % args.server_port
+                    started_here = True
+                    print('server   %s (started by this run)' % HOST)
+                except Exception as err:
+                    print('could not start a server: %s' % err)
+                    return 3
+            else:
+                print('ComfyUI is not reachable (%s).' % type(e).__name__)
+                print('tried: %s' % ', '.join([host] if how != 'none answered' else CANDIDATES))
+                print('start it with:  .\\start-comfy.ps1      then re-run, or set COMFY_HOST to its address')
+                print('or let this script manage it:  --with-server   (starts one, uses it, stops it)')
+                return 3
 
-    images, status = [], None
-    while time.monotonic() - started < args.timeout:
-        h = get('/history/' + pid)
-        if pid in h:
-            entry = h[pid]
-            status = (entry.get('status') or {}).get('status_str')
-            images = [i for out in (entry.get('outputs') or {}).values() for i in out.get('images', [])]
-            break
-        time.sleep(1)
-    wall = round(time.monotonic() - started, 1)
-    if not images:
-        print('no image produced after %ss (status %s)' % (wall, status))
-        return 5
+        prefix = 'zimage-gen-%d' % int(time.time())
+        started = time.monotonic()
+        try:
+            pid = post('/prompt', {'prompt': workflow(prompt, args.width, args.height, args.steps, args.cfg,
+                                                      args.seed, prefix)})['prompt_id']
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', 'replace')
+            print('ComfyUI rejected the workflow: %s' % body[:400])
+            if 'value_not_in_list' in body or 'not in []' in body:
+                print()
+                print('That "not in []" means the server has NO model paths: it was started without')
+                print('--extra-model-paths-config (and usually without --base-directory), so ComfyUI cannot see')
+                print('D:\\models\\comfyui. It still answers /system_stats, which is why this looks like a naming')
+                print('problem. Restart it with:  .\\start-comfy.ps1')
+            return 4
 
-    img = images[0]
-    src = OUTPUT_DIR / img.get('subfolder', '') / img['filename']
-    dest = Path(args.out)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    print('wrote %s  (%d bytes)' % (dest.resolve(), dest.stat().st_size))
-    print('  prompt   %s' % (prompt[:70] + ('...' if len(prompt) > 70 else '')))
-    print('  size     %dx%d  steps %d  cfg %s  seed %d' % (args.width, args.height, args.steps, args.cfg, args.seed))
-    print('  wall     %ss' % wall)
-    if args.open_after:
-        how = open_output(dest)
-        print('  opened   %s' % (how if how else 'FAILED - open it manually'))
-    return 0
+        images, status = [], None
+        while time.monotonic() - started < args.timeout:
+            h = get('/history/' + pid)
+            if pid in h:
+                entry = h[pid]
+                status = (entry.get('status') or {}).get('status_str')
+                images = [i for out in (entry.get('outputs') or {}).values() for i in out.get('images', [])]
+                break
+            time.sleep(1)
+        wall = round(time.monotonic() - started, 1)
+        if not images:
+            print('no image produced after %ss (status %s)' % (wall, status))
+            return 5
+
+        img = images[0]
+        src = OUTPUT_DIR / img.get('subfolder', '') / img['filename']
+        dest = Path(args.out)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        print('wrote %s  (%d bytes)' % (dest.resolve(), dest.stat().st_size))
+        print('  prompt   %s' % (prompt[:70] + ('...' if len(prompt) > 70 else '')))
+        print('  size     %dx%d  steps %d  cfg %s  seed %d' % (args.width, args.height, args.steps, args.cfg, args.seed))
+        print('  wall     %ss' % wall)
+        if args.open_after:
+            how = open_output(dest)
+            print('  opened   %s' % (how if how else 'FAILED - open it manually'))
+        return 0
+    finally:
+        if started_here and not args.keep_server:
+            print('server   stopping the one this run started: %s' % stop_server(args.server_port))
+        elif started_here:
+            print('server   left running on port %d (--keep-server)' % args.server_port)
 
 
 if __name__ == '__main__':
