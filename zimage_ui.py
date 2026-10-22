@@ -26,6 +26,7 @@ import os
 import queue
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -144,6 +145,31 @@ class WSClient(threading.Thread):
 # --------------------------------------------------------------------------- generation plumbing
 
 
+def copy_png_to_clipboard(path):
+    """Put an image on the Windows clipboard. Must run in an STA apartment, hence -STA and WinForms."""
+    ps = ("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; "
+          "$i=[System.Drawing.Image]::FromFile('%s'); "
+          "[System.Windows.Forms.Clipboard]::SetImage($i); $i.Dispose(); Write-Output 'ok'"
+          % str(path).replace("'", "''"))
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', ps],
+                           capture_output=True, text=True, timeout=90)
+        return (r.returncode == 0 and 'ok' in r.stdout), (r.stdout + r.stderr).strip()[:180]
+    except Exception as e:
+        return False, '%s: %s' % (type(e).__name__, e)
+
+
+def read_meta(png):
+    """The sidecar written at save time: prompt, seed, size, base image, strength."""
+    j = Path(png).with_suffix('.json')
+    if not j.exists():
+        return None
+    try:
+        return json.loads(j.read_text(encoding='utf-8'))
+    except Exception:
+        return None
+
+
 class Engine:
     """Server lifecycle plus one-generation-at-a-time generation, all off the UI thread."""
 
@@ -236,7 +262,10 @@ class Engine:
                             self.events.put(('error', 'workflow failed'))
                             return
                         if images:
-                            self._fetch(images[0], out_dir, prompt, seed, width, height)
+                            self._fetch(images[0], out_dir, prompt, seed, width, height,
+                                        meta={'steps': steps, 'cfg': cfg,
+                                              'base_image': (str(base_path) if base_path else None),
+                                              'denoise': (denoise if base_path else 1.0)})
                             return
                     time.sleep(0.4)
                 self.events.put(('error', 'timed out waiting for the image'))
@@ -250,7 +279,7 @@ class Engine:
                 self.events.put(('error', '%s: %s' % (type(e).__name__, e)))
         threading.Thread(target=work, daemon=True).start()
 
-    def _fetch(self, img, out_dir, prompt, seed, width, height):
+    def _fetch(self, img, out_dir, prompt, seed, width, height, meta=None):
         q = urllib.parse.urlencode({'filename': img['filename'], 'subfolder': img.get('subfolder', ''),
                                     'type': img.get('type', 'output')})
         raw = urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
@@ -260,6 +289,12 @@ class Engine:
         path = out_dir / name
         path.write_bytes(raw)
         (out_dir / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
+        meta = meta or {}
+        record = {'image': str(path), 'prompt': prompt, 'seed': seed, 'width': width, 'height': height,
+                  'created': datetime.now().isoformat(timespec='seconds'), 'model': zg.UNET,
+                  'steps': meta.get('steps'), 'cfg': meta.get('cfg'),
+                  'base_image': meta.get('base_image'), 'denoise': meta.get('denoise')}
+        path.with_suffix('.json').write_text(json.dumps(record, indent=1), encoding='utf-8')
         self.events.put(('image', (raw, str(path))))
 
 
@@ -273,6 +308,7 @@ class App:
         self._img = None
         self._raw = None
         self.base_path = None
+        self._current = None
         self._files = []
 
         root.title('Z-Image — prompt and picture')
@@ -354,6 +390,12 @@ class App:
         self.canvas = tk.Canvas(right, background='#f4f4f5', highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', lambda e: self._redraw())
+        tools = ttk.Frame(right)
+        tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
+        self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
+        self.copy_btn.pack(side='left')
+        self.copy_status = ttk.Label(tools, text='', foreground='#555')
+        self.copy_status.pack(side='left', padx=(8, 0))
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
 
@@ -396,6 +438,9 @@ class App:
         return self._files[sel[0]]
 
     def _display(self, path):
+        self._current = Path(path)
+        self.copy_btn.state(['!disabled'])
+        self.copy_status.configure(text='')
         try:
             self._img = Image.open(path)
         except Exception as e:
@@ -409,6 +454,12 @@ class App:
         self.base_label.configure(text=self.base_path.name)
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
+
+    def copy_image(self):
+        if not self._current:
+            return
+        ok, msg = copy_png_to_clipboard(self._current)
+        self.copy_status.configure(text='copied to clipboard' if ok else 'copy failed: %s' % msg)
 
     def _clear_picture(self):
         self._img = None
@@ -425,6 +476,19 @@ class App:
             return
         self._display(f)
         self._set_base(f)
+        meta = read_meta(f)
+        if meta:
+            self.text.delete('1.0', 'end')
+            self.text.insert('1.0', meta.get('prompt') or '')
+            if meta.get('seed') is not None:
+                self.seed.set(str(meta['seed']))
+            self.hint.configure(text='restored prompt and seed %s from %s%s'
+                                % (meta.get('seed'), f.name,
+                                   ('; itself edited %s at strength %s'
+                                    % (Path(meta['base_image']).name, meta.get('denoise')))
+                                   if meta.get('base_image') else ''))
+        else:
+            self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % f.name)
         self.status.configure(text='base: %s  (Enter to edit it, strength %.2f)'
                               % (f.name, self.denoise.get()))
 
@@ -510,6 +574,8 @@ class App:
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
                     self._set_base(path)
+                    self._current = Path(path)
+                    self.copy_btn.state(['!disabled'])
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])

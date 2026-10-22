@@ -35,6 +35,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 CANDIDATES = ['http://127.0.0.1:8006', 'http://127.0.0.1:8000', 'http://127.0.0.1:8188',
@@ -271,6 +272,8 @@ def main(argv):
                     help='with --with-server: leave the server running afterwards')
     ap.add_argument('--server-port', type=int, default=8006, help='port to start the server on (--with-server)')
     ap.add_argument('--server-timeout', type=int, default=300, help='seconds to wait for the server (--with-server)')
+    ap.add_argument('--base', default=None, help='img2img: a PNG already in ComfyUI input, or a local path to upload')
+    ap.add_argument('--denoise', type=float, default=1.0, help='img2img strength (ignored without --base)')
     ap.add_argument('--no-open', dest='open_after', action='store_false',
                     help='do not open the image when it is written (default: open it)')
     args = ap.parse_args(argv)
@@ -304,11 +307,22 @@ def main(argv):
                 print('or let this script manage it:  --with-server   (starts one, uses it, stops it)')
                 return 3
 
+        base_name = None
+        if args.base:
+            bp = Path(args.base)
+            if bp.exists():
+                base_name = upload_image(host, bp)
+                print('base     %s -> uploaded as %s (strength %.2f)' % (bp.name, base_name, args.denoise))
+            else:
+                base_name = args.base          # already inside ComfyUI's input dir
+                print('base     %s (assumed to be in ComfyUI input, strength %.2f)' % (base_name, args.denoise))
+
         prefix = 'zimage-gen-%d' % int(time.time())
         started = time.monotonic()
         try:
             pid = post('/prompt', {'prompt': workflow(prompt, args.width, args.height, args.steps, args.cfg,
-                                                      args.seed, prefix)})['prompt_id']
+                                                      args.seed, prefix, base_image=base_name,
+                                                      denoise=(args.denoise if base_name else 1.0))})['prompt_id']
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', 'replace')
             print('ComfyUI rejected the workflow: %s' % body[:400])
@@ -339,7 +353,11 @@ def main(argv):
         dest = Path(args.out)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
-        print('wrote %s  (%d bytes)' % (dest.resolve(), dest.stat().st_size))
+        record = {'image': str(dest.resolve()), 'prompt': prompt, 'seed': args.seed, 'width': args.width,
+                  'height': args.height, 'created': datetime.now().isoformat(timespec='seconds'), 'model': UNET,
+                  'steps': args.steps, 'cfg': args.cfg, 'base_image': args.base, 'denoise': args.denoise}
+        dest.with_suffix('.json').write_text(json.dumps(record, indent=1), encoding='utf-8')
+        print('wrote %s  (%d bytes) + %s' % (dest.resolve(), dest.stat().st_size, dest.with_suffix('.json').name))
         print('  prompt   %s' % (prompt[:70] + ('...' if len(prompt) > 70 else '')))
         print('  size     %dx%d  steps %d  cfg %s  seed %d' % (args.width, args.height, args.steps, args.cfg, args.seed))
         print('  wall     %ss' % wall)

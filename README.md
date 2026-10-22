@@ -159,6 +159,10 @@ python zimage_ui.py                 # prompt box left, picture right, progress b
 close, but leaves a server it did not start alone. Enter generates, Shift+Enter adds a newline. Step progress comes from
 ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
 
+Every image is saved with a **sidecar JSON** (`<same name>.json`) recording the prompt, seed, size, steps, cfg, model,
+and - for an edit - the **absolute path of the base image and the strength used**. Selecting a row in the gallery
+restores that prompt and seed into the boxes, and *Copy image* puts the PNG on the Windows clipboard.
+
 Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` (1234), `--out`
 (`C:/Users/kevin/Pictures/zimage-ui`), `--no-autostart`, `--no-progress`, `--initial TEXT`, `--initial-file PATH`, `--auto`.
 
