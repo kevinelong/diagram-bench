@@ -20,10 +20,13 @@ the one property that matters when a label needs fixing at 3 a.m. - editability.
 
 ## What these arms cost, measured today
 
-- **Blender: not installed.** Installer ~350-400 MB, plus the `bpy` module is only meaningful inside Blender's own
-  Python (its bundled interpreter, not the system one). A headless run is `blender --background --python script.py`.
-- **KiCad: not installed.** Installer ~1.2-1.5 GB, `kicad-cli` for exports and `pcbnew` only importable from KiCad's
-  Python. There is no pip path worth using.
+- **Blender: INSTALLED — 5.2 (`C:/Program Files/Blender Foundation/Blender 5.2`), verified 2026-10-21.**
+  This line said "not installed" when the protocol was written; it was stale, and A4 was scoped around a
+  blocker that does not exist. Blender's route is `blender -b -P script.py` (headless `bpy`), and the 2D SVG
+  path is Grease Pencil. `bpy` is only meaningful inside Blender's **bundled** interpreter, not the system Python,
+  so the route is `blender --background --python script.py` - one process, no pip.
+- **KiCad: INSTALLED and in use by method E** (verified 2026-10-21 alongside Blender). `kicad-cli` for exports and
+  `pcbnew` only importable from KiCad's own Python; method E runs through it today, so this line was stale too.
 - **Method B: nothing to install.** This box already has local coder models, and the scoring toolchain is built.
 
 ## Metrics these arms add, and the subset rule
