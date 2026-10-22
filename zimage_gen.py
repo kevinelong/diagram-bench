@@ -96,6 +96,55 @@ COMFY_BASE = r'C:/Users/kevin/Documents/ComfyUI'
 COMFY_PATHS = r'C:/Users/kevin/AppData/Roaming/ComfyUI/extra_models_config.yaml'
 
 
+_JOB_HANDLES = []      # keep the job handles alive for the life of this process
+
+
+def _assign_kill_on_close(pid):
+    """Put a child in a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
+
+    Without this, killing the parent (Task Manager, a crash, taskkill without /T) leaves ComfyUI running and holding
+    VRAM - observed twice on 2026-10-22. With it, the OS kills the child when our process dies, however it dies.
+    """
+    if os.name != 'nt':
+        return None
+    import ctypes
+    from ctypes import wintypes as wt
+    k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    k32.CreateJobObjectW.restype = wt.HANDLE
+    k32.CreateJobObjectW.argtypes = [wt.LPVOID, wt.LPCWSTR]
+
+    class BASIC(ctypes.Structure):
+        _fields_ = [('PerProcessUserTimeLimit', ctypes.c_int64), ('PerJobUserTimeLimit', ctypes.c_int64),
+                    ('LimitFlags', wt.DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                    ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', wt.DWORD),
+                    ('Affinity', ctypes.c_size_t), ('PriorityClass', wt.DWORD), ('SchedulingClass', wt.DWORD)]
+
+    class IO(ctypes.Structure):
+        _fields_ = [('ReadOperationCount', ctypes.c_uint64), ('WriteOperationCount', ctypes.c_uint64),
+                    ('OtherOperationCount', ctypes.c_uint64), ('ReadTransferCount', ctypes.c_uint64),
+                    ('WriteTransferCount', ctypes.c_uint64), ('OtherTransferCount', ctypes.c_uint64)]
+
+    class EXT(ctypes.Structure):
+        _fields_ = [('BasicLimitInformation', BASIC), ('IoInfo', IO),
+                    ('ProcessMemoryLimit', ctypes.c_size_t), ('JobMemoryLimit', ctypes.c_size_t),
+                    ('PeakProcessMemoryUsed', ctypes.c_size_t), ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+    job = k32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    info = EXT()
+    info.BasicLimitInformation.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+        return None
+    PROC_SET_QUOTA, PROC_TERMINATE = 0x0100, 0x0001
+    hp = k32.OpenProcess(PROC_SET_QUOTA | PROC_TERMINATE, False, pid)
+    if hp:
+        k32.AssignProcessToJobObject(job, hp)
+        k32.CloseHandle(hp)
+    _JOB_HANDLES.append(job)
+    return job
+
+
 def server_argv(port, cache_none=True):
     argv = [COMFY_PY, COMFY_MAIN,
             '--user-directory', os.path.join(COMFY_BASE, 'user'),
@@ -114,6 +163,7 @@ def start_server(port, timeout=300, cache_none=True):
     log = open(log_path, 'w', encoding='utf-8', errors='replace')
     proc = subprocess.Popen(server_argv(port, cache_none), stdout=log, stderr=subprocess.STDOUT,
                             cwd=os.path.dirname(COMFY_BASE))
+    _assign_kill_on_close(proc.pid)
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
         if proc.poll() is not None:
@@ -143,6 +193,22 @@ def stop_server(port):
         return 'stop failed: %s' % type(e).__name__
 
 
+def upload_image(host, path, name=None):
+    """POST a local file to ComfyUI's /upload/image so LoadImage can see it. Returns the name ComfyUI stored."""
+    path = Path(path)
+    name = name or path.name
+    boundary = '----zimageui%d' % int(time.time() * 1000)
+    body = b''
+    body += ('--%s\r\nContent-Disposition: form-data; name="image"; filename="%s"\r\n'
+             'Content-Type: image/png\r\n\r\n' % (boundary, name)).encode()
+    body += path.read_bytes()
+    body += ('\r\n--%s\r\nContent-Disposition: form-data; name="overwrite"\r\n\r\ntrue\r\n' % boundary).encode()
+    body += ('--%s--\r\n' % boundary).encode()
+    req = urllib.request.Request(host + '/upload/image', data=body,
+                                 headers={'Content-Type': 'multipart/form-data; boundary=' + boundary})
+    return json.loads(urllib.request.urlopen(req, timeout=120).read())['name']
+
+
 def post(path, obj, timeout=60):
     req = urllib.request.Request(HOST + path, data=json.dumps(obj).encode(),
                                  headers={'Content-Type': 'application/json'})
@@ -153,7 +219,25 @@ def get(path, timeout=30):
     return json.loads(urllib.request.urlopen(HOST + path, timeout=timeout).read())
 
 
-def workflow(prompt, width, height, steps, cfg, seed, prefix):
+def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0):
+    """ComfyUI graph. With `base_image` (a name already uploaded to ComfyUI's input dir) the graph becomes img2img:
+    LoadImage -> VAEEncode -> KSampler(denoise<1). Denoise 1.0 is text-to-image."""
+    if base_image:
+        return {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "lumina2"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+            "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+            "10": {"class_type": "LoadImage", "inputs": {"image": base_image}},
+            "11": {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": ["3", 0]}},
+            "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
+                                                      "latent_image": ["11", 0], "seed": seed, "steps": steps,
+                                                      "cfg": cfg, "sampler_name": "euler", "scheduler": "simple",
+                                                      "denoise": denoise}},
+            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+            "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}},
+        }
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "lumina2"}},

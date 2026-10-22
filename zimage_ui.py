@@ -212,12 +212,17 @@ class Engine:
         return client_id
 
     # -- generation --------------------------------------------------------
-    def generate(self, prompt, width, height, steps, cfg, seed, out_dir):
+    def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0):
         def work():
             try:
                 client_id = self._listen_progress() if self.progress else None
+                base_name = None
+                if base_path:
+                    base_name = zg.upload_image('http://%s:%d' % (self.host, self.port), base_path)
+                    self.events.put(('status', 'base image uploaded: %s' % base_name))
                 wf = zg.workflow(prompt, width, height, steps, cfg, seed,
-                                 'zimage-ui-%d' % int(time.time() * 1000))
+                                 'zimage-ui-%d' % int(time.time() * 1000),
+                                 base_image=base_name, denoise=(1.0 if not base_name else denoise))
                 self.events.put(('status', 'queued'))
                 pid = self._post('/prompt', {'prompt': wf, 'client_id': client_id})['prompt_id']
                 self.events.put(('queued', pid))
@@ -267,6 +272,8 @@ class App:
         self.busy = True
         self._img = None
         self._raw = None
+        self.base_path = None
+        self._files = []
 
         root.title('Z-Image — prompt and picture')
         try:
@@ -274,13 +281,31 @@ class App:
         except Exception:
             root.geometry('1180x720')
         root.minsize(760, 480)
-        root.columnconfigure(0, weight=0, minsize=420)
-        root.columnconfigure(1, weight=1)
+        root.columnconfigure(0, weight=0, minsize=210)
+        root.columnconfigure(1, weight=0, minsize=420)
+        root.columnconfigure(2, weight=1)
         root.rowconfigure(0, weight=1)
 
         # ---- left: prompt + controls
+        # ---- far left: previous images
+        gal = ttk.Frame(root, padding=(10, 10, 4, 10))
+        gal.grid(row=0, column=0, sticky='nsew')
+        gal.columnconfigure(0, weight=1)
+        gal.rowconfigure(1, weight=1)
+        ttk.Label(gal, text='Previous').grid(row=0, column=0, sticky='w')
+        self.gallery = tk.Listbox(gal, exportselection=False, activestyle='dotbox', font=('Segoe UI', 9))
+        self.gallery.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
+        self.gallery.bind('<<ListboxSelect>>', lambda e: self._on_pick())
+        self.gallery.bind('<Double-Button-1>', lambda e: self.generate())
+        btns = ttk.Frame(gal)
+        btns.grid(row=2, column=0, sticky='ew')
+        ttk.Button(btns, text='Use as base', command=self.use_as_base).pack(fill='x')
+        ttk.Button(btns, text='Clear base', command=self.clear_base).pack(fill='x', pady=(3, 0))
+        ttk.Button(btns, text='Refresh', command=self.refresh_gallery).pack(fill='x', pady=(3, 0))
+        ttk.Button(btns, text='Open folder', command=self.open_folder).pack(fill='x', pady=(3, 0))
+
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
-        left.grid(row=0, column=0, sticky='nsew')
+        left.grid(row=0, column=1, sticky='nsew')
         left.columnconfigure(0, weight=1)
         left.rowconfigure(1, weight=1)
 
@@ -300,6 +325,18 @@ class App:
         self.seed = tk.StringVar(value=str(args.seed))
         ttk.Entry(row, textvariable=self.seed, width=10).grid(row=0, column=2, sticky='w')
 
+        self.base_row = ttk.Frame(left)
+        self.base_row.grid(row=6, column=0, sticky='ew', pady=(8, 0))
+        ttk.Label(self.base_row, text='base:').pack(side='left')
+        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555')
+        self.base_label.pack(side='left', padx=(4, 10))
+        ttk.Label(self.base_row, text='strength').pack(side='left')
+        self.denoise = tk.DoubleVar(value=0.6)
+        ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130).pack(side='left', padx=4)
+        self.denoise_text = ttk.Label(self.base_row, text='0.60')
+        self.denoise_text.pack(side='left')
+        self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
+
         # ---- middle: progress (sits under the button, above the status line)
         self.bar = ttk.Progressbar(left, mode='determinate', maximum=1.0)
         self.bar.grid(row=3, column=0, sticky='ew', pady=(10, 2))
@@ -311,13 +348,13 @@ class App:
 
         # ---- right: the picture
         right = ttk.Frame(root, padding=(6, 10, 10, 10))
-        right.grid(row=0, column=1, sticky='nsew')
+        right.grid(row=0, column=2, sticky='nsew')
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
         self.canvas = tk.Canvas(right, background='#f4f4f5', highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', lambda e: self._redraw())
-        self.placeholder = self.canvas.create_text(10, 10, anchor='nw', fill='#888',
+        self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
 
         prefill = self.args.initial
@@ -326,8 +363,66 @@ class App:
         if prefill:
             self.text.insert('1.0', prefill)
 
+        self.refresh_gallery()
+
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
+
+    # -- gallery -----------------------------------------------------------
+    def refresh_gallery(self, select=None):
+        out = Path(self.args.out)
+        files = sorted(out.glob('*.png'), key=lambda p: p.stat().st_mtime, reverse=True) if out.exists() else []
+        self._files = files
+        self.gallery.delete(0, 'end')
+        for f in files:
+            self.gallery.insert('end', f.name)
+        if files:
+            idx = 0
+            if select:
+                for i, f in enumerate(files):
+                    if f.name == Path(select).name:
+                        idx = i
+                        break
+            self.gallery.selection_clear(0, 'end')
+            self.gallery.selection_set(idx)
+            self.gallery.see(idx)
+
+    def _picked(self):
+        sel = self.gallery.curselection()
+        if not sel:
+            return None
+        return self._files[sel[0]]
+
+    def _on_pick(self):
+        f = self._picked()
+        if f:
+            self.status.configure(text='selected %s  (Use as base to start from it)' % f.name)
+
+    def use_as_base(self):
+        f = self._picked()
+        if not f:
+            self.hint.configure(text='select an image in the list first')
+            return
+        self.base_path = f
+        self.base_label.configure(text=f.name)
+        self.hint.configure(text='generating will start from %s with strength %.2f' % (f.name, self.denoise.get()))
+        try:
+            self._img = Image.open(f)
+            self.canvas.delete('placeholder')
+            self.root.after_idle(self._redraw)
+        except Exception:
+            pass
+
+    def clear_base(self):
+        self.base_path = None
+        self.base_label.configure(text='(none - text to image)')
+        self.hint.configure(text='')
+
+    def open_folder(self):
+        try:
+            os.startfile(str(Path(self.args.out)))
+        except Exception as e:
+            self.hint.configure(text='could not open folder: %s' % type(e).__name__)
 
     # -- events ------------------------------------------------------------
     def _on_return(self, event):
@@ -355,8 +450,11 @@ class App:
         self.bar.configure(value=0.0)
         self.bar.grid()
         self.status.configure(text='queued…')
+        self.hint.configure(text='starting from %s (strength %.2f)' % (self.base_path.name, self.denoise.get())
+                            if self.base_path else '')
         self.engine.generate(prompt, self.args.size, self.args.size, self.args.steps, self.args.cfg,
-                             seed, self.args.out)
+                             seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
+                             denoise=self.denoise.get())
 
     def _poll(self):
         try:
@@ -384,6 +482,7 @@ class App:
                     self.gen_btn.state(['!disabled'])
                     self.bar.grid_remove()
                     self.status.configure(text='wrote %s' % path)
+                    self.refresh_gallery(select=path)
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
@@ -407,7 +506,9 @@ class App:
 
     def _show(self, raw):
         self._img = Image.open(io.BytesIO(raw))
-        self._redraw()
+        self.canvas.delete('placeholder')
+        self.root.update_idletasks()      # let the maximised window settle before measuring the canvas
+        self.root.after_idle(self._redraw)
 
     def _redraw(self):
         self.canvas.delete('img')
@@ -416,7 +517,7 @@ class App:
         w = max(self.canvas.winfo_width() - 12, 64)
         h = max(self.canvas.winfo_height() - 12, 64)
         im = self._img.copy()
-        im.thumbnail((w, h), Image.LANCZOS)
+        im.thumbnail((w, h), Image.LANCZOS)   # never upscales, never overflows the canvas
         self._tk = ImageTk.PhotoImage(im)
         self.canvas.create_image(self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
                                  image=self._tk, tags='img')
