@@ -320,8 +320,11 @@ class App:
         self.placeholder = self.canvas.create_text(10, 10, anchor='nw', fill='#888',
                                                    text='generated image appears here')
 
-        if self.args.initial:
-            self.text.insert('1.0', self.args.initial)
+        prefill = self.args.initial
+        if getattr(self.args, 'initial_file', ''):
+            prefill = Path(self.args.initial_file).read_text(encoding='utf-8').strip()
+        if prefill:
+            self.text.insert('1.0', prefill)
 
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
@@ -436,6 +439,7 @@ def main(argv):
     ap.add_argument('--no-autostart', action='store_true', help='never start a server; only use a running one')
     ap.add_argument('--no-progress', action='store_true', help='skip the websocket progress feed')
     ap.add_argument('--initial', default='', help='pre-fill the prompt box')
+    ap.add_argument('--initial-file', default='', help='pre-fill from a text file (avoids shell quoting of a long prompt)')
     ap.add_argument('--auto', action='store_true', help='generate once as soon as the server is ready')
     args = ap.parse_args(argv)
 

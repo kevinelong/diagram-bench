@@ -160,7 +160,10 @@ close, but leaves a server it did not start alone. Enter generates, Shift+Enter 
 ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
 
 Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` (1234), `--out`
-(`C:/Users/kevin/Pictures/zimage-ui`), `--no-autostart`, `--no-progress`, `--initial TEXT`, `--auto`.
+(`C:/Users/kevin/Pictures/zimage-ui`), `--no-autostart`, `--no-progress`, `--initial TEXT`, `--initial-file PATH`, `--auto`.
+
+On Windows, prefer `--initial-file` for a long or punctuated prompt: PowerShell's `Start-Process -ArgumentList`
+splits a multi-word argument into several, so `--initial "a blue circle"` arrives as `--initial a` plus strays.
 
 ## Licence
 
