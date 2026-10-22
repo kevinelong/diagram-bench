@@ -373,6 +373,8 @@ class App:
         out = Path(self.args.out)
         files = sorted(out.glob('*.png'), key=lambda p: p.stat().st_mtime, reverse=True) if out.exists() else []
         self._files = files
+        if self.base_path is not None and not any(f.name == self.base_path.name for f in files):
+            self.clear_base()
         self.gallery.delete(0, 'end')
         for f in files:
             self.gallery.insert('end', f.name)
@@ -402,27 +404,45 @@ class App:
         self.canvas.delete('placeholder')
         self.root.after_idle(self._redraw)
 
+    def _set_base(self, path):
+        self.base_path = Path(path)
+        self.base_label.configure(text=self.base_path.name)
+        self.hint.configure(text='next generation starts from %s at strength %.2f'
+                            % (self.base_path.name, self.denoise.get()))
+
+    def _clear_picture(self):
+        self._img = None
+        self.canvas.delete('img')
+        self.canvas.delete('placeholder')
+        self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
+                                                   text='generated image appears here')
+
     def _on_pick(self):
+        """Selecting a row shows it AND makes it the base; deselecting clears both."""
         f = self._picked()
         if not f:
+            self.clear_base()
             return
-        self._display(f)          # show it immediately, before it is chosen as a base
-        self.status.configure(text='showing %s  (Use as base to start from it)' % f.name)
+        self._display(f)
+        self._set_base(f)
+        self.status.configure(text='base: %s  (Enter to edit it, strength %.2f)'
+                              % (f.name, self.denoise.get()))
 
     def use_as_base(self):
         f = self._picked()
         if not f:
             self.hint.configure(text='select an image in the list first')
             return
-        self.base_path = f
-        self.base_label.configure(text=f.name)
-        self.hint.configure(text='generating will start from %s with strength %.2f' % (f.name, self.denoise.get()))
+        self._set_base(f)
         self._display(f)
 
     def clear_base(self):
         self.base_path = None
         self.base_label.configure(text='(none - text to image)')
         self.hint.configure(text='')
+        self.gallery.selection_clear(0, 'end')
+        self._clear_picture()
+        self.status.configure(text='text to image — nothing selected')
 
     def open_folder(self):
         try:
@@ -489,6 +509,7 @@ class App:
                     self.bar.grid_remove()
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
+                    self._set_base(path)
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
