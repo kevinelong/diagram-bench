@@ -37,7 +37,27 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-HOST = os.environ.get('COMFY_HOST', 'http://127.0.0.1:8006')
+CANDIDATES = ['http://127.0.0.1:8006', 'http://127.0.0.1:8000', 'http://127.0.0.1:8188',
+              'http://127.0.0.1:8001', 'http://127.0.0.1:8003']
+HOST = os.environ.get('COMFY_HOST', '') or CANDIDATES[0]
+HOST_SOURCE = 'COMFY_HOST' if os.environ.get('COMFY_HOST') else 'assumed'
+
+
+def resolve_host():
+    """COMFY_HOST wins; otherwise probe the ports this box actually uses. A truncated start command silently drops
+    --port, leaving the server on 8188 while the script assumed 8006, so probing beats assuming."""
+    global HOST, HOST_SOURCE
+    if os.environ.get('COMFY_HOST'):
+        return HOST, HOST_SOURCE
+    for cand in CANDIDATES:
+        try:
+            urllib.request.urlopen(cand + '/system_stats', timeout=2)
+            HOST, HOST_SOURCE = cand, 'auto-detected'
+            return HOST, HOST_SOURCE
+        except Exception:
+            continue
+    HOST_SOURCE = 'none answered'
+    return HOST, HOST_SOURCE
 OUTPUT_DIR = Path(os.environ.get('COMFY_OUTPUT', r'C:/Users/kevin/Documents/ComfyUI/output'))
 # The three components matter: the UNET is Z-Image Turbo (nvfp4 on this box), and the text encoder must be loaded as
 # `lumina2` - the flux encoder in the same folder will not do. ae.safetensors is the matching VAE.
@@ -116,11 +136,14 @@ def main(argv):
     if not prompt:
         print('empty prompt'); return 2
 
+    host, how = resolve_host()
+    print('server   %s (%s)' % (host, how))
     try:
         get('/system_stats', timeout=10)
     except Exception as e:
-        print('ComfyUI is not reachable at %s (%s).' % (HOST, type(e).__name__))
-        print('Start it with the command in this file\'s docstring, then re-run. COMFY_HOST overrides the address.')
+        print('ComfyUI is not reachable (%s).' % type(e).__name__)
+        print('tried: %s' % ', '.join([host] if how != 'none answered' else CANDIDATES))
+        print('start it with:  .\\start-comfy.ps1      then re-run, or set COMFY_HOST to its address')
         return 3
 
     prefix = 'zimage-gen-%d' % int(time.time())
@@ -129,7 +152,14 @@ def main(argv):
         pid = post('/prompt', {'prompt': workflow(prompt, args.width, args.height, args.steps, args.cfg,
                                                   args.seed, prefix)})['prompt_id']
     except urllib.error.HTTPError as e:
-        print('ComfyUI rejected the workflow: %s' % e.read().decode('utf-8', 'replace')[:400])
+        body = e.read().decode('utf-8', 'replace')
+        print('ComfyUI rejected the workflow: %s' % body[:400])
+        if 'value_not_in_list' in body or 'not in []' in body:
+            print()
+            print('That "not in []" means the server has NO model paths: it was started without')
+            print('--extra-model-paths-config (and usually without --base-directory), so ComfyUI cannot see')
+            print('D:\\models\\comfyui. It still answers /system_stats, which is why this looks like a naming')
+            print('problem. Restart it with:  .\\start-comfy.ps1')
         return 4
 
     images, status = [], None
