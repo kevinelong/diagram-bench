@@ -393,10 +393,21 @@ class App:
             return None
         return self._files[sel[0]]
 
+    def _display(self, path):
+        try:
+            self._img = Image.open(path)
+        except Exception as e:
+            self.hint.configure(text='cannot open %s: %s' % (Path(path).name, type(e).__name__))
+            return
+        self.canvas.delete('placeholder')
+        self.root.after_idle(self._redraw)
+
     def _on_pick(self):
         f = self._picked()
-        if f:
-            self.status.configure(text='selected %s  (Use as base to start from it)' % f.name)
+        if not f:
+            return
+        self._display(f)          # show it immediately, before it is chosen as a base
+        self.status.configure(text='showing %s  (Use as base to start from it)' % f.name)
 
     def use_as_base(self):
         f = self._picked()
@@ -406,12 +417,7 @@ class App:
         self.base_path = f
         self.base_label.configure(text=f.name)
         self.hint.configure(text='generating will start from %s with strength %.2f' % (f.name, self.denoise.get()))
-        try:
-            self._img = Image.open(f)
-            self.canvas.delete('placeholder')
-            self.root.after_idle(self._redraw)
-        except Exception:
-            pass
+        self._display(f)
 
     def clear_base(self):
         self.base_path = None
