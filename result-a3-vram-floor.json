@@ -1,0 +1,83 @@
+{
+ "declaration": "DECLARATION-20261021-a3-vram-floor.md",
+ "prompt": "net-1-words",
+ "size": 1024,
+ "seed": 1234,
+ "variants": [
+  {
+   "variant": "v0-baseline",
+   "flags": [],
+   "status": "ran",
+   "free_before_mib": 11035,
+   "vram_total_mib": 12227,
+   "vram_peak_mib": 11266,
+   "free_at_peak_mib": 961,
+   "wall_s": 12.3,
+   "image_wall_s": 12.1,
+   "sha256": "575bf60da8b263fabcfa9f0c001d8a53a5c092635f6773f6ad2f4386004d6fd6",
+   "ok": true,
+   "arm_stdout_tail": [
+    "",
+    "1/1 generated; median wall 12.1s; peak VRAM 11266 MiB; wrote result-arm-a3-v0-baseline.json"
+   ]
+  },
+  {
+   "variant": "v1-reserve-1g",
+   "flags": [
+    "--reserve-vram",
+    "1.0"
+   ],
+   "status": "ran",
+   "free_before_mib": 11035,
+   "vram_total_mib": 12227,
+   "vram_peak_mib": 11277,
+   "free_at_peak_mib": 950,
+   "wall_s": 7.4,
+   "image_wall_s": 7.2,
+   "sha256": "b33437adedb5f683ebefaccb8b9f9166d53514075ab4be42b1887bc11585554b",
+   "ok": true,
+   "arm_stdout_tail": [
+    "",
+    "1/1 generated; median wall 7.2s; peak VRAM 11277 MiB; wrote result-arm-a3-v1-reserve-1g.json"
+   ]
+  },
+  {
+   "variant": "v2-cache-none",
+   "flags": [
+    "--cache-none"
+   ],
+   "status": "ran",
+   "free_before_mib": 11032,
+   "vram_total_mib": 12227,
+   "vram_peak_mib": 6307,
+   "free_at_peak_mib": 5920,
+   "wall_s": 8.3,
+   "image_wall_s": 8.1,
+   "sha256": "84c6807f4d07b20d17b6cbe66bfcaad4eb74a6526208bb6049cfd6122f97847a",
+   "ok": true,
+   "arm_stdout_tail": [
+    "",
+    "1/1 generated; median wall 8.1s; peak VRAM 6307 MiB; wrote result-arm-a3-v2-cache-none.json"
+   ]
+  },
+  {
+   "variant": "v3-lowvram",
+   "flags": [
+    "--lowvram"
+   ],
+   "status": "ran",
+   "free_before_mib": 11032,
+   "vram_total_mib": 12227,
+   "vram_peak_mib": 10245,
+   "free_at_peak_mib": 1982,
+   "wall_s": 7.3,
+   "image_wall_s": 7.1,
+   "sha256": "a7e721bcdd93c30db64f14868ba7fc1d22eccf3c8bfb37e02586332493fbcf95",
+   "ok": true,
+   "arm_stdout_tail": [
+    "",
+    "1/1 generated; median wall 7.1s; peak VRAM 10245 MiB; wrote result-arm-a3-v3-lowvram.json"
+   ]
+  }
+ ]
+}

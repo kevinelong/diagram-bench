@@ -1,0 +1,28 @@
+{
+ "arm": "A-zimage-turbo-nvfp4",
+ "steps": 4,
+ "cfg": 1.0,
+ "seeds": [
+  1234
+ ],
+ "sampler": "euler/simple",
+ "resolution": 1024,
+ "idle_vram_mib": 1360,
+ "determinism": null,
+ "rows": [
+  {
+   "id": "net-1-words",
+   "kind": "topology",
+   "seed": 1234,
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 7.1,
+   "vram_peak_mib": 10410,
+   "status": "success",
+   "error": null,
+   "file": "nd2-net-1-words-s1234.png",
+   "sha256": "8d534af033e912814d5f697363e6c4ab7586417fe69263cf9c0de76c4fe0fa87"
+  }
+ ]
+}
