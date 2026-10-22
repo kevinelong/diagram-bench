@@ -148,6 +148,20 @@ on 2026-10-20/21 and their output is what the RESULT files record.
 - **Two dimensions the prompts ask for are recorded as unmeasurable**, not passed: dimension arrows on blueprints,
   and lane semantics (a connector proves it spans the divider, not that it means what the diagram claims).
 
+## Generating with a window instead of a command line
+
+```powershell
+.\start-comfy.ps1                  # session server, optional - the UI will start one itself
+python zimage_ui.py                 # prompt box left, picture right, progress bar between
+```
+
+`zimage_ui.py` keeps the server under the window's control: it starts ComfyUI if nothing is answering and stops it on
+close, but leaves a server it did not start alone. Enter generates, Shift+Enter adds a newline. Step progress comes from
+ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
+
+Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` (1234), `--out`
+(`C:/Users/kevin/Pictures/zimage-ui`), `--no-autostart`, `--no-progress`, `--initial TEXT`, `--auto`.
+
 ## Licence
 
 **FSL-1.1-MIT** — see `LICENSE.md`. The scripts, harness, prompts and result documents here are licensed under the
