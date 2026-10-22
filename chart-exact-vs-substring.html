@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Diagram label accuracy vs speed - exact-token scoring, 2026-10-22</title>
+<style>
+html,body{margin:0;padding:0;height:100%;background:#fff;overflow:hidden}
+#wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+#wrap svg{width:100%;height:100%}
+</style></head>
+<body><div id="wrap"><svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, sans-serif">
+  <g stroke="var(--border, #d1d5db)" stroke-width="1" opacity="0.55">
+    <line x1="120" y1="425.6" x2="900" y2="425.6"/>
+    <line x1="120" y1="381.1" x2="900" y2="381.1"/>
+    <line x1="120" y1="336.7" x2="900" y2="336.7"/>
+    <line x1="120" y1="292.2" x2="900" y2="292.2"/>
+    <line x1="120" y1="247.8" x2="900" y2="247.8"/>
+    <line x1="120" y1="203.3" x2="900" y2="203.3"/>
+    <line x1="120" y1="158.9" x2="900" y2="158.9"/>
+    <line x1="120" y1="114.4" x2="900" y2="114.4"/>
+    <line x1="120" y1="70.0" x2="900" y2="70.0"/>
+  </g>
+  <g stroke="var(--fg, #1a1a1a)" stroke-width="1.5"><line x1="120" y1="58.0" x2="120" y2="470"/><line x1="120" y1="470" x2="930" y2="470"/></g>
+  <g fill="var(--muted, #6b7280)" font-size="12" text-anchor="end">
+    <text x="110" y="429.6">0.20</text>
+    <text x="110" y="385.1">0.30</text>
+    <text x="110" y="340.7">0.40</text>
+    <text x="110" y="296.2">0.50</text>
+    <text x="110" y="251.8">0.60</text>
+    <text x="110" y="207.3">0.70</text>
+    <text x="110" y="162.9">0.80</text>
+    <text x="110" y="118.4">0.90</text>
+    <text x="110" y="74.0">1.00</text>
+  </g>
+  <g fill="var(--muted, #6b7280)" font-size="12" text-anchor="middle">
+    <text x="120.0" y="492">2 s</text>
+    <text x="430.4" y="492">5 s</text>
+    <text x="665.2" y="492">10 s</text>
+    <text x="900.0" y="492">20 s</text>
+  </g>
+  <text x="510.0" y="518" fill="var(--fg, #1a1a1a)" font-size="13" text-anchor="middle">median wall time per image (log scale) → slower</text>
+  <text x="20" y="270.0" fill="var(--fg, #1a1a1a)" font-size="13" text-anchor="middle" transform="rotate(-90 20 270.0)">label accuracy (OCR exact) → better</text>
+  <text x="120" y="34" fill="var(--fg, #1a1a1a)" font-size="17" font-weight="600">Diagram label accuracy vs speed — exact-token scoring, 2026-10-22</text>
+  <text x="120" y="54" fill="var(--muted, #6b7280)" font-size="12">filled = measured today with exact-token matching · hollow = the previous chart, substring-matched, now retracted</text>
+  <defs><marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="var(--muted, #6b7280)"/></marker></defs>
+  <line x1="437.1" y1="154.0" x2="268.5" y2="165.1" stroke="var(--muted, #6b7280)" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.9" marker-end="url(#ar)"/>
+  <line x1="430.4" y1="241.6" x2="430.4" y2="250.0" stroke="var(--muted, #6b7280)" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.9" marker-end="url(#ar)"/>
+  <line x1="668.6" y1="269.1" x2="668.6" y2="334.0" stroke="var(--muted, #6b7280)" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.9" marker-end="url(#ar)"/>
+  <circle cx="437.1" cy="154.0" r="7" fill="none" stroke="var(--muted, #6b7280)" stroke-width="1.7" stroke-dasharray="2 2"/>
+  <text x="406" y="158" fill="var(--muted, #6b7280)" font-size="11" text-anchor="end">previous Z-Image</text>
+  <circle cx="430.4" cy="241.6" r="7" fill="none" stroke="var(--muted, #6b7280)" stroke-width="1.7" stroke-dasharray="2 2"/>
+  <text x="430.4" y="228.6" fill="var(--muted, #6b7280)" font-size="11" text-anchor="middle">klein</text>
+  <circle cx="668.6" cy="269.1" r="7" fill="none" stroke="var(--muted, #6b7280)" stroke-width="1.7" stroke-dasharray="2 2"/>
+  <text x="668.6" y="256.1" fill="var(--muted, #6b7280)" font-size="11" text-anchor="middle">schnell</text>
+  <circle cx="703.6" cy="201.6" r="7" fill="none" stroke="var(--muted, #6b7280)" stroke-width="1.7" stroke-dasharray="2 2"/>
+  <text x="703.6" y="188.6" fill="var(--muted, #6b7280)" font-size="11" text-anchor="middle">FLUX.1-dev 512</text>
+  <circle cx="268.5" cy="165.1" r="8.5" fill="var(--success, #15803d)"/>
+  <text x="282.5" y="170.1" fill="var(--fg, #1a1a1a)" font-size="12">Z-Image  0.786 · 3.1 s</text>
+  <circle cx="549.2" cy="165.1" r="8.5" fill="var(--success, #15803d)"/>
+  <text x="533" y="182" fill="var(--fg, #1a1a1a)" font-size="12" text-anchor="end">cache-none 0.786 · 7.1 s · 6.3 GiB</text>
+  <rect x="261.0" y="268.3" width="15" height="15" fill="var(--success, #15803d)"/>
+  <text x="282.5" y="264.8" fill="var(--fg, #1a1a1a)" font-size="12">grounded  0.537</text>
+  <circle cx="430.4" cy="250.0" r="8.5" fill="var(--warning, #b45309)"/>
+  <text x="444.4" y="255.0" fill="var(--fg, #1a1a1a)" font-size="12">klein  0.595</text>
+  <circle cx="668.6" cy="334.0" r="8.5" fill="var(--error, #b91c1c)"/>
+  <text x="682.6" y="339.0" fill="var(--fg, #1a1a1a)" font-size="12">schnell  0.406</text>
+  <rect x="661.1" y="357.2" width="15" height="15" fill="var(--error, #b91c1c)"/>
+  <text x="682.6" y="381.7" fill="var(--fg, #1a1a1a)" font-size="12">grounded  0.337</text>
+  <g stroke="var(--warning, #b45309)" stroke-width="1.4"><line x1="150" y1="352" x2="150" y2="418"/></g>
+  <text x="164" y="364" fill="var(--warning, #b45309)" font-size="12" font-weight="600">Grounding costs labels on every model</text>
+  <text x="164" y="382" fill="var(--fg, #1a1a1a)" font-size="12">Z-Image 0.786 → 0.537 · schnell 0.406 → 0.337</text>
+  <text x="164" y="400" fill="var(--muted, #6b7280)" font-size="12">every retracted point moved down, none moved up</text>
+  <text x="164" y="418" fill="var(--muted, #6b7280)" font-size="12">dashed arrows: previous score → today's exact score</text>
+  <g font-size="12" fill="var(--fg, #1a1a1a)">
+    <circle cx="128" cy="554" r="7.5" fill="var(--success, #15803d)"/><text x="144" y="558">measured today (exact tokens)</text>
+    <circle cx="128" cy="578" r="7" fill="none" stroke="var(--muted, #6b7280)" stroke-width="1.7" stroke-dasharray="2 2"/><text x="144" y="582">previous chart (substring-matched, retracted)</text>
+    <rect x="460" y="547" width="14" height="14" fill="var(--success, #15803d)"/><text x="480" y="558">square = grounded-prompt arm</text>
+  </g>
+</svg></div></body></html>
