@@ -147,3 +147,12 @@ on 2026-10-20/21 and their output is what the RESULT files record.
 - **Blender (method D) was never run**, and no animated asset has been scored.
 - **Two dimensions the prompts ask for are recorded as unmeasurable**, not passed: dimension arrows on blueprints,
   and lane semantics (a connector proves it spans the divider, not that it means what the diagram claims).
+
+## Licence
+
+**FSL-1.1-MIT** — see `LICENSE.md`. The scripts, harness, prompts and result documents here are licensed under the
+Functional Source License 1.1 with an MIT future licence; it converts to MIT after two years.
+
+Model weights and the third-party tools this work measures or drives (llama.cpp, ComfyUI, KiCad, Ollama, and the
+diffusion and language models themselves) are **not** covered and are **not** distributed here — they remain under
+their own licences. Nothing in this repository redistributes a model.
