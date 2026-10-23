@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -116,6 +118,7 @@ def main():
         SHOTS.mkdir(parents=True, exist_ok=True)
 
     tmp = Path(tempfile.mkdtemp(prefix='gal-test-'))
+    os.environ['LOCALAPPDATA'] = str(tmp / 'appdata')   # settings must not touch the real profile
     files = make_gallery(tmp, 26)   # more than the strip holds, so the cap is exercised
     root = tk.Tk()
     try:
@@ -221,8 +224,16 @@ def main():
     check('thumbnails gone', not any((tmp / '.thumbs' / (t.stem + '.jpg')).exists() for t in targets))
     check('selection emptied', app.selected == [])
     check('gallery dropped to 24 files', len(app._files) == 24, str(len(app._files)))
-    check('status reports the count', 'deleted 2' in app.status['text'], app.status['text'])
+    check('status says where they went', 'Recycle Bin' in app.status['text'] and '2' in app.status['text'],
+          app.status['text'])
     shot(root, '06-after-delete')
+
+    print('\n-- the recycle path really is the shell one')
+    throwaway = tmp / 'recycle-probe.png'
+    throwaway.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 2048)
+    accepted = app._recycle_files([throwaway])
+    check('shell accepted the file for recycling', accepted is True)
+    check('and it left the folder', not throwaway.exists())
 
     print('\n-- deleting the base image clears it')
     app.clear_selection()
@@ -331,6 +342,120 @@ def main():
     app.seq_var.set(True)
     app.layout_var.set('single')
 
+    print('\n-- the banner says what Enter will do')
+    app.clear_base()
+    app.layout_var.set('single')
+    app.size_var.set('512')
+    app.steps_var.set('4')
+    app.sampler_var.set('euler')
+    app.seed.set('1234')
+    root.update()
+    check('banner reads TEXT to IMAGE', app.banner['text'].startswith('TEXT'), app.banner['text'])
+    check('banner names steps, sampler and size',
+          all(s in app.banner['text'] for s in ('4 steps', 'euler', '512 px')), app.banner['text'])
+    first_tile = app._files[0]
+    click(app, first_tile)
+    check('banner switches to EDIT', app.banner['text'].startswith('EDIT'), app.banner['text'])
+    check('banner names the base file', first_tile.name in app.banner['text'], app.banner['text'])
+    app.clear_base()
+    check('clearing the base returns to TEXT', app.banner['text'].startswith('TEXT'), app.banner['text'])
+
+    print('\n-- tooltips')
+    check('every control has a tooltip', len(app._tips) >= 20, str(len(app._tips)))
+    tip = app._tips[0]
+    tip.show(); root.update()
+    check('a tooltip opens a window', tip._tip is not None)
+    tip.hide(); root.update()
+    check('and closes again', tip._tip is None)
+
+    print('\n-- labels are plain English')
+    check('the sequential box says one image at a time',
+          'one image at a time' in app.seq_chk['text'].lower(), app.seq_chk['text'])
+    check('the chain box says reuse last image',
+          'reuse last image' in app.chain_chk['text'].lower(), app.chain_chk['text'])
+
+    print('\n-- per-tile progress')
+    app._run_start = time.time() - 5.0
+    app._show_tile_progress(3, 8)
+    check('ticks show 3 filled of 8', app.ticks['text'].count('\u25cf') == 3 and len(app.ticks['text']) == 8,
+          repr(app.ticks['text']))
+    check('status counts tiles', 'tile 3 of 8' in app.status['text'], app.status['text'])
+    check('status estimates the rest', 'left' in app.status['text'], app.status['text'])
+
+    print('\n-- cost preview on layout change')
+    app.busy = False
+    app.layout_var.set('16-up (4x4)')
+    root.update()
+    check('setting a layout shows an estimate', 'tiles' in app.hint['text'] and '\u2248' in app.hint['text'],
+          app.hint['text'])
+    check('the estimate compares sequential and batch', 'batch' in app.hint['text'], app.hint['text'])
+    app.layout_var.set('single')
+
+    print('\n-- keyboard navigation in the strip')
+    app.clear_selection()
+    app._nav(0, 0)
+    check('first arrow press selects the first tile',
+          app.selected and app.selected[0].name == app._files[0].name)
+    app._nav(1, 0)
+    check('right moves one tile on', app.selected[0].name == app._files[1].name, app.selected[0].name)
+    app._nav(0, 1)
+    check('down moves one row (3 columns)', app.selected[0].name == app._files[4].name, app.selected[0].name)
+    n_before = len(app.selected)
+    app._nav_toggle()
+    check('space removes the current tile', len(app.selected) == n_before - 1)
+    app._nav_toggle()
+    check('space adds it back', len(app.selected) == n_before)
+    loaded = app.selected[-1]
+    app._nav_open()
+    check('Enter loads the selected tile as the base',
+          app.base_path is not None and app.base_path.name == loaded.name)
+    check('arrow keys are bound on the strip', bool(app.gal_canvas.bind('<Right>')))
+    app.clear_base()
+
+    print('\n-- prompt history')
+    app._history = ['first prompt', 'second prompt']
+    app._hist_pos = None
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'draft')
+    app.text.mark_set('insert', '1.0')
+    app._on_hist_up()
+    check('Up recalls the newest prompt', app.text.get('1.0', 'end').strip() == 'second prompt',
+          app.text.get('1.0', 'end').strip())
+    app._on_hist_up()
+    check('Up again goes further back', app.text.get('1.0', 'end').strip() == 'first prompt')
+    app._on_hist_down()
+    check('Down comes forward again', app.text.get('1.0', 'end').strip() == 'second prompt')
+    app._on_hist_down()
+    check('Down past the end clears the box', app.text.get('1.0', 'end').strip() == '')
+
+    print('\n-- a failure offers Retry instead of a stack trace')
+    app.engine.events.put(('error', 'connection refused'))
+    app._poll(); root.update()
+    check('message names the local port', '127.0.0.1:8019' in app.hint['text'], app.hint['text'])
+    check('and offers Retry', 'Retry' in app.hint['text'])
+    check('retry button is visible', bool(app.retry_btn.winfo_ismapped()))
+    check('status says nothing was saved', 'nothing was saved' in app.status['text'], app.status['text'])
+    app.engine.events.put(('ready', None))
+    app._poll(); root.update()
+    check('retry hides once the server answers', not app.retry_btn.winfo_ismapped())
+
+    print('\n-- metadata popover')
+    click(app, app._files[0])
+    app.show_metadata(); root.update()
+    tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.winfo_exists()]
+    check('a metadata window opens', len(tops) == 1, str(len(tops)))
+    if tops:
+        texts = [w for w in tops[0].winfo_children() if isinstance(w, tk.Text)]
+        body = texts[0].get('1.0', 'end') if texts else ''
+        check('it shows the prompt', 'prompt' in body.lower(), body[:60])
+        check('it shows the seed', 'seed:' in body.lower(), body[:60])
+        tops[0].destroy()
+    app.clear_base()
+
+    print('\n-- the placeholder wraps instead of being clipped')
+    app._fit_placeholder(NS(width=300))
+    width = app.canvas.itemcget(app.placeholder, 'width')
+    check('placeholder wraps to the canvas width', width != '' and int(width) == 272, width)
+
     print('\n-- the browser window shares the selection')
     app.clear_selection()
     app.open_all()
@@ -351,6 +476,44 @@ def main():
     root.update()
 
     root.destroy()
+
+    print('\n-- starters, and settings that survive a restart')
+    empty = Path(tempfile.mkdtemp(prefix='gal-empty-'))
+    args2 = argparse.Namespace(**vars(args))
+    args2.out = str(empty)
+    root2 = tk.Tk()
+    app2 = zui.App(root2, StubEngine(), args2)
+    root2.update()
+    check('starters appear when nothing has been made', bool(app2.starters.winfo_ismapped()))
+    app2.use_starter(zui.STARTER_PROMPTS[0][1])
+    check('a starter fills the prompt box', 'fox' in app2.text.get('1.0', 'end'))
+    check('and the strip stays empty', len(app2._tile_widgets) == 0)
+
+    app2.size_var.set('768')
+    app2.steps_var.set('8')
+    app2.sampler_var.set('euler_ancestral')
+    app2.layout_var.set('4-up (2x2)')
+    app2.chain_var.set(True)          # deliberately on: it must not be remembered
+    app2._persist()
+    data = zui.load_settings()
+    check('size saved', data.get('size') == '768', str(data.get('size')))
+    check('steps saved', data.get('steps') == '8', str(data.get('steps')))
+    check('sampler saved', data.get('sampler') == 'euler_ancestral', str(data.get('sampler')))
+    check('layout saved', data.get('layout') == '4-up (2x2)', str(data.get('layout')))
+    check('the chain flag is never saved', 'chain' not in data, str(sorted(data)))
+    root2.destroy()
+
+    root3 = tk.Tk()
+    app3 = zui.App(root3, StubEngine(), args2)
+    root3.update()
+    check('a new window restores the size', app3.size_var.get() == '768', app3.size_var.get())
+    check('... the steps', app3.steps_var.get() == '8', app3.steps_var.get())
+    check('... the sampler', app3.sampler_var.get() == 'euler_ancestral', app3.sampler_var.get())
+    check('... the layout', app3.layout_var.get() == '4-up (2x2)', app3.layout_var.get())
+    check('but the chain box is still off for this window', app3.chain_var.get() is False)
+    check('starters still shown for the still-empty folder', bool(app3.starters.winfo_ismapped()))
+    root3.destroy()
+
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
     print('gallery was %s' % tmp)
     return 1 if FAILS else 0

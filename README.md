@@ -179,6 +179,15 @@ per step, which adds grain and is the real "randomisation" knob), **strength** f
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
+Every control carries a one-line tooltip, and a **banner** above the progress bar states what the next Generate will
+do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one image · seed 1234`, switching to
+`EDIT img.png at 0.60` when a base is set. Choosing a layout prints its measured cost (`16 tiles · ≈ 3 m 39 s one at a
+time, or ≈ 11 s as one batch`), from a table of timings taken on this machine rather than a formula.
+
+Window size, steps, sampler and layout are remembered in `%LOCALAPPDATA%/zimage-ui/settings.json`, and Up/Down in the
+prompt box recalls previous prompts. The *reuse last image as base* box is deliberately **not** remembered, so a fresh
+window always starts as text to image.
+
 **reuse last image as base** is off by default, and it changes what "Enter" means from run to run. Unticked, a
 generation is text to image: the picture that just appeared does **not** become the base, so pressing Enter again
 produces another fresh image. Ticked, each finished image becomes the base for the next run - the chaining behaviour -
@@ -219,7 +228,7 @@ action instead of only loading them:
 | **ctrl+click** | adds or removes that image from the selection, leaving the base alone |
 | **shift+click** | selects the range from the last clicked image to this one |
 | **Select all** | takes the whole strip; pressing it again clears |
-| **Delete (N)** | confirms, then removes the PNG, its sidecar and its cached thumbnail |
+| **Delete (N)** | confirms, then moves the PNG, its sidecar and its thumbnail to the **Recycle Bin** (recoverable) |
 | **Del / Ctrl+A / Esc** | delete selection, select all, clear selection - ignored while the prompt box has focus |
 
 Two states are visible at once and do not conflict: a **blue ring** means "selected", a **black border** means "loaded
@@ -229,7 +238,7 @@ shares the same selection and carries its own Delete, so a sweep can span both.
 The strip holds 20 (`RECENT_N`, `RECENT_COLS`, `RECENT_PX` at the top of the module) 4 across by 5 deep; the title
 reads *Recent (20 of 26)* once there are more files, the strip scrolls when the window is too short, and the scrollbar
 hides itself when everything fits. *Select all* therefore covers 18; use **More…** for a bigger sweep.
-There is no undo - the native confirmation dialog is the only guard.
+There is no undo inside the window, but the delete itself is reversible in Explorer's Recycle Bin.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
 carrying the same state bits Tk sends), asserts 49 selection, delete and older-control checks, and screenshots each

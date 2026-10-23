@@ -161,6 +161,37 @@ def copy_png_to_clipboard(path):
         return False, '%s: %s' % (type(e).__name__, e)
 
 
+SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history')
+
+# Measured cost of one sequential request at 4 steps, on this box, with the model cache disabled. The cost is flat
+# above 384 px - the per-request overhead dominates, not the pixel count - so area-based formulas are wrong here.
+SIZE_SECONDS = {256: 6.5, 320: 10.0, 384: 14.0, 448: 13.9, 512: 13.7, 640: 14.0, 768: 13.7, 1024: 14.1}
+BATCH_SECONDS_PER_TILE = 0.67      # measured: 16-up at 384 px in one batch took 10.75 s
+
+
+def settings_path():
+    base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
+    return base / 'zimage-ui' / 'settings.json'
+
+
+def load_settings():
+    try:
+        data = json.loads(settings_path().read_text(encoding='utf-8'))
+        return {k: v for k, v in data.items() if k in SETTINGS_KEYS}
+    except Exception:
+        return {}
+
+
+def save_settings(data):
+    try:
+        p = settings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({k: data[k] for k in SETTINGS_KEYS if k in data}, indent=1), encoding='utf-8')
+        return True
+    except Exception:
+        return False
+
+
 THUMB_DIR = '.thumbs'
 THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
@@ -414,12 +445,71 @@ class Engine:
         return path
 
 
+STARTER_PROMPTS = [('icon', 'flat vector icon of a fox, simple shapes, white background'), ('diagram', 'clean flowchart: START, VALIDATE, STORE, DONE - vertical, thin black lines, white background'), ('photo', 'photo of a ceramic mug on a wooden table, soft window light')]
+
+
+class Tooltip:
+    """A one-line explanation shown under a control on hover.
+
+    Delayed so that sweeping the mouse across the window does not flash a dozen bubbles, and destroyed on leave so no
+    orphaned toplevels accumulate (tests assert on _tips being empty after a leave).
+    """
+
+    def __init__(self, widget, text, delay=450):
+        self.widget, self.text, self.delay = widget, text, delay
+        self._id = None
+        self._tip = None
+        widget.bind('<Enter>', self._schedule, add='+')
+        widget.bind('<Leave>', self.hide, add='+')
+        widget.bind('<ButtonPress>', self.hide, add='+')
+
+    def _schedule(self, _=None):
+        self._cancel()
+        self._id = self.widget.after(self.delay, self.show)
+
+    def _cancel(self):
+        if self._id is not None:
+            try:
+                self.widget.after_cancel(self._id)
+            except Exception:
+                pass
+            self._id = None
+
+    def show(self):
+        if self._tip is not None:
+            return
+        x = self.widget.winfo_rootx() + 8
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        tip.wm_geometry('+%d+%d' % (x, y))
+        tk.Label(tip, text=self.text, background='#ffffe0', foreground='#222', relief='solid', bd=1,
+                 font=('Segoe UI', 9), justify='left', wraplength=340, padx=7, pady=5).pack()
+        self._tip = tip
+
+    def hide(self, _=None):
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except Exception:
+                pass
+            self._tip = None
+
+
 class App:
     def __init__(self, root, engine, args):
         self.root, self.engine, self.args = root, engine, args
         self.busy = True
         self._img = None
         self._raw = None
+        self._tips = []                   # populated as widgets appear, not in one later pass
+        self._poll_id = None
+        self._settings = load_settings()
+        self._history = list(self._settings.get('history') or [])
+        self._hist_pos = None
+        self._run_start = None
+        self._run_total = 0
         self.base_path = None
         self._base_from_gallery = False   # True only when a click in the gallery chose the base
         self._current = None
@@ -463,6 +553,11 @@ class App:
         self.recent.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<MouseWheel>', self._on_gallery_wheel)
+        self.gal_canvas.configure(takefocus=1)
+        for seq, fn in (('<Left>', lambda e: self._nav(-1, 0)), ('<Right>', lambda e: self._nav(1, 0)),
+                        ('<Up>', lambda e: self._nav(0, -1)), ('<Down>', lambda e: self._nav(0, 1)),
+                        ('<space>', self._nav_toggle), ('<Return>', self._nav_open)):
+            self.gal_canvas.bind(seq, fn)
         self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
         for c in range(RECENT_COLS):
             self.recent.columnconfigure(c, weight=0)
@@ -474,20 +569,25 @@ class App:
 
         btns = ttk.Frame(gal)
         btns.grid(row=2, column=0, columnspan=2, sticky='ew')
-        ttk.Button(btns, text='More…', command=self.open_all).pack(fill='x')
-        ttk.Button(btns, text='Clear base', command=self.clear_base).pack(fill='x', pady=(3, 0))
-        ttk.Button(btns, text='Refresh', command=self.refresh_gallery).pack(fill='x', pady=(3, 0))
-        ttk.Button(btns, text='Open folder', command=self.open_folder).pack(fill='x', pady=(3, 0))
+        self.more_btn = ttk.Button(btns, text='More…', command=self.open_all)
+        self.more_btn.pack(fill='x')
+        self.clear_base_btn = ttk.Button(btns, text='Clear base', command=self.clear_base)
+        self.clear_base_btn.pack(fill='x', pady=(3, 0))
+        self.refresh_btn = ttk.Button(btns, text='Refresh', command=self.refresh_gallery)
+        self.refresh_btn.pack(fill='x', pady=(3, 0))
+        self.folder_btn = ttk.Button(btns, text='Open folder', command=self.open_folder)
+        self.folder_btn.pack(fill='x', pady=(3, 0))
 
         selrow = ttk.Frame(btns)
         selrow.pack(fill='x', pady=(6, 0))
-        ttk.Button(selrow, text='Select all', command=self.select_all).pack(side='left', fill='x', expand=True)
+        self.sel_all_btn = ttk.Button(selrow, text='Select all', command=self.select_all)
+        self.sel_all_btn.pack(side='left', fill='x', expand=True)
         self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
         self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
         self.sel_label = ttk.Label(btns, text='', foreground='#2a6df4')
         self.sel_label.pack(anchor='w', pady=(3, 0))
-        ttk.Label(btns, text='ctrl+click adds · shift+click ranges\nDel / Ctrl+A / Esc', foreground='#777',
-                  font=('Segoe UI', 7), justify='left').pack(anchor='w')
+        ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
+                  foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
         gal.rowconfigure(1, weight=1)
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
@@ -500,6 +600,8 @@ class App:
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
+        self.text.bind('<Up>', self._on_hist_up)
+        self.text.bind('<Down>', self._on_hist_down)
         self.text.focus_set()
 
         row = ttk.Frame(left)
@@ -509,65 +611,95 @@ class App:
         self.gen_btn.grid(row=0, column=0, sticky='w')
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
         self.stop_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
+        self.retry_btn = ttk.Button(row, text='Retry', command=self.retry)
+        self.retry_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
+        self.retry_btn.grid_remove()
         ttk.Label(row, text='size').grid(row=0, column=1, padx=(12, 4))
-        self.size_var = tk.StringVar(value=str(args.size))
-        ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
-                     values=['256', '320', '384', '448', '512', '640', '768', '1024']).grid(row=0, column=2, sticky='w')
+        self.size_var = tk.StringVar(value=str(self._settings.get('size') or args.size))
+        self.size_cb = ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
+                                    values=['256', '320', '384', '448', '512', '640', '768', '1024'])
+        self.size_cb.grid(row=0, column=2, sticky='w')
         ttk.Label(row, text='layout').grid(row=0, column=3, padx=(10, 4))
-        self.layout_var = tk.StringVar(value='single')
-        ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
-                     values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)']).grid(row=0, column=4, sticky='w')
+        self.layout_var = tk.StringVar(value=self._settings.get('layout') or 'single')
+        self.layout_cb = ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
+                                      values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'])
+        self.layout_cb.grid(row=0, column=4, sticky='w')
         # one at a time by default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
         # individually reproducible and the VRAM peak stays that of a single image
         self.seq_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(row, text='one at a time (seed+1)', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
-                                                                                sticky='w', pady=(4, 0))
+        self.seq_chk = ttk.Checkbutton(row, text='one image at a time', variable=self.seq_var)
+        self.seq_chk.grid(row=1, column=0, columnspan=3, sticky='w', pady=(4, 0))
         # off by default: a generation is text to image unless an image was picked from the gallery
         self.chain_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var).grid(
-            row=2, column=0, columnspan=4, sticky='w', pady=(2, 0))
+        self.chain_chk = ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var)
+        self.chain_chk.grid(row=2, column=0, columnspan=4, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
         seedbox.grid(row=1, column=3, sticky='w', pady=(4, 0))
         ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
         self.seed = tk.StringVar(value=str(args.seed))
-        ttk.Entry(seedbox, textvariable=self.seed, width=10).pack(side='left')
-        ttk.Button(seedbox, text='\u2212', width=2, command=lambda: self.bump_seed(-1)).pack(side='left', padx=(3, 0))
-        ttk.Button(seedbox, text='+', width=2, command=lambda: self.bump_seed(1)).pack(side='left', padx=(2, 0))
-        ttk.Button(seedbox, text='Rnd', width=4, command=self.random_seed).pack(side='left', padx=(4, 0))
+        self.seed_entry = ttk.Entry(seedbox, textvariable=self.seed, width=10)
+        self.seed_entry.pack(side='left')
+        self.seed_minus = ttk.Button(seedbox, text='\u2212', width=2, command=lambda: self.bump_seed(-1))
+        self.seed_minus.pack(side='left', padx=(3, 0))
+        self.seed_plus = ttk.Button(seedbox, text='+', width=2, command=lambda: self.bump_seed(1))
+        self.seed_plus.pack(side='left', padx=(2, 0))
+        self.seed_rnd = ttk.Button(seedbox, text='Rnd', width=4, command=self.random_seed)
+        self.seed_rnd.pack(side='left', padx=(4, 0))
 
         self.base_row = ttk.Frame(left)
-        self.base_row.grid(row=6, column=0, sticky='ew', pady=(8, 0))
+        self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
         ttk.Label(self.base_row, text='base:').pack(side='left')
         self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555')
         self.base_label.pack(side='left', padx=(4, 10))
         ttk.Label(self.base_row, text='strength').pack(side='left')
         self.denoise = tk.DoubleVar(value=0.6)
-        ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130).pack(side='left', padx=4)
+        self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130)
+        self.strength_scale.pack(side='left', padx=4)
         self.denoise_text = ttk.Label(self.base_row, text='0.60')
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
         guide_row = ttk.Frame(left)
-        guide_row.grid(row=7, column=0, sticky='ew', pady=(4, 0))
+        guide_row.grid(row=9, column=0, sticky='ew', pady=(4, 0))
         ttk.Label(guide_row, text='steps').pack(side='left')
-        self.steps_var = tk.StringVar(value=str(self.args.steps))
-        ttk.Combobox(guide_row, textvariable=self.steps_var, width=4, state='readonly',
-                     values=['2', '4', '6', '8', '12']).pack(side='left', padx=4)
+        self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
+        self.steps_cb = ttk.Combobox(guide_row, textvariable=self.steps_var, width=4, state='readonly',
+                                     values=['2', '4', '6', '8', '12'])
+        self.steps_cb.pack(side='left', padx=4)
         ttk.Label(guide_row, text='sampler').pack(side='left', padx=(12, 4))
-        self.sampler_var = tk.StringVar(value='euler')
-        ttk.Combobox(guide_row, textvariable=self.sampler_var, width=15, state='readonly',
-                     values=['euler', 'euler_ancestral']).pack(side='left')
+        self.sampler_var = tk.StringVar(value=self._settings.get('sampler') or 'euler')
+        self.sampler_cb = ttk.Combobox(guide_row, textvariable=self.sampler_var, width=15, state='readonly',
+                                       values=['euler', 'euler_ancestral'])
+        self.sampler_cb.pack(side='left')
         ttk.Label(guide_row, text='turbo is 4 steps, euler',
                   foreground='#777').pack(side='left', padx=(8, 0))
 
         # ---- middle: progress (sits under the button, above the status line)
+        # the banner answers the only question that matters before pressing Enter
+        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground='#1a1a1a')
+        self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
+        self.ticks = ttk.Label(left, text='', foreground='#2a6df4', font=('Consolas', 10))
+        self.ticks.grid(row=4, column=0, sticky='w')
+
         self.bar = ttk.Progressbar(left, mode='determinate', maximum=1.0)
-        self.bar.grid(row=3, column=0, sticky='ew', pady=(10, 2))
+        self.bar.grid(row=5, column=0, sticky='ew', pady=(4, 2))
         self.bar.grid_remove()
         self.status = ttk.Label(left, text='starting…', foreground='#555')
-        self.status.grid(row=4, column=0, sticky='w')
-        self.hint = ttk.Label(left, text='', foreground='#555', wraplength=390, justify='left')
-        self.hint.grid(row=5, column=0, sticky='w', pady=(4, 0))
+        self.status.grid(row=6, column=0, sticky='w')
+        self.hint = ttk.Label(left, text='', foreground='#555', wraplength=430, justify='left',
+                              font=('Segoe UI', 9))
+        self.hint.grid(row=7, column=0, sticky='w', pady=(4, 0))
+
+        self.starters = ttk.Frame(left)
+        self.starters.grid(row=7, column=0, sticky='w', pady=(4, 0))
+        ttk.Label(self.starters, text='Nothing generated yet. Try one of these:',
+                  foreground='#555').pack(anchor='w')
+        for label, prompt in STARTER_PROMPTS:
+            b = ttk.Button(self.starters, text=label, width=9,
+                           command=lambda p=prompt: self.use_starter(p))
+            b.pack(side='left', padx=(0, 6), pady=(4, 0))
+            self._tip(b, prompt)
+        self.starters.grid_remove()
 
         # ---- right: the picture
         right = ttk.Frame(root, padding=(6, 10, 10, 10))
@@ -582,6 +714,8 @@ class App:
         tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
         self.copy_btn.pack(side='left')
+        self.info_btn = ttk.Button(tools, text='\u24d8 metadata', command=self.show_metadata, state='disabled')
+        self.info_btn.pack(side='left', padx=(6, 0))
         self.copy_status = ttk.Label(tools, text='', foreground='#555')
         self.copy_status.pack(side='left', padx=(8, 0))
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
@@ -593,11 +727,19 @@ class App:
         if prefill:
             self.text.insert('1.0', prefill)
 
+        for v in (self.size_var, self.layout_var, self.steps_var, self.sampler_var, self.seed, self.denoise):
+            v.trace_add('write', lambda *a: self._update_banner())
+        self.canvas.bind('<Configure>', self._fit_placeholder, add='+')
+        self.layout_var.trace_add('write', self._update_estimate)
+        self._add_tooltips()
+        self._update_banner()
+
         self.refresh_gallery()
         for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
 
+        root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
 
@@ -644,6 +786,10 @@ class App:
             lab.grid(row=i // RECENT_COLS, column=i % RECENT_COLS, padx=1, pady=1)
             lab.bind('<MouseWheel>', self._on_gallery_wheel)
             self._tile_widgets[Path(p)] = lab
+        if files:
+            self.starters.grid_remove()
+        else:
+            self.starters.grid()
         self._paint()
 
     def _on_strip_resize(self, event=None):
@@ -660,6 +806,78 @@ class App:
             self.gal_bar.grid_remove()
             self.gal_canvas.yview_moveto(0)
 
+    def _nav(self, dx, dy):
+        """Move the selection one tile, so the strip is usable without the mouse."""
+        order = [p for p in self._files[:RECENT_N] if p in self._tile_widgets]
+        if not order:
+            return 'break'
+        cur = self.selected[-1] if self.selected else None
+        i = order.index(cur) if cur in order else -1
+        new = 0 if i < 0 else max(0, min(len(order) - 1, i + dx + dy * RECENT_COLS))
+        self.selected = [order[new]]
+        self._anchor = order[new]
+        self._paint()
+        return 'break'
+
+    def _nav_toggle(self, event=None):
+        cur = self.selected[-1] if self.selected else None
+        if cur is None:
+            return self._nav(0, 0)
+        if cur in self.selected:
+            self.selected.remove(cur)
+        else:
+            self.selected.append(cur)
+        self._paint()
+        return 'break'
+
+    def _nav_open(self, event=None):
+        if self.selected:
+            self.select_file(self.selected[-1])
+        return 'break'
+
+    def retry(self):
+        """Try the last request again after a transport failure."""
+        self.retry_btn.grid_remove()
+        self.hint.configure(text='')
+        self.generate()
+
+    def show_metadata(self):
+        """Show the sidecar of the displayed image, selectable and copyable."""
+        path = self._current
+        if path is None:
+            self.hint.configure(text='nothing displayed yet')
+            return
+        meta = read_meta(path)
+        if not meta:
+            self.hint.configure(text='no metadata beside %s' % Path(path).name)
+            return
+        lines = ['file: %s' % Path(path).name]
+        for key in ('created', 'model', 'prompt', 'seed', 'size', 'steps', 'cfg', 'batch', 'seeds',
+                    'base_image', 'denoise'):
+            if meta.get(key) not in (None, ''):
+                val = meta[key]
+                if key == 'prompt':
+                    lines.append('prompt: %s' % val)
+                else:
+                    lines.append('%s: %s' % (key, val))
+        if meta.get('tiles'):
+            lines.append('tiles: %d separate files' % len(meta['tiles']))
+        body = '\n'.join(lines)
+
+        win = tk.Toplevel(self.root)
+        win.title('Metadata - %s' % Path(path).name)
+        win.geometry('560x320')
+        txt = tk.Text(win, wrap='word', font=('Consolas', 9))
+        txt.pack(fill='both', expand=True, padx=8, pady=8)
+        txt.insert('1.0', body)
+        txt.configure(state='disabled')
+
+        def copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(body)
+            self.copy_status.configure(text='metadata copied')
+        ttk.Button(win, text='Copy metadata', command=copy).pack(pady=(0, 8))
+
     def _on_gallery_wheel(self, event):
         self.gal_canvas.yview_scroll(int(-event.delta / 120), 'units')
         return 'break'
@@ -672,6 +890,10 @@ class App:
     def _on_tile_click(self, event, path):
         """Plain click loads the image as the base; ctrl toggles; shift extends from the anchor."""
         path = Path(path)
+        try:
+            self.gal_canvas.focus_set()      # so arrows and Space drive the strip after a click
+        except Exception:
+            pass
         ctrl = bool(event.state & 0x0004)
         shift = bool(event.state & 0x0001)
 
@@ -744,6 +966,39 @@ class App:
         self._paint()
 
     # -- gallery: delete -----------------------------------------------------
+    def _recycle_files(self, files):
+        """Move files to the Windows Recycle Bin. True if the shell accepted every one of them.
+
+        A delete that cannot be undone is the only action in this window that can destroy work, so the default path
+        is a reversible one. Returns False (caller falls back to unlink) if the shell refuses, e.g. for a path on a
+        volume without a recycle bin.
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+        except Exception:
+            return False
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [('hwnd', wintypes.HWND), ('wFunc', wintypes.UINT), ('pFrom', wintypes.LPCWSTR),
+                        ('pTo', wintypes.LPCWSTR), ('fFlags', ctypes.c_ushort),
+                        ('fAnyOperationsAborted', wintypes.BOOL), ('hNameMappings', wintypes.LPVOID),
+                        ('lpszProgressTitle', wintypes.LPCWSTR)]
+
+        FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x0004, 0x0010, 0x0040, 0x0400
+        names = [str(f) for f in files if Path(f).exists()]
+        if not names:
+            return True
+        try:
+            buf = ctypes.create_unicode_buffer('\0'.join(names) + '\0\0')
+            op = SHFILEOPSTRUCTW(None, FO_DELETE, ctypes.cast(buf, wintypes.LPCWSTR), None,
+                                 FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,
+                                 False, None, None)
+            rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        except Exception:
+            return False
+        return rc == 0 and not op.fAnyOperationsAborted
+
     def _delete_one(self, png):
         """Remove the PNG, its sidecar and its cached thumbnail. True if the image itself went."""
         png = Path(png)
@@ -765,11 +1020,20 @@ class App:
         n = len(paths)
         if not messagebox.askyesno(
                 'Delete images',
-                'Delete %d image%s and the metadata beside %s?\n\nThis removes the file%s from disk.'
-                % (n, '' if n == 1 else 's', 'it' if n == 1 else 'them', '' if n == 1 else 's'),
+                'Move %d image%s, with the metadata and thumbnail beside each, to the Recycle Bin?\n\n'
+                'You can restore %s from there if it was a mistake.'
+                % (n, '' if n == 1 else 's', 'it' if n == 1 else 'them'),
                 parent=self.root):
             return 0
-        gone = [p for p in paths if self._delete_one(p)]
+        files = []
+        for p in paths:
+            files += [p, p.with_suffix('.json'), p.parent / THUMB_DIR / (p.stem + '.jpg')]
+        recycled = self._recycle_files(files)
+        gone = [p for p in paths if not p.exists()]
+        if len(gone) < len(paths):
+            # the shell would not take them (off-volume path, or no recycle bin): hard delete what is left
+            gone += [p for p in paths if p.exists() and self._delete_one(p)]
+            recycled = False
         base_gone = self.base_path is not None and any(
             p.name == self.base_path.name for p in paths)
         if base_gone:
@@ -780,12 +1044,14 @@ class App:
             self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                     text='that image was deleted')
             self.copy_btn.state(['disabled'])
+            self.info_btn.state(['disabled'])
             self._img = None
             self._current = None
         self.selected = [p for p in self.selected if p not in paths]
         self.refresh_gallery()
-        self.status.configure(text='deleted %d image%s%s'
-                              % (len(gone), '' if len(gone) == 1 else 's',
+        self.status.configure(text='%s %d image%s%s'
+                              % ('moved to the Recycle Bin' if recycled else 'deleted',
+                                 len(gone), '' if len(gone) == 1 else 's',
                                  '; base cleared' if base_gone else ''))
         return len(gone)
 
@@ -897,6 +1163,7 @@ class App:
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
+        self.info_btn.state(['!disabled'] if self._current else ['disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
         self.canvas.delete('placeholder')
@@ -905,6 +1172,7 @@ class App:
     def _display(self, path):
         self._current = Path(path)
         self.copy_btn.state(['!disabled'])
+        self.info_btn.state(['!disabled'])
         self.copy_status.configure(text='')
         try:
             self._img = Image.open(path)
@@ -920,6 +1188,7 @@ class App:
         self.base_label.configure(text=self.base_path.name)
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
+        self._update_banner()
 
     def _tile_at(self, x, y):
         """Which tile of the displayed sheet is at canvas (x, y)? Returns a tile path or None."""
@@ -958,6 +1227,12 @@ class App:
         self.text.delete('1.0', 'end')
         self.text.insert('1.0', prompt)
         self.seed.set(str(seed))
+        if not self._history or self._history[-1] != prompt:
+            self._history.append(prompt)
+            self._hist_pos = None
+        self._run_start = time.time()
+        self._run_total = batch
+
         self.busy = True
         self.gen_btn.state(['disabled'])
         self.stop_btn.state(['!disabled'])
@@ -989,6 +1264,7 @@ class App:
         self.hint.configure(text='')
         self._clear_picture()          # (there is no separate listbox here; repaint drops the base ring)
         self._paint()
+        self._update_banner()
         self.status.configure(text='text to image — nothing selected')
 
     def open_folder(self):
@@ -1028,6 +1304,137 @@ class App:
             v = random.randint(0, 999_999_999)
         self.seed.set(str(v))
 
+    # -- self-documentation ---------------------------------------------------
+    def _tip(self, widget, text):
+        tip = Tooltip(widget, text)
+        self._tips.append(tip)
+        return tip
+
+    def _add_tooltips(self):
+        """One line under every control, so nothing has to be guessed or read in a manual."""
+        t = self._tip
+        t(self.gen_btn, 'Generate with the current prompt (Enter).')
+        t(self.stop_btn, 'Interrupt this run. Tiles already written are kept.')
+        t(self.size_cb, 'Image size in pixels. Bigger is slower and uses more VRAM.')
+        t(self.layout_cb, 'How many images one press makes: 1, 4, 9 or 16, saved as separate tiles on one sheet.')
+        t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')
+        t(self.sampler_cb, 'euler is clean. euler_ancestral injects noise every step: grain and more variation.')
+        t(self.seed_entry, 'The seed picks the starting noise. Same seed and prompt give the same picture.')
+        t(self.seed_minus, 'Seed - 1')
+        t(self.seed_plus, 'Seed + 1')
+        t(self.seed_rnd, 'Draw a new random seed.')
+        t(self.seq_chk, 'On: each tile is its own request with its own seed - reproducible, and only one image '
+                        'in VRAM at a time.\nOff: one batch, about 8x faster, much higher VRAM peak.')
+        t(self.chain_chk, 'On: the image just made becomes the base for the next run.\n'
+                          'Off: every run is text to image unless you pick an image in the gallery.')
+        t(self.strength_scale, 'How much of the base image survives.\n0.2 loose sketch - 0.60 keeps the '
+                               'composition - 0.95 replaces almost everything.')
+        t(self.copy_btn, 'Copy the current image to the Windows clipboard.')
+        t(self.more_btn, 'Browse every saved image. The selection is shared with the strip.')
+        t(self.clear_base_btn, 'Forget the base image; the next run is text to image.')
+        t(self.refresh_btn, 'Re-read the folder, for example after files changed outside the window.')
+        t(self.folder_btn, 'Open the output folder in Explorer.')
+        t(self.sel_all_btn, 'Select every tile in the strip; press again to clear.')
+        t(self.del_btn, 'Send the selected images, their metadata and thumbnails to the Recycle Bin.')
+
+    def _update_banner(self):
+        """Say what the next Generate will do, in one line, before it is pressed."""
+        if not hasattr(self, 'banner'):
+            return
+        if self.base_path is None:
+            mode, colour = 'TEXT → IMAGE', '#1a1a1a'
+        else:
+            mode = 'EDIT %s at %.2f' % (self.base_path.name, self.denoise.get())
+            colour = '#2a6df4'
+        n = self._batch()
+        what = 'one image' if n == 1 else '%d tiles' % n
+        self.banner.configure(text='%s   ·   %s steps · %s · %s px · %s   ·   seed %s'
+                                   % (mode, self.steps_var.get(), self.sampler_var.get(), self.size_var.get(),
+                                      what, self.seed.get()),
+                              foreground=colour)
+
+    # -- persistence, starters, prompt history -------------------------------
+    def _persist(self):
+        self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
+                          'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
+                          'history': self._history[-20:]}
+        return save_settings(self._settings)
+
+    def use_starter(self, prompt):
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', prompt)
+        self.text.focus_set()
+        self.hint.configure(text='prompt loaded - press Enter, or edit it first')
+
+    def _set_prompt(self, text):
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', text)
+        self.text.mark_set('insert', 'end-1c')
+
+    def _on_hist_up(self, event=None):
+        """Up recalls the previous prompt, but only from the first line, so normal editing still works."""
+        if not self._history or self.text.index('insert').split('.')[0] != '1':
+            return None
+        if self._hist_pos is None:
+            self._hist_pos = len(self._history) - 1
+        elif self._hist_pos > 0:
+            self._hist_pos -= 1
+        self._set_prompt(self._history[self._hist_pos])
+        return 'break'
+
+    def _on_hist_down(self, event=None):
+        if self._hist_pos is None or not self._history:
+            return None
+        if self._hist_pos < len(self._history) - 1:
+            self._hist_pos += 1
+            self._set_prompt(self._history[self._hist_pos])
+        else:
+            self._hist_pos = None
+            self._set_prompt('')
+        return 'break'
+
+    # -- progress and cost ---------------------------------------------------
+    @staticmethod
+    def _short_time(sec):
+        sec = int(round(max(0, sec)))
+        return '%d s' % sec if sec < 60 else '%d m %02d s' % (sec // 60, sec % 60)
+
+    def _show_tile_progress(self, idx, total):
+        self.ticks.configure(text='\u25cf' * idx + '\u25cb' * max(0, total - idx))
+        eta = ''
+        if self._run_start and idx:
+            per = (time.time() - self._run_start) / idx
+            eta = ' \u00b7 \u2248 %s left' % self._short_time(per * (total - idx))
+        self.status.configure(text='tile %d of %d%s' % (idx, total, eta))
+
+    def _update_estimate(self, *_):
+        """Estimate the cost of the chosen layout from the two configurations that were actually measured."""
+        n = self._batch()
+        if n <= 1 or self.busy:
+            return
+        try:
+            steps, size = int(self.steps_var.get()), int(self.size_var.get())
+        except (TypeError, ValueError):
+            return
+        per = SIZE_SECONDS.get(size, 14.0)
+        if steps != 4:
+            per *= steps / 4.0          # only the 4-step points were measured; say so in the text
+        seq = per * n
+        bat = max(1.0, BATCH_SECONDS_PER_TILE * n) * (steps / 4.0)
+        tail = '' if steps == 4 else ' (scaled from 4-step measurements)'
+        self.hint.configure(
+            text='%d tiles \u00b7 \u2248 %s one at a time (%.1f s/tile measured at %d px), '
+                 'or \u2248 %s as one batch (0.67 s/tile measured at 384 px)%s.'
+                 % (n, self._short_time(seq), per, size, self._short_time(bat), tail))
+
+    def _fit_placeholder(self, event=None):
+        """Keep the placeholder text inside the canvas however narrow the window gets."""
+        w = event.width if event is not None else self.canvas.winfo_width()
+        try:
+            self.canvas.itemconfigure('placeholder', width=max(90, w - 28))
+        except Exception:
+            pass
+
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
 
@@ -1049,6 +1456,12 @@ class App:
 
         # a base image yields exactly one result, so an N-up layout does not apply to an edit
         batch = 1 if self.base_path else self._batch()
+
+        if not self._history or self._history[-1] != prompt:
+            self._history.append(prompt)
+            self._hist_pos = None
+        self._run_start = time.time()
+        self._run_total = batch
 
         self.busy = True
         self.gen_btn.state(['disabled'])
@@ -1082,12 +1495,21 @@ class App:
                              sampler=self.sampler_var.get())
 
     def _poll(self):
+        if not self.root.winfo_exists():     # the window is gone: stop rescheduling
+            return
+        if self._poll_id is not None:        # never leave a second timer pending behind this one
+            try:
+                self.root.after_cancel(self._poll_id)
+            except Exception:
+                pass
+            self._poll_id = None
         try:
             while True:
                 kind, payload = self.engine.events.get_nowait()
                 if kind == 'status':
                     self.status.configure(text=payload)
                 elif kind == 'ready':
+                    self.retry_btn.grid_remove()
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
                     self.status.configure(text='ready — type a prompt and press Enter')
@@ -1100,6 +1522,7 @@ class App:
                 elif kind == 'ws_error':
                     self.hint.configure(text='progress feed unavailable (%s); the image still arrives' % payload)
                 elif kind == 'cancelled':
+                    self.ticks.configure(text='')
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
                     self.stop_btn.state(['disabled'])
@@ -1113,7 +1536,8 @@ class App:
                     raw, path, idx, total = payload
                     self._sheet = None
                     self._display_raw(raw, path)
-                    self.status.configure(text='tile %d of %d received' % (idx, total))
+                    self._run_total = total
+                    self._show_tile_progress(idx, total)
                 elif kind == 'image':
                     raw, path = payload
                     self._raw = raw
@@ -1129,6 +1553,7 @@ class App:
                     self.gen_btn.state(['!disabled'])
                     self.stop_btn.state(['disabled'])
                     self.bar.grid_remove()
+                    self.ticks.configure(text='')
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
                     if self.chain_var.get():
@@ -1151,11 +1576,15 @@ class App:
                     self.gen_btn.state(['!disabled'])
                     self.stop_btn.state(['disabled'])
                     self.bar.grid_remove()
-                    self.status.configure(text='error')
-                    self.hint.configure(text=payload)
+                    self.ticks.configure(text='')
+                    self.status.configure(text='failed - nothing was saved')
+                    self.hint.configure(
+                        text='%s\n\nThe request went to ComfyUI on 127.0.0.1:%d. If the server is not running, '
+                             'start it and press Retry.' % (payload, self.args.port))
+                    self.retry_btn.grid()
         except queue.Empty:
             pass
-        self.root.after(60, self._poll)
+        self._poll_id = self.root.after(60, self._poll)
 
     def _on_ws(self, msg):
         mtype = msg.get('type')
@@ -1187,7 +1616,25 @@ class App:
         self._draw = (cx - im.width // 2, cy - im.height // 2, im.width, im.height)
         self.canvas.create_image(cx, cy, image=self._tk, tags='img')
 
+    def _on_destroy(self, event=None):
+        """Cancel the poll loop however the window goes away, not just via the close button."""
+        if event is not None and event.widget is not self.root:
+            return
+        if self._poll_id is not None:
+            try:
+                self.root.after_cancel(self._poll_id)
+            except Exception:
+                pass
+            self._poll_id = None
+
     def on_close(self):
+        self._persist()
+        if self._poll_id is not None:
+            try:
+                self.root.after_cancel(self._poll_id)
+            except Exception:
+                pass
+            self._poll_id = None
         self.status.configure(text='stopping…')
         result = self.engine.shutdown()
         print('server: %s' % result)
