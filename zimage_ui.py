@@ -522,6 +522,20 @@ class Engine:
 STARTER_PROMPTS = [('icon', 'flat vector icon of a fox, simple shapes, white background'), ('diagram', 'clean flowchart: START, VALIDATE, STORE, DONE - vertical, thin black lines, white background'), ('photo', 'photo of a ceramic mug on a wooden table, soft window light')]
 
 
+class ActionButton(tk.Button):
+    """A tk.Button that answers to the ttk state([...]) API, so call sites do not care which toolkit broke the line."""
+
+    def state(self, spec=None):
+        if spec is None:
+            return ('disabled',) if str(self['state']) == 'disabled' else ()
+        for s in spec:
+            if s.startswith('!'):
+                super().configure(state='normal')
+            elif s in ('disabled', 'active', 'normal'):
+                super().configure(state=s)
+        return ()
+
+
 class Tooltip:
     """A one-line explanation shown under a control on hover.
 
@@ -722,25 +736,25 @@ class App:
         row = ttk.Frame(left)
         row.grid(row=2, column=0, sticky='ew')
         row.columnconfigure(3, weight=1)
-        self.gen_btn = ttk.Button(row, text='Generate  ⏎', command=self.generate)
-        self.gen_btn.grid(row=0, column=0, sticky='w')
+        # Generate itself now lives at the bottom of the column; this row holds the modifiers and second actions
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
-        self.stop_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
-        self.preview_btn = ttk.Button(row, text='Preview', command=self.preview)
-        self.preview_btn.grid(row=0, column=2, sticky='e')
+        self.stop_btn.grid(row=0, column=0, sticky='w')
         self.retry_btn = ttk.Button(row, text='Retry', command=self.retry)
-        self.retry_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
+        self.retry_btn.grid(row=0, column=0, sticky='w')
         self.retry_btn.grid_remove()
-        ttk.Label(row, text='size').grid(row=0, column=1, padx=(12, 4))
+        self.preview_btn = ttk.Button(row, text='Preview', command=self.preview)
+        self.preview_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
+        ttk.Label(row, text='size').grid(row=0, column=2, padx=(12, 4))
         self.size_var = tk.StringVar(value=str(self._settings.get('size') or args.size))
         self.size_cb = ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
                                     values=['256', '320', '384', '448', '512', '640', '768', '1024'])
-        self.size_cb.grid(row=0, column=2, sticky='w')
-        ttk.Label(row, text='layout').grid(row=0, column=3, padx=(10, 4))
+        self.size_cb.grid(row=0, column=3, sticky='w')
+        ttk.Label(row, text='layout').grid(row=0, column=4, padx=(10, 4))
         self.layout_var = tk.StringVar(value=self._settings.get('layout') or 'single')
         self.layout_cb = ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
                                       values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'])
-        self.layout_cb.grid(row=0, column=4, sticky='w')
+        self.layout_cb.grid(row=0, column=5, sticky='w')
+
         # one at a time by default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
         # individually reproducible and the VRAM peak stays that of a single image
         self.seq_var = tk.BooleanVar(value=True)
@@ -751,7 +765,7 @@ class App:
         self.chain_chk = ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var)
         self.chain_chk.grid(row=2, column=0, columnspan=4, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
-        seedbox.grid(row=1, column=3, sticky='w', pady=(4, 0))
+        seedbox.grid(row=1, column=3, columnspan=3, sticky='w', pady=(4, 0))
         ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
         self.seed = tk.StringVar(value=str(args.seed))
         self.seed_entry = ttk.Entry(seedbox, textvariable=self.seed, width=10)
@@ -778,7 +792,9 @@ class App:
         self.base_row = ttk.Frame(left)
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
         ttk.Label(self.base_row, text='base:').pack(side='left')
-        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555')
+        # a fixed character width, so a long file name cannot change the column's width
+        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555',
+                                    width=24, anchor='w')
         self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
         ttk.Label(self.base_row, text='strength').pack(side='left')
@@ -788,6 +804,13 @@ class App:
         self.denoise_text = ttk.Label(self.base_row, text='0.60')
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
+
+        self.gen_btn = ActionButton(left, text='\u26a1 Generate', command=self.generate,
+                                    font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
+                                    activebackground='#166b34', activeforeground='white',
+                                    disabledforeground='#c9e6d2', relief='flat', bd=0,
+                                    height=2, cursor='hand2', takefocus=True)
+        self.gen_btn.grid(row=10, column=0, sticky='ew', pady=(10, 0))
 
         self.advanced = ttk.Frame(left)
         self.advanced.grid(row=9, column=0, sticky='ew', pady=(4, 0))
@@ -832,7 +855,7 @@ class App:
         # the banner answers the only question that matters before pressing Enter
         # wraplength caps the requested width, so a long file name can never widen this column
         self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground='#1a1a1a',
-                                wraplength=430, justify='left')
+                                wraplength=396, justify='left')
         self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
         self._tip(self.banner, 'What the next Generate will do, with the base file name in full.')
         self.ticks = ttk.Label(left, text='', foreground='#2a6df4', font=('Consolas', 10))
@@ -2118,7 +2141,8 @@ class App:
         per = SIZE_SECONDS.get(size, 14.0) * (steps / 4.0)
         total = per * n * (1.35 if self._pending_hires else 1.0)
         painting = self._mask is not None and self._mask.getbbox() is not None
-        label = 'Fill selection  \u23ce' if painting else ('Expand  \u23ce' if any(self._pads) else 'Generate  \u23ce')
+        label = ('\u26a1 Fill selection' if painting else
+                 ('\u26a1 Expand' if any(self._pads) else '\u26a1 Generate'))
         if hasattr(self, 'gen_btn'):
             self.gen_btn.configure(text='%s  \u00b7 \u2248 %s' % (label, self._short_time(total)))
 

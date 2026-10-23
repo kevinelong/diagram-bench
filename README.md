@@ -249,7 +249,9 @@ Under the picture, three verbs and two editors:
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
 
-The Generate button carries its own cost (`Generate ⏎ · ≈ 14 s`, from the measured table), so the price is visible
+Generate is one large green button across the bottom of the prompt column (`⚡ Generate · ≈ 14 s`), so the commit key
+is where the eye ends up after reading the prompt, and it renames itself to *Fill selection* or *Expand* when the
+picture has a mask or pads. It carries its own cost (from the measured table), so the price is visible
 before the click, and the banner carries the memory: `VRAM ≈ 8.7/11.9 GiB` in red when a shape comes within 400 MiB of
 the card. Both come from peaks measured here with `nvidia-smi` at 0.25 s:
 

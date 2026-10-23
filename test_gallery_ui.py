@@ -657,7 +657,7 @@ def main():
     check('strokes stay above the picture after a repaint',
           bool(paint_ids) and bool(img_ids) and items.index(paint_ids[-1]) > items.index(img_ids[-1]),
           'paint %s img %s' % (paint_ids[-1], img_ids[-1]))
-    check('the button offers to fill', str(app.gen_btn['text']).startswith('Fill'), str(app.gen_btn['text']))
+    check('the button offers to fill', 'Fill selection' in str(app.gen_btn['text']), str(app.gen_btn['text']))
     app.busy = False; app.engine.calls.clear()
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a blue square')
     app.generate(); root.update()
@@ -667,15 +667,14 @@ def main():
     check('fill uses the picture as base', (kwd.get('base_path') or '').endswith(app._files[0].name),
           str(kwd.get('base_path')))
     check('the mask clears after the run', app._mask.getbbox() is None)
-    check('and the button is a Generate again', str(app.gen_btn['text']).startswith('Generate'),
-          str(app.gen_btn['text']))
+    check('and the button is a Generate again', 'Generate' in str(app.gen_btn['text']), str(app.gen_btn['text']))
     app.toggle_mask_mode(False)
 
     print('\n-- expand pads the picture')
     app.busy = False
     app.add_pad(0); app.add_pad(2)
     check('pads are recorded', app._pads == [64, 0, 64, 0], str(app._pads))
-    check('the button offers to expand', str(app.gen_btn['text']).startswith('Expand'), str(app.gen_btn['text']))
+    check('the button offers to expand', 'Expand' in str(app.gen_btn['text']), str(app.gen_btn['text']))
     app.engine.calls.clear(); app.generate(); root.update()
     kwd = app.engine.calls[-1][1]
     check('expand sends the pads', kwd.get('outpaint') == (64, 0, 64, 0), str(kwd.get('outpaint')))
