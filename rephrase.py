@@ -12,7 +12,9 @@ Whole words only - "photograph" is not touched by the entry for "photo" - and ca
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 # Curated for image prompts, not for prose. Each entry lists alternatives that are *not* the key itself, so the first
 # press always changes something. Plurals are listed where a prompt is likely to use them.
@@ -120,7 +122,6 @@ SYNONYMS = {
 SYNONYMS = {k: [o for o in v if o.lower() != k.lower()] for k, v in SYNONYMS.items()}
 SYNONYMS = {k: v for k, v in SYNONYMS.items() if v}
 
-
 def _collapse_repeats(text):
     """'a golden golden hour' -> 'a golden hour'; 'propped against against' -> 'propped against against' fixed to one."""
     previous = None
@@ -128,6 +129,132 @@ def _collapse_repeats(text):
         previous = text
         text = re.sub(r'\b(\w+)(\s+)\1\b', r'\1', text, flags=re.IGNORECASE)
     return text
+
+
+# Words WordNet cannot help with: its noun senses are prose-shaped, so "mug" resolves to the gullible-person sense and
+# "brick" has no synonym at all. These are prompt-specific, written by hand, and they take precedence over the table.
+VISUAL_EXTRA = {
+    'brick': ['masonry', 'brickwork', 'terracotta block'],
+    'mug': ['cup', 'beaker', 'tankard'],
+    'cup': ['mug', 'beaker', 'goblet'],
+    'kitchen': ['galley', 'cook room', 'cookhouse'],
+    'window': ['casement', 'windowpane', 'glazing'],
+    'door': ['doorway', 'entrance', 'portal'],
+    'table': ['desk', 'tabletop', 'surface'],
+    'chair': ['seat', 'armchair', 'stool'],
+    'sofa': ['couch', 'settee', 'divan'],
+    'bed': ['cot', 'bunk', 'berth'],
+    'shelf': ['shelving', 'ledge', 'rack'],
+    'wall': ['partition', 'facade', 'partition wall'],
+    'floor': ['flooring', 'ground', 'deck'],
+    'ceiling': ['roof', 'soffit', 'overhead plane'],
+    'stairway': ['staircase', 'stairs', 'steps'],
+    'lamp': ['light fixture', 'lantern', 'luminaire'],
+    'candle': ['taper', 'candlestick', 'wax light'],
+    'mirror': ['looking glass', 'reflector', 'glass'],
+    'rug': ['carpet', 'mat', 'runner'],
+    'curtain': ['drape', 'drapery', 'blind'],
+    'fireplace': ['hearth', 'chimney piece', 'fire opening'],
+    'dog': ['hound', 'canine', 'mutt'],
+    'cat': ['feline', 'kitten', 'tabby'],
+    'horse': ['stallion', 'steed', 'mare'],
+    'bird': ['fowl', 'songbird', 'winged creature'],
+    'fish': ['catch', 'finfish', 'minnow'],
+    'tree': ['sapling', 'timber tree', 'canopy tree'],
+    'flower': ['bloom', 'blossom', 'petalled head'],
+    'leaf': ['frond', 'foliage', 'blade'],
+    'grass': ['turf', 'lawn grass', 'sward'],
+    'stone': ['rock', 'boulder', 'cobble'],
+    'rock': ['stone', 'boulder', 'crag'],
+    'sand': ['grit', 'beach sand', 'dune sand'],
+    'mud': ['slurry', 'silt', 'sludge'],
+    'glass': ['pane', 'glazing', 'crystal'],
+    'metal': ['metallic surface', 'alloy', 'steel'],
+    'wood': ['timber', 'lumber', 'plank'],
+    'leather': ['hide', 'skin leather', 'calfskin'],
+    'fabric': ['textile', 'material', 'cloth'],
+    'cloth': ['fabric', 'textile', 'linen'],
+    'paper': ['parchment', 'sheet', 'card stock'],
+    'concrete': ['cement', 'cast concrete', 'concrete slab'],
+    'roof': ['rooftop', 'roofing', 'gable'],
+    'sky': ['heavens', 'skyscape', 'air'],
+    'cloud': ['cloudbank', 'cumulus', 'vapour'],
+    'fog': ['mist', 'haze', 'sea fret'],
+    'rain': ['downpour', 'drizzle', 'rainfall'],
+    'snow': ['powder snow', 'snowfall', 'flurry'],
+    'shadow': ['shade', 'silhouette', 'umbra'],
+    'light': ['illumination', 'radiance', 'glow'],
+    'smoke': ['haze', 'fumes', 'smoke plume'],
+    'fire': ['flame', 'blaze', 'burning'],
+    'water': ['liquid', 'waterline', 'surface water'],
+    'sea': ['ocean', 'brine', 'deep water'],
+    'river': ['stream', 'watercourse', 'channel'],
+    'road': ['highway', 'carriageway', 'thoroughfare'],
+    'path': ['trail', 'footpath', 'track'],
+    'building': ['structure', 'edifice', 'block'],
+    'house': ['home', 'dwelling', 'residence'],
+    'car': ['automobile', 'vehicle', 'motor car'],
+    'truck': ['lorry', 'van', 'haulage truck'],
+    'bike': ['bicycle', 'cycle', 'pushbike'],
+    'bicycle': ['bike', 'cycle', 'pushbike'],
+    'man': ['gentleman', 'male figure', 'fellow'],
+    'woman': ['lady', 'female figure', 'woman'],
+    'child': ['kid', 'youngster', 'little one'],
+    'crowd': ['throng', 'gathering', 'mob'],
+    'face': ['visage', 'countenance', 'features'],
+    'hand': ['palm', 'fist', 'mitt'],
+    'hair': ['mane', 'tresses', 'locks'],
+    'eye': ['orb', 'peeper', 'gaze'],
+    'smile': ['grin', 'beam', 'smirk'],
+    # colours: WordNet offers "red -> loss", so these are hand-written instead
+    'red': ['crimson', 'scarlet', 'vermilion', 'ruby red'],
+    'blue': ['cobalt', 'azure', 'cerulean', 'navy'],
+    'green': ['emerald', 'verdant', 'sage green', 'moss'],
+    'yellow': ['golden', 'saffron', 'butter yellow', 'lemon'],
+    'orange': ['tangerine', 'amber', 'apricot', 'burnt orange'],
+    'purple': ['violet', 'plum', 'mauve', 'lilac'],
+    'pink': ['rose', 'blush', 'coral pink', 'salmon'],
+    'brown': ['chestnut', 'walnut', 'umber', 'tan'],
+    'grey': ['gray', 'slate', 'ash', 'charcoal'],
+    'black': ['jet', 'ebony', 'onyx', 'ink black'],
+    'white': ['ivory', 'chalk white', 'snow white', 'bone'],
+    'golden': ['amber', 'gilded', 'honeyed', 'gold'],
+    'silver': ['chrome', 'steel grey', 'silvery'],
+    # light and mood, where wordnets adjective senses are singletons
+    'weathered': ['battered', 'aged', 'time-worn', 'weather-beaten'],
+    'worn': ['frayed', 'tired', 'battered', 'threadbare'],
+    'rusty': ['corroded', 'oxidised', 'rust-covered'],
+    'dusty': ['powdery', 'dust-covered', 'chalky'],
+    'glowing': ['luminous', 'radiant', 'lit', 'aglow'],
+    'bright': ['luminous', 'brilliant', 'vivid', 'radiant'],
+    'dark': ['shadowy', 'dim', 'moody', 'unlit'],
+    'moody': ['brooding', 'atmospheric', 'sombre'],
+    'calm': ['serene', 'tranquil', 'still', 'placid'],
+    'busy': ['bustling', 'crowded', 'hectic', 'thronged'],
+    'quiet': ['still', 'hushed', 'silent'],
+    'empty': ['bare', 'vacant', 'deserted'],
+    'ancient': ['antique', 'age-old', 'primeval'],
+    'modern': ['contemporary', 'sleek', 'up-to-date'],
+    'small': ['little', 'tiny', 'compact'],
+    'large': ['big', 'vast', 'spacious'],
+    'detailed': ['intricate', 'elaborate', 'richly detailed'],
+    'simple': ['plain', 'uncluttered', 'minimal'],
+}
+
+
+# WordNet's table is generated by build_synonyms.py; hand-written entries win where both have a word.
+_WORDNET_TABLE = {}
+_TABLE_PATH = Path(__file__).with_name('data') / 'synonyms.json'
+if _TABLE_PATH.exists():
+    try:
+        _WORDNET_TABLE = json.loads(_TABLE_PATH.read_text(encoding='utf-8')).get('synonyms', {})
+    except Exception:
+        _WORDNET_TABLE = {}
+
+LOOKUP = dict(_WORDNET_TABLE)
+for _k, _v in VISUAL_EXTRA.items():
+    LOOKUP[_k] = [o for o in _v if o.lower() != _k.lower()]
+LOOKUP.update(SYNONYMS)          # the original curated set keeps the last word
 
 
 def rephrase_text(text, turn=1):
@@ -141,7 +268,7 @@ def rephrase_text(text, turn=1):
     turn = max(1, int(turn))
     out, changed = [], 0
     for token in re.findall(r"[A-Za-z][A-Za-z'-]*|[^A-Za-z]+", text):
-        options = SYNONYMS.get(token.lower())
+        options = LOOKUP.get(token.lower())
         if options:
             replacement = options[(turn - 1) % len(options)]
             if replacement.lower() != token.lower():

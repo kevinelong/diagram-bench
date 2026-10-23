@@ -1,0 +1,2877 @@
+{
+"created": "2026-10-23T16:14:23",
+"entries": 866,
+"license": "data/WORDNET-LICENSE.txt",
+"source": "WordNet 3.0 (Princeton University)",
+"synonyms": {
+"abandoned": [
+"derelict"
+],
+"acid": [
+"window pane"
+],
+"acute": [
+"sharp"
+],
+"adolescent": [
+"teenager"
+],
+"advanced": [
+"modern"
+],
+"ag": [
+"silver"
+],
+"aged": [
+"elderly"
+],
+"agency": [
+"office"
+],
+"aim": [
+"train"
+],
+"air": [
+"beam",
+"bare"
+],
+"airplane": [
+"plane"
+],
+"alloy": [
+"metal"
+],
+"almost": [
+"near"
+],
+"amber": [
+"gold"
+],
+"analyze": [
+"canvas"
+],
+"anatomy": [
+"figure",
+"frame"
+],
+"angle": [
+"fish"
+],
+"angry": [
+"wild"
+],
+"apartment": [
+"flat"
+],
+"apparent": [
+"plain"
+],
+"apparently": [
+"plain"
+],
+"approach": [
+"near"
+],
+"appropriate": [
+"capture"
+],
+"approximate": [
+"near",
+"rough"
+],
+"aqua": [
+"turquoise"
+],
+"arctic": [
+"icy"
+],
+"area": [
+"field"
+],
+"arena": [
+"field",
+"bowl"
+],
+"arm": [
+"branch"
+],
+"arrival": [
+"reaching"
+],
+"art": [
+"artwork"
+],
+"ash grey": [
+"silver"
+],
+"aspect": [
+"view",
+"scene",
+"panorama"
+],
+"assault": [
+"round"
+],
+"assume": [
+"bear"
+],
+"asymmetrical": [
+"crooked"
+],
+"atmosphere": [
+"air"
+],
+"attack": [
+"round"
+],
+"au": [
+"gold"
+],
+"aurora": [
+"morning",
+"dawn",
+"sunrise",
+"daybreak",
+"first light"
+],
+"auto": [
+"car",
+"automobile"
+],
+"automobile": [
+"car"
+],
+"autumn": [
+"fall"
+],
+"aviation": [
+"air"
+],
+"baby": [
+"child"
+],
+"bare": [
+"air"
+],
+"bass": [
+"deep"
+],
+"batch": [
+"mountain",
+"mint"
+],
+"bath": [
+"bathtub"
+],
+"bathroom": [
+"toilet"
+],
+"battlefield": [
+"field"
+],
+"beam": [
+"air",
+"ray",
+"shine"
+],
+"beast": [
+"wolf"
+],
+"beat": [
+"round"
+],
+"beauty": [
+"peach"
+],
+"bedroom": [
+"chamber"
+],
+"beginning": [
+"root"
+],
+"behind": [
+"seat"
+],
+"bend": [
+"bending"
+],
+"bent": [
+"dented"
+],
+"bicycle": [
+"cycle",
+"bike"
+],
+"big": [
+"large"
+],
+"bike": [
+"cycle",
+"motorcycle",
+"bicycle"
+],
+"bird": [
+"fowl"
+],
+"birth": [
+"bear"
+],
+"black": [
+"dim"
+],
+"blade": [
+"steel"
+],
+"blank": [
+"white",
+"space",
+"clean"
+],
+"blanket": [
+"wide",
+"broad"
+],
+"bleached": [
+"faded"
+],
+"blind": [
+"dim"
+],
+"bloom": [
+"blossom"
+],
+"blossom": [
+"peak",
+"bloom"
+],
+"blue": [
+"gloomy"
+],
+"bm": [
+"stool"
+],
+"board": [
+"room",
+"table"
+],
+"bob": [
+"dock"
+],
+"bone": [
+"ivory"
+],
+"border": [
+"frame"
+],
+"bother": [
+"gravel"
+],
+"bottom": [
+"seat"
+],
+"bound": [
+"spring"
+],
+"branch": [
+"arm",
+"leg"
+],
+"brass": [
+"face"
+],
+"breast": [
+"summit"
+],
+"breezy": [
+"windy"
+],
+"bright": [
+"vivid"
+],
+"brilliant": [
+"bright",
+"vivid"
+],
+"broad": [
+"wide"
+],
+"broadcast": [
+"air",
+"beam"
+],
+"brook": [
+"creek",
+"bear"
+],
+"browse": [
+"shop",
+"crop"
+],
+"brush": [
+"thicket"
+],
+"brushed": [
+"fleecy"
+],
+"buck": [
+"horse"
+],
+"buffer": [
+"cushion"
+],
+"bug": [
+"tap"
+],
+"build": [
+"figure",
+"frame"
+],
+"building": [
+"edifice"
+],
+"bulwark": [
+"wall"
+],
+"bunch": [
+"crowd"
+],
+"bureau": [
+"office",
+"dresser"
+],
+"burn": [
+"glow"
+],
+"bush": [
+"shrub"
+],
+"cad": [
+"dog"
+],
+"calculate": [
+"figure"
+],
+"calm": [
+"still",
+"quiet",
+"serene",
+"tranquil"
+],
+"can": [
+"seat"
+],
+"candid": [
+"blunt"
+],
+"canon": [
+"canyon"
+],
+"capable": [
+"subject"
+],
+"car": [
+"automobile"
+],
+"carpet": [
+"rug"
+],
+"cartoon": [
+"sketch"
+],
+"cause": [
+"grounds"
+],
+"cd": [
+"candle"
+],
+"chairman": [
+"chair"
+],
+"char": [
+"woman"
+],
+"characterization": [
+"picture",
+"depiction"
+],
+"charm": [
+"capture"
+],
+"chase": [
+"dog",
+"trail"
+],
+"chassis": [
+"figure",
+"frame"
+],
+"cheap": [
+"loud"
+],
+"cherry": [
+"red",
+"crimson",
+"scarlet"
+],
+"chest": [
+"dresser"
+],
+"chick": [
+"bird"
+],
+"chicken": [
+"yellow"
+],
+"child": [
+"kid",
+"youngster"
+],
+"chile": [
+"chilly"
+],
+"chip": [
+"crisp"
+],
+"chocolate": [
+"coffee",
+"umber"
+],
+"chuck": [
+"cat"
+],
+"circular": [
+"round"
+],
+"clay": [
+"mud"
+],
+"clean": [
+"light",
+"clear",
+"fresh",
+"plum"
+],
+"cleared": [
+"clear"
+],
+"clearly": [
+"clear"
+],
+"click": [
+"dog"
+],
+"climb": [
+"climbing"
+],
+"clip": [
+"crop"
+],
+"close": [
+"near"
+],
+"closely": [
+"close"
+],
+"closing": [
+"close"
+],
+"cloth": [
+"fabric"
+],
+"cloud": [
+"fog",
+"mist",
+"overcast"
+],
+"co": [
+"cobalt"
+],
+"coach": [
+"train"
+],
+"coat": [
+"surface",
+"cake"
+],
+"cobble": [
+"cobblestone"
+],
+"cobblestone": [
+"cobble"
+],
+"coffee": [
+"umber"
+],
+"coin": [
+"mint"
+],
+"colored": [
+"dark",
+"bleached"
+],
+"column": [
+"tower"
+],
+"common": [
+"park",
+"green"
+],
+"commons": [
+"park",
+"green"
+],
+"compact": [
+"thick"
+],
+"composite": [
+"complex"
+],
+"compressed": [
+"flat"
+],
+"compute": [
+"figure"
+],
+"conclude": [
+"close"
+],
+"conclusion": [
+"close"
+],
+"condition": [
+"train"
+],
+"conduct": [
+"bear"
+],
+"confused": [
+"broken"
+],
+"consecutive": [
+"straight"
+],
+"consider": [
+"view"
+],
+"console": [
+"cabinet"
+],
+"consortium": [
+"pool"
+],
+"constitute": [
+"plant"
+],
+"constitution": [
+"composition"
+],
+"construction": [
+"building",
+"structure"
+],
+"contain": [
+"bear"
+],
+"cop": [
+"copper",
+"pig"
+],
+"copper": [
+"pig"
+],
+"coquette": [
+"butterfly"
+],
+"corner": [
+"tree"
+],
+"cosy": [
+"cozy"
+],
+"couch": [
+"frame",
+"sofa"
+],
+"countenance": [
+"mug"
+],
+"cover": [
+"blanket"
+],
+"cozy": [
+"cosy"
+],
+"crest": [
+"peak",
+"summit"
+],
+"crew": [
+"crowd"
+],
+"crimson": [
+"red",
+"scarlet"
+],
+"crisp": [
+"sharp",
+"frosty"
+],
+"crooked": [
+"asymmetrical"
+],
+"crude": [
+"rough"
+],
+"ct": [
+"cat"
+],
+"cu": [
+"copper"
+],
+"current": [
+"stream"
+],
+"curve": [
+"wind"
+],
+"custody": [
+"hands"
+],
+"cyan": [
+"teal"
+],
+"cycle": [
+"round",
+"bike",
+"motorcycle",
+"bicycle"
+],
+"dame": [
+"bird",
+"lady"
+],
+"dark": [
+"black",
+"night",
+"shadow"
+],
+"darkness": [
+"dark",
+"shadow"
+],
+"daughter": [
+"girl"
+],
+"dawn": [
+"morning",
+"sunrise",
+"daybreak",
+"first light"
+],
+"day": [
+"daylight"
+],
+"daybreak": [
+"morning",
+"dawn",
+"sunrise",
+"first light"
+],
+"daylight": [
+"day"
+],
+"dead": [
+"short"
+],
+"deal": [
+"mountain",
+"mint"
+],
+"dear": [
+"near"
+],
+"deck": [
+"floor"
+],
+"decline": [
+"fall"
+],
+"decrease": [
+"fall"
+],
+"deeply": [
+"deep"
+],
+"degree": [
+"level"
+],
+"delicate": [
+"soft"
+],
+"deliver": [
+"render"
+],
+"dense": [
+"thick",
+"dim"
+],
+"dented": [
+"bent"
+],
+"depiction": [
+"picture",
+"line drawing"
+],
+"design": [
+"figure"
+],
+"desktop": [
+"background"
+],
+"destroyed": [
+"ruined"
+],
+"detailed": [
+"elaborate"
+],
+"devil": [
+"gravel"
+],
+"difficult": [
+"hard"
+],
+"diffused": [
+"soft"
+],
+"dig": [
+"shot"
+],
+"digest": [
+"bear"
+],
+"digit": [
+"figure"
+],
+"dim": [
+"black"
+],
+"direct": [
+"straight"
+],
+"directly": [
+"flat",
+"straight"
+],
+"dirt": [
+"soil"
+],
+"dirty": [
+"soil"
+],
+"discipline": [
+"subject",
+"field",
+"train"
+],
+"dish": [
+"peach"
+],
+"dock": [
+"pier"
+],
+"dodge": [
+"hedge"
+],
+"dog": [
+"trail"
+],
+"doll": [
+"bird"
+],
+"domain": [
+"field"
+],
+"door": [
+"doorway"
+],
+"doorway": [
+"door"
+],
+"dose": [
+"window pane"
+],
+"dot": [
+"window pane"
+],
+"double": [
+"image"
+],
+"drawn": [
+"worn"
+],
+"dressed": [
+"polished"
+],
+"drop": [
+"fall",
+"sink",
+"cliff"
+],
+"drum": [
+"barrel"
+],
+"duck": [
+"hedge"
+],
+"dumb": [
+"dim"
+],
+"dusk": [
+"fall",
+"twilight",
+"nightfall"
+],
+"dusty": [
+"cold"
+],
+"dwelling": [
+"home"
+],
+"dyed": [
+"bleached"
+],
+"earn": [
+"clear"
+],
+"ease": [
+"still"
+],
+"easy": [
+"soft"
+],
+"ebony": [
+"jet black"
+],
+"edifice": [
+"building"
+],
+"elaborate": [
+"detailed"
+],
+"elderly": [
+"aged"
+],
+"elementary": [
+"simple"
+],
+"elevation": [
+"peak",
+"summit"
+],
+"elvis": [
+"window pane"
+],
+"empty": [
+"hollow"
+],
+"engaged": [
+"busy"
+],
+"enlarge": [
+"elaborate"
+],
+"enter": [
+"figure"
+],
+"entrance": [
+"capture"
+],
+"establish": [
+"plant"
+],
+"estimate": [
+"figure"
+],
+"eve": [
+"evening"
+],
+"even": [
+"level",
+"still",
+"evening"
+],
+"evidence": [
+"grounds"
+],
+"evident": [
+"plain"
+],
+"ex": [
+"antique"
+],
+"examine": [
+"canvas"
+],
+"example": [
+"illustration"
+],
+"expression": [
+"face"
+],
+"extensive": [
+"wide",
+"broad"
+],
+"fabric": [
+"cloth"
+],
+"faded": [
+"bleached"
+],
+"fair": [
+"clean"
+],
+"fairly": [
+"clean"
+],
+"fairy": [
+"pouf"
+],
+"fall": [
+"autumn"
+],
+"falls": [
+"waterfall"
+],
+"family": [
+"home",
+"house",
+"folk"
+],
+"fancy": [
+"image",
+"picture",
+"figure"
+],
+"fantastic": [
+"wild"
+],
+"fascinating": [
+"gripping"
+],
+"fatal": [
+"black"
+],
+"fe": [
+"iron"
+],
+"felt": [
+"matte"
+],
+"fence": [
+"wall"
+],
+"field": [
+"subject"
+],
+"fierce": [
+"rough"
+],
+"fig": [
+"figure"
+],
+"figure": [
+"image",
+"picture",
+"frame"
+],
+"film": [
+"picture"
+],
+"finish": [
+"close"
+],
+"fireplace": [
+"hearth"
+],
+"firm": [
+"house"
+],
+"first light": [
+"morning",
+"dawn",
+"sunrise",
+"daybreak"
+],
+"fish": [
+"angle"
+],
+"fit": [
+"scene"
+],
+"flame": [
+"flare"
+],
+"flash": [
+"loud"
+],
+"flat": [
+"level",
+"straight",
+"plane"
+],
+"fleecy": [
+"brushed"
+],
+"flesh": [
+"figure",
+"frame"
+],
+"flight": [
+"flying"
+],
+"flip": [
+"leaf"
+],
+"flood": [
+"swamp"
+],
+"floor": [
+"level"
+],
+"flooring": [
+"floor"
+],
+"flow": [
+"stream"
+],
+"flower": [
+"peak",
+"bloom",
+"blossom"
+],
+"fluid": [
+"smooth"
+],
+"flush": [
+"level",
+"peak",
+"bloom",
+"blossom",
+"crimson"
+],
+"foam": [
+"sparkle"
+],
+"fog": [
+"cloud",
+"mist"
+],
+"foggy": [
+"fuzzy",
+"hazy"
+],
+"fold": [
+"close"
+],
+"font": [
+"face"
+],
+"fool": [
+"mug"
+],
+"forecast": [
+"figure"
+],
+"forest": [
+"wood",
+"woods",
+"woodland"
+],
+"fork": [
+"branch"
+],
+"form": [
+"spring"
+],
+"former": [
+"old"
+],
+"found": [
+"plant"
+],
+"fountain": [
+"spring"
+],
+"fowl": [
+"bird"
+],
+"frame": [
+"figure",
+"couch"
+],
+"framework": [
+"fabric"
+],
+"framing": [
+"frame"
+],
+"frank": [
+"dog",
+"blunt"
+],
+"freeze": [
+"freezing"
+],
+"frequent": [
+"shop"
+],
+"fresh": [
+"new"
+],
+"front": [
+"face"
+],
+"frosty": [
+"icy",
+"crisp"
+],
+"frozen": [
+"icy",
+"frosty"
+],
+"function": [
+"office"
+],
+"fuzzy": [
+"hazy",
+"foggy"
+],
+"gage": [
+"grass"
+],
+"gang": [
+"crowd"
+],
+"gay": [
+"sunny"
+],
+"gear": [
+"train"
+],
+"gem": [
+"stone"
+],
+"generate": [
+"render"
+],
+"gentle": [
+"blue",
+"soft"
+],
+"gentleman": [
+"man"
+],
+"ghost": [
+"shade"
+],
+"giant": [
+"whale"
+],
+"girlfriend": [
+"girl"
+],
+"give": [
+"spring"
+],
+"gliding": [
+"soaring"
+],
+"glitter": [
+"shine",
+"sparkle"
+],
+"gloomy": [
+"blue",
+"dark"
+],
+"glossy": [
+"shiny",
+"shining"
+],
+"glow": [
+"beam",
+"shine"
+],
+"glowing": [
+"glow"
+],
+"gold": [
+"golden",
+"amber"
+],
+"golden": [
+"gold"
+],
+"grade": [
+"level"
+],
+"grand": [
+"yard",
+"expansive"
+],
+"graphics": [
+"artwork"
+],
+"gray": [
+"grey"
+],
+"great": [
+"neat"
+],
+"green": [
+"park"
+],
+"grey": [
+"gray"
+],
+"grounds": [
+"yard"
+],
+"grove": [
+"orchard"
+],
+"grown": [
+"adult"
+],
+"guess": [
+"shot"
+],
+"guy": [
+"cat"
+],
+"hang": [
+"bent"
+],
+"harbor": [
+"harbour"
+],
+"harbour": [
+"harbor"
+],
+"harvest": [
+"crop"
+],
+"haven": [
+"harbor",
+"harbour"
+],
+"hazardous": [
+"wild"
+],
+"hazy": [
+"fuzzy",
+"foggy"
+],
+"hearth": [
+"fireplace"
+],
+"heather": [
+"broom"
+],
+"heel": [
+"dog"
+],
+"height": [
+"peak",
+"summit"
+],
+"heroic": [
+"expansive"
+],
+"highlight": [
+"foreground"
+],
+"home": [
+"plate",
+"dwelling"
+],
+"horizon": [
+"view"
+],
+"household": [
+"home",
+"house"
+],
+"however": [
+"still"
+],
+"huge": [
+"vast"
+],
+"human": [
+"man"
+],
+"humanity": [
+"man"
+],
+"humans": [
+"man"
+],
+"hz": [
+"cycle"
+],
+"icon": [
+"image",
+"picture"
+],
+"icy": [
+"frosty"
+],
+"idle": [
+"light",
+"wild"
+],
+"illuminated": [
+"lit"
+],
+"illumination": [
+"light"
+],
+"image": [
+"picture",
+"figure"
+],
+"immaculate": [
+"spotless"
+],
+"immense": [
+"huge",
+"vast"
+],
+"imperial": [
+"purple"
+],
+"impression": [
+"picture"
+],
+"individual": [
+"person",
+"someone"
+],
+"infinite": [
+"space"
+],
+"informal": [
+"cozy"
+],
+"injection": [
+"shot"
+],
+"inner": [
+"interior"
+],
+"innovative": [
+"modern"
+],
+"inside": [
+"interior"
+],
+"instance": [
+"illustration"
+],
+"institute": [
+"plant"
+],
+"intense": [
+"vivid"
+],
+"internal": [
+"interior"
+],
+"interpretation": [
+"rendering"
+],
+"intimate": [
+"cozy"
+],
+"issue": [
+"subject"
+],
+"jail": [
+"jug"
+],
+"java": [
+"coffee"
+],
+"jazz": [
+"bed",
+"wind"
+],
+"jet black": [
+"ebony"
+],
+"john": [
+"bathroom",
+"toilet"
+],
+"josh": [
+"kid"
+],
+"jump": [
+"spring"
+],
+"just": [
+"upright"
+],
+"keen": [
+"sharp",
+"neat"
+],
+"keeping": [
+"holding"
+],
+"kid": [
+"child",
+"youngster"
+],
+"kitty": [
+"pool",
+"kitten"
+],
+"knight": [
+"horse"
+],
+"knit": [
+"plain"
+],
+"knock": [
+"pink",
+"tap"
+],
+"land": [
+"soil"
+],
+"last": [
+"close"
+],
+"late": [
+"deep"
+],
+"lavender": [
+"lilac"
+],
+"layer": [
+"level",
+"bed"
+],
+"lead": [
+"trail"
+],
+"lean": [
+"angle",
+"thin",
+"leaning"
+],
+"leaning": [
+"tilted"
+],
+"leg": [
+"branch"
+],
+"level": [
+"flat",
+"plane"
+],
+"liberal": [
+"broad"
+],
+"lighter": [
+"light"
+],
+"lighting": [
+"light"
+],
+"lilac": [
+"lavender"
+],
+"line drawing": [
+"depiction"
+],
+"lip": [
+"rim"
+],
+"list": [
+"leaning"
+],
+"lit": [
+"illuminated"
+],
+"lite": [
+"light"
+],
+"literature": [
+"lit"
+],
+"little": [
+"small"
+],
+"lobby": [
+"hall"
+],
+"look": [
+"looking",
+"face"
+],
+"lot": [
+"mountain",
+"mint"
+],
+"lottery": [
+"drawing"
+],
+"lounge": [
+"sofa",
+"couch"
+],
+"love": [
+"bed"
+],
+"lucky": [
+"golden"
+],
+"makeup": [
+"composition"
+],
+"mass": [
+"mountain",
+"mint"
+],
+"mat": [
+"flat",
+"matte"
+],
+"material": [
+"fabric",
+"cloth"
+],
+"matt": [
+"flat",
+"matte"
+],
+"matte": [
+"flat"
+],
+"matter": [
+"subject"
+],
+"men": [
+"hands"
+],
+"mesa": [
+"table"
+],
+"mild": [
+"soft"
+],
+"miniature": [
+"illumination"
+],
+"minimum": [
+"minimal"
+],
+"minor": [
+"child",
+"kid",
+"youngster"
+],
+"mint": [
+"mountain"
+],
+"minute": [
+"narrow"
+],
+"miss": [
+"girl"
+],
+"mist": [
+"cloud",
+"fog"
+],
+"mod": [
+"modern"
+],
+"moderate": [
+"chair"
+],
+"moisture": [
+"wet"
+],
+"monster": [
+"giant"
+],
+"moody": [
+"dark"
+],
+"moon": [
+"moonlight"
+],
+"moonlight": [
+"moon"
+],
+"morning": [
+"dawn",
+"sunrise",
+"daybreak",
+"first light"
+],
+"most": [
+"near"
+],
+"motorcycle": [
+"cycle",
+"bike"
+],
+"mount": [
+"mountain"
+],
+"mountain": [
+"mint"
+],
+"mounting": [
+"climbing"
+],
+"movie": [
+"picture"
+],
+"muted": [
+"quiet"
+],
+"mysterious": [
+"deep"
+],
+"naked": [
+"bare"
+],
+"name": [
+"figure"
+],
+"national": [
+"subject"
+],
+"naughty": [
+"blue"
+],
+"ne": [
+"neon"
+],
+"near": [
+"close"
+],
+"nearly": [
+"near"
+],
+"neat": [
+"clean"
+],
+"nerve": [
+"face",
+"steel"
+],
+"net": [
+"clear"
+],
+"nevertheless": [
+"still"
+],
+"new": [
+"fresh"
+],
+"newly": [
+"new",
+"fresh"
+],
+"newspaper": [
+"paper"
+],
+"night": [
+"dark"
+],
+"nightfall": [
+"fall",
+"dusk",
+"twilight"
+],
+"nose": [
+"wind"
+],
+"novel": [
+"new",
+"fresh"
+],
+"nude": [
+"bare"
+],
+"number": [
+"figure"
+],
+"nurse": [
+"harbor",
+"harbour"
+],
+"nuts": [
+"cracked"
+],
+"observation": [
+"watching"
+],
+"obviously": [
+"plain"
+],
+"ocean": [
+"sea"
+],
+"odd": [
+"uneven"
+],
+"offset": [
+"branch"
+],
+"older": [
+"old",
+"aged",
+"elderly"
+],
+"open": [
+"clear",
+"surface"
+],
+"opinion": [
+"view"
+],
+"optical": [
+"visual"
+],
+"orbit": [
+"field"
+],
+"orchard": [
+"grove"
+],
+"origin": [
+"root"
+],
+"outline": [
+"sketch"
+],
+"outlined": [
+"defined"
+],
+"overcast": [
+"cloud"
+],
+"package": [
+"box"
+],
+"painting": [
+"picture"
+],
+"palace": [
+"castle"
+],
+"panorama": [
+"view",
+"scene"
+],
+"paper": [
+"composition"
+],
+"paradigm": [
+"image"
+],
+"park": [
+"green"
+],
+"passive": [
+"peaceful"
+],
+"pat": [
+"tap"
+],
+"patent": [
+"plain"
+],
+"pattern": [
+"figure"
+],
+"pay": [
+"bear"
+],
+"peak": [
+"summit",
+"bloom",
+"blossom"
+],
+"pearl": [
+"ivory"
+],
+"pee": [
+"water"
+],
+"person": [
+"individual",
+"someone"
+],
+"perspective": [
+"view"
+],
+"petite": [
+"tiny"
+],
+"phantom": [
+"shadow"
+],
+"photo": [
+"picture",
+"photograph"
+],
+"photograph": [
+"photo",
+"picture"
+],
+"piano": [
+"soft"
+],
+"pic": [
+"photo",
+"picture",
+"photograph"
+],
+"pick": [
+"cream"
+],
+"picture": [
+"image",
+"figure",
+"scene",
+"render"
+],
+"piece": [
+"composition"
+],
+"pier": [
+"dock"
+],
+"piercing": [
+"sharp"
+],
+"pig": [
+"copper"
+],
+"pin": [
+"fall"
+],
+"ping": [
+"pink"
+],
+"pink": [
+"tap"
+],
+"pit": [
+"stone"
+],
+"pitch": [
+"sky"
+],
+"plain": [
+"field"
+],
+"plane": [
+"level",
+"flat"
+],
+"plate": [
+"home"
+],
+"plenty": [
+"mountain",
+"mint"
+],
+"plum": [
+"clean"
+],
+"point": [
+"level"
+],
+"polish": [
+"round",
+"smooth",
+"shine"
+],
+"poll": [
+"canvas"
+],
+"pond": [
+"pool"
+],
+"pool": [
+"pond"
+],
+"posing": [
+"sitting"
+],
+"position": [
+"view",
+"perspective"
+],
+"post": [
+"office"
+],
+"posting": [
+"poster"
+],
+"pot": [
+"toilet",
+"stool"
+],
+"poultry": [
+"fowl"
+],
+"pour": [
+"stream"
+],
+"power": [
+"office"
+],
+"president": [
+"chair"
+],
+"previous": [
+"old"
+],
+"prime": [
+"peak",
+"bloom",
+"blossom"
+],
+"productive": [
+"rich"
+],
+"prominent": [
+"large"
+],
+"promising": [
+"bright"
+],
+"property": [
+"holding"
+],
+"prospect": [
+"view",
+"scene",
+"panorama"
+],
+"prototype": [
+"image"
+],
+"provide": [
+"render"
+],
+"puppy": [
+"pup"
+],
+"pure": [
+"saturated"
+],
+"purple": [
+"violet"
+],
+"put": [
+"frame",
+"couch"
+],
+"puzzle": [
+"gravel"
+],
+"quad": [
+"space"
+],
+"queer": [
+"pouf"
+],
+"quest": [
+"bay"
+],
+"quick": [
+"flying"
+],
+"quiet": [
+"still",
+"calm",
+"muted"
+],
+"rage": [
+"storm"
+],
+"rand": [
+"reef"
+],
+"range": [
+"chain"
+],
+"rap": [
+"pink",
+"tap"
+],
+"ray": [
+"beam"
+],
+"re": [
+"ray"
+],
+"reach": [
+"reaching"
+],
+"realize": [
+"clear"
+],
+"rear": [
+"seat"
+],
+"rebound": [
+"spring"
+],
+"red": [
+"crimson",
+"scarlet"
+],
+"refine": [
+"elaborate"
+],
+"refined": [
+"elegant",
+"polished"
+],
+"reflect": [
+"shine"
+],
+"regard": [
+"view"
+],
+"remote": [
+"distant"
+],
+"removed": [
+"distant"
+],
+"representative": [
+"illustration"
+],
+"residence": [
+"hall"
+],
+"resume": [
+"sketch"
+],
+"retention": [
+"holding"
+],
+"return": [
+"render"
+],
+"rhythm": [
+"round",
+"cycle"
+],
+"robust": [
+"rich"
+],
+"rock": [
+"stone"
+],
+"rocky": [
+"rough"
+],
+"role": [
+"office"
+],
+"romance": [
+"butterfly"
+],
+"roof": [
+"ceiling"
+],
+"roughly": [
+"rough"
+],
+"round": [
+"cycle"
+],
+"route": [
+"road",
+"path"
+],
+"royal": [
+"purple"
+],
+"ruby": [
+"red",
+"crimson",
+"scarlet"
+],
+"rug": [
+"carpet"
+],
+"sail": [
+"canvas"
+],
+"sailing": [
+"gliding",
+"soaring"
+],
+"sapphire": [
+"azure"
+],
+"savage": [
+"wild",
+"wolf"
+],
+"scarlet": [
+"red",
+"crimson"
+],
+"scene": [
+"view",
+"shot",
+"panorama"
+],
+"school": [
+"train"
+],
+"scope": [
+"background"
+],
+"scratch": [
+"bread"
+],
+"screw": [
+"bed"
+],
+"script": [
+"hand"
+],
+"sea": [
+"ocean"
+],
+"seated": [
+"sitting"
+],
+"see": [
+"image",
+"picture",
+"figure"
+],
+"send": [
+"ship"
+],
+"senior": [
+"aged",
+"elderly"
+],
+"sensual": [
+"sultry"
+],
+"sept": [
+"folk"
+],
+"serene": [
+"calm",
+"tranquil"
+],
+"session": [
+"sitting"
+],
+"setting": [
+"background",
+"scene"
+],
+"severe": [
+"hard",
+"spartan"
+],
+"sewn": [
+"stitched"
+],
+"shade": [
+"shadow"
+],
+"shadow": [
+"dark",
+"shade"
+],
+"shaft": [
+"shot",
+"ray",
+"beam"
+],
+"shake": [
+"rock"
+],
+"shape": [
+"figure",
+"frame"
+],
+"sharp": [
+"crisp"
+],
+"sharply": [
+"sharp"
+],
+"sheer": [
+"plain",
+"transparent"
+],
+"sheet": [
+"plane"
+],
+"shield": [
+"harbor",
+"harbour"
+],
+"shine": [
+"beam",
+"glitter"
+],
+"shining": [
+"bright",
+"shiny",
+"glossy"
+],
+"shiny": [
+"bright",
+"glossy",
+"shining"
+],
+"shock": [
+"floor"
+],
+"shooting": [
+"shot"
+],
+"shop": [
+"workshop",
+"grass"
+],
+"shortly": [
+"short"
+],
+"shrub": [
+"bush"
+],
+"shut": [
+"close"
+],
+"shuttle": [
+"bird"
+],
+"sick": [
+"cat"
+],
+"side": [
+"face"
+],
+"silence": [
+"still",
+"quiet"
+],
+"silent": [
+"still"
+],
+"silver": [
+"ash grey"
+],
+"single": [
+"individual"
+],
+"sitting": [
+"seated"
+],
+"skin": [
+"bark"
+],
+"skirt": [
+"bird",
+"hedge"
+],
+"sleeve": [
+"arm"
+],
+"slight": [
+"thin"
+],
+"slim": [
+"thin"
+],
+"slow": [
+"dim"
+],
+"smart": [
+"fresh",
+"bright"
+],
+"smile": [
+"smiling"
+],
+"smiling": [
+"smile"
+],
+"smooth": [
+"shine"
+],
+"snapshot": [
+"shot"
+],
+"snowy": [
+"white"
+],
+"soaked": [
+"wet"
+],
+"soaring": [
+"gliding"
+],
+"sofa": [
+"couch"
+],
+"solution": [
+"root"
+],
+"solve": [
+"clear"
+],
+"soma": [
+"figure",
+"frame"
+],
+"somebody": [
+"person",
+"individual",
+"someone"
+],
+"someone": [
+"person",
+"individual"
+],
+"son": [
+"boy"
+],
+"sorry": [
+"blue",
+"dark",
+"sad",
+"gloomy"
+],
+"soul": [
+"person",
+"individual",
+"someone"
+],
+"source": [
+"root"
+],
+"sparkle": [
+"light",
+"glitter"
+],
+"specs": [
+"glasses"
+],
+"spectacular": [
+"dramatic"
+],
+"sphere": [
+"field"
+],
+"sponsor": [
+"shop"
+],
+"sporting": [
+"clean"
+],
+"spotless": [
+"immaculate"
+],
+"spotlight": [
+"foreground"
+],
+"square": [
+"straight"
+],
+"stack": [
+"mountain",
+"mint"
+],
+"stadium": [
+"bowl"
+],
+"stage": [
+"level"
+],
+"static": [
+"still"
+],
+"steady": [
+"calm"
+],
+"stem": [
+"root"
+],
+"steps": [
+"stairs"
+],
+"still": [
+"smooth",
+"quiet",
+"calm",
+"tranquil"
+],
+"stitched": [
+"sewn"
+],
+"stomach": [
+"bear"
+],
+"stone": [
+"rock"
+],
+"stool": [
+"toilet"
+],
+"store": [
+"shop"
+],
+"story": [
+"level",
+"floor"
+],
+"straight": [
+"flat"
+],
+"strain": [
+"air"
+],
+"strand": [
+"chain",
+"maroon"
+],
+"stretch": [
+"reaching"
+],
+"strike": [
+"tap"
+],
+"striking": [
+"dramatic"
+],
+"string": [
+"train"
+],
+"stroke": [
+"shot"
+],
+"study": [
+"canvas"
+],
+"subdivision": [
+"branch",
+"arm"
+],
+"subject": [
+"field"
+],
+"submit": [
+"subject"
+],
+"substantial": [
+"square"
+],
+"suddenly": [
+"short"
+],
+"suffer": [
+"bear"
+],
+"sugar": [
+"bread"
+],
+"suite": [
+"rooms"
+],
+"summit": [
+"peak"
+],
+"sunday": [
+"sun"
+],
+"sundown": [
+"sunset"
+],
+"sunrise": [
+"morning",
+"dawn",
+"daybreak",
+"first light"
+],
+"sunset": [
+"sundown"
+],
+"sunshine": [
+"sun"
+],
+"supply": [
+"render"
+],
+"surprise": [
+"storm"
+],
+"surround": [
+"wall"
+],
+"survey": [
+"view",
+"sketch"
+],
+"sword": [
+"steel"
+],
+"syndicate": [
+"pool"
+],
+"tag": [
+"dog",
+"trail"
+],
+"tail": [
+"dog",
+"seat",
+"trail",
+"dock"
+],
+"tan": [
+"bronze"
+],
+"teal": [
+"cyan"
+],
+"teen": [
+"teenager"
+],
+"tender": [
+"warm"
+],
+"terrace": [
+"bench"
+],
+"territory": [
+"soil"
+],
+"textile": [
+"fabric",
+"cloth"
+],
+"theater": [
+"house",
+"field"
+],
+"theatre": [
+"house",
+"field"
+],
+"theme": [
+"subject",
+"paper",
+"composition"
+],
+"thou": [
+"yard"
+],
+"thought": [
+"view"
+],
+"thousand": [
+"yard"
+],
+"thread": [
+"wind"
+],
+"threshold": [
+"door",
+"doorway"
+],
+"thumb": [
+"leaf"
+],
+"ticket": [
+"slate"
+],
+"tier": [
+"level"
+],
+"tight": [
+"close"
+],
+"tilt": [
+"angle",
+"leaning"
+],
+"tilted": [
+"leaning"
+],
+"timber": [
+"forest",
+"woodland"
+],
+"time": [
+"clock"
+],
+"tip": [
+"wind",
+"peak"
+],
+"toilet": [
+"bathroom",
+"stool"
+],
+"top": [
+"clear",
+"peak",
+"summit"
+],
+"topic": [
+"subject"
+],
+"torso": [
+"trunk"
+],
+"trace": [
+"shadow"
+],
+"track": [
+"dog",
+"path",
+"trail"
+],
+"trail": [
+"dog"
+],
+"trance": [
+"capture"
+],
+"tranquil": [
+"still",
+"smooth",
+"quiet",
+"calm",
+"serene"
+],
+"translate": [
+"render"
+],
+"translation": [
+"rendering"
+],
+"transmit": [
+"air",
+"beam"
+],
+"transport": [
+"ship"
+],
+"trash": [
+"glass"
+],
+"trench": [
+"deep"
+],
+"tribe": [
+"folk"
+],
+"trick": [
+"fox"
+],
+"triumph": [
+"crow"
+],
+"tub": [
+"bathtub"
+],
+"tune": [
+"air"
+],
+"turtleneck": [
+"turtle"
+],
+"twilight": [
+"fall",
+"dusk",
+"nightfall"
+],
+"umber": [
+"coffee"
+],
+"upset": [
+"broken"
+],
+"vast": [
+"huge"
+],
+"version": [
+"rendering"
+],
+"vertex": [
+"peak"
+],
+"vertical": [
+"upright"
+],
+"video": [
+"picture"
+],
+"view": [
+"scene",
+"perspective",
+"panorama"
+],
+"violent": [
+"wild"
+],
+"violet": [
+"purple"
+],
+"virtually": [
+"near"
+],
+"vista": [
+"view",
+"scene",
+"panorama"
+],
+"vivid": [
+"bright"
+],
+"walk": [
+"walking"
+],
+"wallpaper": [
+"paper"
+],
+"wan": [
+"pale"
+],
+"waste": [
+"wild",
+"wasteland"
+],
+"watch": [
+"view"
+],
+"watershed": [
+"basin"
+],
+"weak": [
+"light"
+],
+"weapon": [
+"arm"
+],
+"wear": [
+"bear"
+],
+"weed": [
+"grass"
+],
+"weight": [
+"angle"
+],
+"whale": [
+"giant"
+],
+"wheel": [
+"cycle",
+"bike",
+"bicycle"
+],
+"white": [
+"snowy"
+],
+"wholesale": [
+"sweeping"
+],
+"wide": [
+"broad"
+],
+"widely": [
+"wide"
+],
+"wilderness": [
+"wild"
+],
+"windy": [
+"breezy"
+],
+"wise": [
+"fresh"
+],
+"wood": [
+"forest"
+],
+"woodland": [
+"forest"
+],
+"woods": [
+"forest"
+],
+"workforce": [
+"hands"
+],
+"works": [
+"plant"
+],
+"workshop": [
+"shop"
+],
+"worm": [
+"insect"
+],
+"wrap": [
+"wind"
+],
+"writing": [
+"composition"
+],
+"yard": [
+"grounds"
+],
+"yet": [
+"still"
+],
+"yield": [
+"fruit",
+"render"
+],
+"young": [
+"new"
+],
+"youngster": [
+"child",
+"kid"
+],
+"zen": [
+"window pane"
+],
+"zone": [
+"partition"
+]
+},
+"vocabulary": 10477
+}

@@ -373,7 +373,13 @@ def main():
           '%dx%d vs %dx%d' % (app.clear_base_btn.winfo_width(), app.clear_base_btn.winfo_height(),
                               app.gen_btn.winfo_width(), app.gen_btn.winfo_height()))
     app.clear_base(); root.update()
-    check('Clear base is disabled with nothing to clear', 'disabled' in app.clear_base_btn.state())
+    check('Clear Base is title case', str(app.clear_base_btn['text']) == 'Clear Base',
+          str(app.clear_base_btn['text']))
+    check('its text colour matches Generate', str(app.clear_base_btn['fg']) == str(app.gen_btn['fg']),
+          '%s vs %s' % (app.clear_base_btn['fg'], app.gen_btn['fg']))
+    check('its background is tomato red', str(app.clear_base_btn['bg']).lower() == '#ff6347',
+          str(app.clear_base_btn['bg']))
+    check('Clear Base is disabled with nothing to clear', 'disabled' in app.clear_base_btn.state())
     app.select_file(app._files[0]); root.update()
     check('and enabled once a picture is the base', 'disabled' not in app.clear_base_btn.state())
     app.clear_base(); root.update()
@@ -977,6 +983,21 @@ def main():
     check('an unknown prompt is reported, not silently kept',
           'no known synonyms' in app.hint['text'], app.hint['text'])
     app.text.delete('1.0', 'end')
+
+    print('\n-- the dictionary is generated from WordNet, scoped to visual words')
+    check('the table is far larger than the hand-written list alone', len(rp2.LOOKUP) > 800, str(len(rp2.LOOKUP)))
+    check('generated entries are loaded', bool(rp2._WORDNET_TABLE.get('forest')),
+          str(rp2._WORDNET_TABLE.get('forest')))
+    check('hand-written entries win over generated ones',
+          rp2.LOOKUP['brick'][0] in ('masonry', 'brickwork', 'terracotta block'), str(rp2.LOOKUP['brick']))
+    check('WordNet's prose senses are filtered out of colours', 'loss' not in rp2.LOOKUP.get('red', []),
+          str(rp2.LOOKUP.get('red')))
+    check('and out of physical objects', 'fool' not in rp2.LOOKUP.get('mug', []) and
+          'mark' not in rp2.LOOKUP.get('mug', []), str(rp2.LOOKUP.get('mug')))
+    check('the WordNet licence travels with the data', Path('data/WORDNET-LICENSE.txt').exists())
+    check('the generated file records its source',
+          'WordNet' in json.loads(Path('data/synonyms.json').read_text(encoding='utf-8'))['source'],
+          'missing source field')
 
     print('\n-- the prompt repair tool')
     import repair_prompts as rp

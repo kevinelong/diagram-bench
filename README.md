@@ -179,8 +179,23 @@ per step, which adds grain and is the real "randomisation" knob), **strength** f
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
-**rephrase** sits directly under the prompt box and rewrites it with synonyms from a curated map (`rephrase.py`) - no
-model, no server, so it always works. Each press re-derives from the *original* wording and walks the next variant, so
+**rephrase** sits directly under the prompt box and rewrites it with synonyms - no model, no server, so it always works.
+The dictionary is **947 words**, from two layers:
+
+| layer | words | where it comes from |
+|---|---|---|
+| generated | 866 | `build_synonyms.py` parses WordNet 3.0 synsets, restricted to visual vocabulary |
+| hand-written | 181 | `VISUAL_EXTRA` + `SYNONYMS` in `rephrase.py`, and these win on conflict |
+
+WordNet alone is not usable here: its noun senses are prose-shaped, so it pairs *red* with **loss** (in the red), *mug*
+with **fool** (a gullible person) and *dog* with **track, tag**. The builder therefore keeps only replacements from a
+visual allow-list (`COMMON` in the builder - colours, materials, light, weather, subjects, poses, textures), which drops
+those senses without hand-checking thousands of entries. Where WordNet has nothing at all - *brick*, *kitchen*, *window*,
+*red* - the hand-written layer covers it. Regenerate with:
+
+    python build_synonyms.py --senses 4        # downloads WordNet once, writes data/synonyms.json (~25 KB)
+
+WordNet 3.0 data is Princeton's; the licence travels with the output in `data/WORDNET-LICENSE.txt`. Each press re-derives from the *original* wording and walks the next variant, so
 three presses give three different phrasings rather than converging; editing the text starts the cycle again. Whole
 words only, capitalisation carried over, and repeated words collapsed, so "leaning against a wall" cannot become
 "propped against against". It reports how many words moved ("rephrased 7 words"), and says so plainly when a prompt has
