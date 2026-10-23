@@ -93,6 +93,13 @@ def shot(root, name):
     root.attributes('-topmost', False)
 
 
+def feed_image(app, path):
+    """Deliver a finished generation the way the engine does, so the base-update path is exercised."""
+    app.engine.events.put(('image', (Path(path).read_bytes(), str(path))))
+    app._poll()
+    app.root.update()
+
+
 def click(app, path, ctrl=False, shift=False):
     state = (0x0004 if ctrl else 0) | (0x0001 if shift else 0)
     app._on_tile_click(NS(state=state), path)
@@ -259,6 +266,23 @@ def main():
               and isinstance(call[5], int) and call[6] == str(tmp), str(call[:7]))
     check('button locked while busy', 'disabled' in app.gen_btn.state())
     app.busy = False
+
+    print('\n-- a generation does not become the next base')
+    check('reuse-last-image is off by default', app.chain_var.get() is False)
+    app.clear_base()
+    check('no base to begin with', app.base_path is None)
+    fresh = app._files[0]
+    feed_image(app, fresh)
+    check('base stays empty after generating', app.base_path is None)
+    check('status confirms the write', 'wrote' in app.status['text'], app.status['text'])
+    check('hint says the base is unchanged', 'base unchanged' in app.hint['text'], app.hint['text'])
+
+    app.chain_var.set(True)
+    feed_image(app, fresh)
+    check('with the box ticked the new image is the base',
+          app.base_path is not None and app.base_path.name == fresh.name)
+    app.chain_var.set(False)
+    app.clear_base()
 
     print('\n-- n-ups run one tile at a time by default')
     check('default is one at a time', app.seq_var.get() is True)

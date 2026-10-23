@@ -521,6 +521,10 @@ class App:
         self.seq_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(row, text='one at a time (seed+1)', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
                                                                                 sticky='w', pady=(4, 0))
+        # off by default: a generation is text to image unless an image was picked from the gallery
+        self.chain_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var).grid(
+            row=2, column=0, columnspan=4, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
         seedbox.grid(row=1, column=3, sticky='w', pady=(4, 0))
         ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
@@ -1119,7 +1123,12 @@ class App:
                     self.bar.grid_remove()
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
-                    self._set_base(path)
+                    if self.chain_var.get():
+                        self._set_base(path)
+                    else:
+                        self.hint.configure(text='saved; base unchanged (%s)'
+                                            % ('none - next run is text to image' if self.base_path is None
+                                               else 'still %s' % self.base_path.name))
                     self._current = Path(path)
                     self.copy_btn.state(['!disabled'])
                 elif kind == 'error':

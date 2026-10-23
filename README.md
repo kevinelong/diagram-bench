@@ -173,6 +173,12 @@ per step, which adds grain and is the real "randomisation" knob), **strength** f
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
+**reuse last image as base** is off by default, and it changes what "Enter" means from run to run. Unticked, a
+generation is text to image: the picture that just appeared does **not** become the base, so pressing Enter again
+produces another fresh image. Ticked, each finished image becomes the base for the next run - the chaining behaviour -
+and the status line says which file is now the base. Either way, clicking an image in the gallery sets the base
+explicitly; the checkbox only controls what a *generation* does.
+
 **Guidance (CFG) is deliberately not exposed**, because it was measured and removed: on this turbo model raising it from
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs
 crispness. CFG stays at the model's distilled 1.0.
