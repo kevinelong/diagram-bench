@@ -1194,6 +1194,28 @@ class App:
             return self._custom_styles[name]
         return STYLES.get(name, '')
 
+    def _apply_style(self, prompt, style_name):
+        """Append the style suffix exactly once: a prompt that already ends with it is left alone.
+
+        Rerendering is the normal case - vary, hires and a gallery click all restore the prompt that produced an
+        image, and that prompt already carries the suffix the first run appended.
+        """
+        text = (prompt or '').rstrip()
+        suffix = self._style_suffix(style_name)
+        if not suffix:
+            return text
+        if text.endswith(suffix):
+            return text
+        return (text + ', ' + suffix) if text else suffix
+
+    def _strip_style(self, prompt, style_name):
+        """The inverse: what the box should hold so the suffix is not applied twice."""
+        text = (prompt or '').rstrip()
+        suffix = self._style_suffix(style_name)
+        if suffix and text.endswith(suffix):
+            text = text[:-len(suffix)].rstrip().rstrip(',').rstrip()
+        return text
+
     def _meta_of_current(self):
         return (read_meta(self._current) if self._current else None) or {}
 
@@ -1293,10 +1315,11 @@ class App:
         if not prompt or self._current is None:
             self.hint.configure(text='vary needs an image with its prompt recorded')
             return
-        self.text.delete('1.0', 'end')
-        self.text.insert('1.0', prompt)
         if meta.get('style'):
             self.style_var.set(meta['style'])
+            prompt = self._strip_style(prompt, meta['style'])
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', prompt)
         if meta.get('negative'):
             self.negative.delete('1.0', 'end')
             self.negative.insert('1.0', meta['negative'])
@@ -1323,8 +1346,12 @@ class App:
         """
         meta = self._meta_of_current()
         if self._current is not None and (meta.get('prompt') or '').strip():
+            restored = meta['prompt']
+            if meta.get('style'):
+                self.style_var.set(meta['style'])
+                restored = self._strip_style(restored, meta['style'])
             self.text.delete('1.0', 'end')
-            self.text.insert('1.0', meta['prompt'])
+            self.text.insert('1.0', restored)
             if meta.get('seed') is not None:
                 self.seed.set(str(meta['seed']))
         self._pending_hires = 2.0
@@ -1755,7 +1782,11 @@ class App:
         meta = read_meta(path)
         if meta:
             self.text.delete('1.0', 'end')
-            self.text.insert('1.0', meta.get('prompt') or '')
+            restored = meta.get('prompt') or ''
+            if meta.get('style'):
+                self.style_var.set(meta['style'])
+                restored = self._strip_style(restored, meta['style'])
+            self.text.insert('1.0', restored)
             if meta.get('seed') is not None:
                 self.seed.set(str(meta['seed']))
             self.hint.configure(text='restored prompt and seed %s from %s%s'
@@ -2250,8 +2281,7 @@ class App:
         except (AttributeError, ValueError):
             steps = self.args.steps
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
-        suffix = self._style_suffix(style)
-        full_prompt = (prompt + ', ' + suffix) if suffix else prompt
+        full_prompt = self._apply_style(prompt, style)
         cfg = zg.MODELS.get(model, {}).get('cfg', 1.0)
         negative = self.negative.get('1.0', 'end').strip() if hasattr(self, 'negative') else ''
         sweep = None

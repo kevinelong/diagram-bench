@@ -561,6 +561,36 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- a style suffix is applied once, however often you rerender')
+    app.style_var.set('photo')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    first = app.engine.calls[-1][0][0]
+    check('the suffix is appended', first.count('photograph, natural light, shallow depth of field') == 1, first)
+
+    styled = tmp / 'styled-restore.png'
+    Image.new('RGB', (32, 32), 'red').save(styled)
+    styled.with_suffix('.json').write_text(json.dumps({'prompt': first, 'seed': 7, 'style': 'photo'}),
+                                           encoding='utf-8')
+    app.refresh_gallery(); app.select_file(styled); root.update()
+    box = app.text.get('1.0', 'end').strip()
+    check('a gallery restore takes the suffix back out of the box', 'photograph' not in box, box)
+    check('and restores the style choice', app.style_var.get() == 'photo', app.style_var.get())
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    second = app.engine.calls[-1][0][0]
+    check('rerendering does not stack it', second.count('photograph, natural light') == 1, second)
+    check('the prompt is identical to the first run', second == first, second)
+
+    app.busy = False; app.engine.calls.clear()
+    app.vary('vary'); root.update()
+    third = app.engine.calls[-1][0][0]
+    check('vary does not stack it either', third.count('shallow depth of field') == 1, third)
+    app.style_var.set('none'); app.busy = False
+    styled.unlink(); styled.with_suffix('.json').unlink(missing_ok=True)
+    app.refresh_gallery(); root.update()
+
     print('\n-- vary, vary subtly, regen')
     click(app, app._files[0])
     base_seed = int(app.seed.get())
@@ -808,6 +838,18 @@ def main():
                       'style': 'none', 'wall': '7 s'})
     app._persist()
     check('runs are persisted', bool(zui.load_settings().get('runs')), str(len(zui.load_settings().get('runs') or [])))
+
+    print('\n-- the prompt repair tool')
+    import repair_prompts as rp
+    S = zui.STYLES['photo']
+    check('a doubled suffix collapses to one', rp.collapse('a fox, %s, %s' % (S, S), S) == 'a fox, ' + S,
+          rp.collapse('a fox, %s, %s' % (S, S), S))
+    check('text edited between occurrences is kept',
+          rp.collapse('X, %s, %s resting inside case, %s' % (S, S, S), S) == 'X, resting inside case, ' + S,
+          rp.collapse('X, %s, %s resting inside case, %s' % (S, S, S), S))
+    check('a clean prompt is untouched', rp.collapse('a fox, %s' % S, S) == 'a fox, ' + S)
+    fixed, hits = rp.repair('a fox, %s, %s' % (S, S))
+    check('repair reports which suffix it fixed', bool(hits) and fixed.count(S) == 1, str(hits))
 
     print('\n-- the browser window shares the selection')
     app.clear_selection()

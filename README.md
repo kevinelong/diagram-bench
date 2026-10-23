@@ -224,7 +224,14 @@ directly: **style** and this picture's actions stay visible, while *model*, *ste
 behind **Advanced**.
 
 Styles are prompt suffixes (`STYLES` in the module) - the model is not retrained, words are appended: photo, icon,
-diagram, blueprint, watercolour, cinematic. The suffix applied is written into the sidecar as `style`.
+diagram, blueprint, watercolour, cinematic. The suffix applied is written into the sidecar as `style`, and it is applied
+**once**: `_apply_style` leaves a prompt that already ends with its suffix alone, and every restore path (Vary, hires, a
+gallery click) puts the *unsuffixed* prompt back in the box, so rerendering cannot stack
+"photograph, natural light, shallow depth of field" three deep.
+
+`repair_prompts.py` fixes sidecars written before that: dry run by default, `--apply` writes after copying every file it
+touches into `.prompt-backups/`. It kept the user's edited words that had landed *between* two suffixes - of 717 sidecars,
+56 needed repair and the worst had the suffix three times mid-sentence.
 
 **Advanced → model** switches between profiles that are already on disk, each verified against ComfyUI's own node list:
 
