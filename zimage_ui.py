@@ -215,6 +215,30 @@ RECENT_COLS = 3
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 FILTER_CAP = 200     # while a search is active the strip is a result list, not a recency window
 
+#  Peaks measured on this box with nvidia-smi at 0.25 s (12,227 MiB total). Steps and hires barely move them; batch
+#  size and the checkpoint dominate. Every entry below actually ran - including 16-up at 512 px, which an earlier
+#  hand-written warning claimed would not fit.
+VRAM_POINTS = {
+    ('z-image turbo', 1, 512): 6708,
+    ('z-image turbo', 1, 1024): 7193,
+    ('z-image turbo', 16, 384): 8206,
+    ('z-image turbo', 16, 512): 8927,
+    ('flux1 dev', 1, 512): 9458,
+}
+VRAM_TOTAL_MIB = 12227
+
+
+def estimate_vram(model, batch, size):
+    """Nearest measured peak for this shape, and the point it came from. None if nothing similar was measured."""
+    want_single = batch == 1
+    cands = [(k, v) for k, v in VRAM_POINTS.items() if k[0] == model and (k[1] == 1) == want_single]
+    if not cands:
+        cands = [(k, v) for k, v in VRAM_POINTS.items() if k[0] == model]
+    if not cands:
+        return None, None
+    key, mib = min(cands, key=lambda kv: abs(kv[0][2] - size))
+    return mib, 'measured %s at %d px, batch %d' % (key[0], key[2], key[1])
+
 
 def thumb_for(png, cache_root=None):
     """Return a cached thumbnail path for `png`, creating it if missing or stale.
@@ -2011,10 +2035,17 @@ class App:
         what = 'one image' if n == 1 else '%d tiles' % n
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
+        try:
+            vram, _src = estimate_vram(model, n, int(self.size_var.get() or 0) or 512)
+        except (TypeError, ValueError):
+            vram = None
+        vram_text = '   ·   VRAM ≈ %.1f/%.1f GiB' % (vram / 1024.0, VRAM_TOTAL_MIB / 1024.0) if vram else ''
+        if vram and vram > VRAM_TOTAL_MIB - 400:
+            colour = '#c0392b'
         self.banner.configure(text='%s   ·   %s · %s steps · %s · %s px · %s   ·   '
-                                   'style %s   ·   seed %s'
+                                   'style %s   ·   seed %s%s'
                                    % (mode, model, self.steps_var.get(), self.sampler_var.get(),
-                                      self.size_var.get(), what, style, self.seed.get()),
+                                      self.size_var.get(), what, style, self.seed.get(), vram_text),
                               foreground=colour)
 
     # -- persistence, starters, prompt history -------------------------------
@@ -2153,6 +2184,7 @@ class App:
 
         # an edit yields exactly one result, so an N-up layout does not apply
         batch = 1 if (edit_base or mask_path or outpaint) else self._batch()
+        model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
 
         if not self._history or self._history[-1] != prompt:
             self._history.append(prompt)
@@ -2180,9 +2212,11 @@ class App:
         if batch == 1:
             self.status.configure(text='queued… one %d px image' % size)
         else:
-            if batch >= 16 and size > 448 and not self.seq_var.get():
-                self.hint.configure(text='16-up above 448 px in one batch needs more than a 12 GB card: '
-                                        '16 x 384 px already peaks near 11.7 GiB as a batch')
+            vram, src = estimate_vram(model, batch, size)
+            if vram and vram > VRAM_TOTAL_MIB - 400:
+                self.hint.configure(text='this shape peaked at %.1f GiB (%s) - close to the %.1f GiB on this card. '
+                                         'Lower the size, or use one image at a time.'
+                                         % (vram / 1024.0, src, VRAM_TOTAL_MIB / 1024.0))
             cols = 2 if batch == 4 else 4 if batch == 16 else 3
             self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
                                   % (batch, size, size * cols + (cols - 1) * 6,
@@ -2195,7 +2229,6 @@ class App:
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         suffix = self._style_suffix(style)
         full_prompt = (prompt + ', ' + suffix) if suffix else prompt
-        model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
         cfg = zg.MODELS.get(model, {}).get('cfg', 1.0)
         negative = self.negative.get('1.0', 'end').strip() if hasattr(self, 'negative') else ''
         sweep = None

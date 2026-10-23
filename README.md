@@ -250,7 +250,22 @@ Under the picture, three verbs and two editors:
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
 
 The Generate button carries its own cost (`Generate ⏎ · ≈ 14 s`, from the measured table), so the price is visible
-before the click. **graph** shows the exact ComfyUI workflow the last run sent, copyable - the simplest way to see what
+before the click, and the banner carries the memory: `VRAM ≈ 8.7/11.9 GiB` in red when a shape comes within 400 MiB of
+the card. Both come from peaks measured here with `nvidia-smi` at 0.25 s:
+
+| shape | peak | wall |
+|---|---|---|
+| z-image single 512 | 6,708 MiB | 7.6 s |
+| z-image single 1024 | 7,193 MiB | 15.1 s |
+| z-image 16-up, one at a time, 384 | 6,507 MiB | 160.3 s |
+| z-image 16-up as one batch, 384 | 8,206 MiB | 15.3 s |
+| z-image 16-up as one batch, **512** | **8,927 MiB** | 18.5 s |
+| z-image hires ×2 at 512 | 7,013 MiB | 13.5 s |
+| flux1 dev single 512 | 9,458 MiB | 40.3 s |
+
+That last-but-one row retracts an earlier claim in this file: the window used to warn that 16-up above 448 px "needs
+more than a 12 GB card". It does not - the measured peak is 8,927 of 12,227 MiB and the run completed. The warning was
+replaced by the estimate, and a model with no measured peak (flux1 schnell) shows no number rather than a borrowed one. **graph** shows the exact ComfyUI workflow the last run sent, copyable - the simplest way to see what
 the window actually did. **enhance** and **Describe** are disabled with a reason until a local OpenAI-compatible
 endpoint answers at `llm_url` (probed once at startup, never off-machine).
 

@@ -339,10 +339,24 @@ def main():
     app.generate(); root.update()
     kw = app.engine.calls[-1][1]
     check('unticked asks for one batch', kw.get('sequential') is False)
-    check('batch VRAM warning returns at 16-up/512', '12 GB card' in app.hint['text'], app.hint['text'])
+    # (the old "16-up above 448 px will not fit" assertion is gone: 16-up at 512 px measured 8,927 MiB and ran)
     app.busy = False
     app.seq_var.set(True)
     app.layout_var.set('single')
+
+    print('\n-- the VRAM estimate comes from measurements, not from a guess')
+    mib, src = zui.estimate_vram('z-image turbo', 16, 512)
+    check('a measured shape returns its peak', mib == 8927, str(mib))
+    check('and says where it came from', 'measured' in (src or ''), str(src))
+    check('an unmeasured model invents nothing', zui.estimate_vram('flux1 schnell', 1, 256)[0] is None)
+    app.model_var.set('z-image turbo'); app.size_var.set('512'); app.layout_var.set('16-up (4x4)')
+    app.busy = False; root.update()
+    check('the banner shows headroom', 'VRAM' in app.banner['text'], app.banner['text'])
+    app.engine.calls.clear(); app.text.insert('1.0', 'x')
+    app.generate(); root.update()
+    check('the old "above 448 px will not fit" claim is gone',
+          'needs more than a 12 GB card' not in app.hint['text'], app.hint['text'])
+    app.busy = False; app.layout_var.set('single'); app.text.delete('1.0', 'end')
 
     print('\n-- the banner says what Enter will do')
     app.clear_base()
