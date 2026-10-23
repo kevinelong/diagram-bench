@@ -439,18 +439,16 @@ class App:
 
         guide_row = ttk.Frame(left)
         guide_row.grid(row=7, column=0, sticky='ew', pady=(4, 0))
-        ttk.Label(guide_row, text='guidance').pack(side='left')
-        self.cfg = tk.DoubleVar(value=1.0)
-        ttk.Scale(guide_row, from_=1.0, to=3.0, variable=self.cfg, length=130).pack(side='left', padx=4)
-        self.cfg_text = ttk.Label(guide_row, text='1.00', width=5)
-        self.cfg_text.pack(side='left')
-        ttk.Label(guide_row, text='  sampler').pack(side='left', padx=(10, 4))
+        ttk.Label(guide_row, text='steps').pack(side='left')
+        self.steps_var = tk.StringVar(value=str(self.args.steps))
+        ttk.Combobox(guide_row, textvariable=self.steps_var, width=4, state='readonly',
+                     values=['2', '4', '6', '8', '12']).pack(side='left', padx=4)
+        ttk.Label(guide_row, text='sampler').pack(side='left', padx=(12, 4))
         self.sampler_var = tk.StringVar(value='euler')
         ttk.Combobox(guide_row, textvariable=self.sampler_var, width=15, state='readonly',
                      values=['euler', 'euler_ancestral']).pack(side='left')
-        ttk.Label(guide_row, text='1.0 = turbo default  ·  above ~2 shapes soften',
-                  foreground='#777').pack(side='left', padx=(6, 0))
-        self.cfg.trace_add('write', lambda *a: self.cfg_text.configure(text='%.2f' % self.cfg.get()))
+        ttk.Label(guide_row, text='turbo is 4 steps, euler',
+                  foreground='#777').pack(side='left', padx=(8, 0))
 
         # ---- middle: progress (sits under the button, above the status line)
         self.bar = ttk.Progressbar(left, mode='determinate', maximum=1.0)
@@ -586,7 +584,7 @@ class App:
         self.bar.grid()
         base = meta.get('base_image')
         self.status.configure(text='enlarging %s at 1024 px, seed %s' % (Path(tile_path).name, seed))
-        self.engine.generate(prompt, 1024, 1024, self.args.steps, self.cfg.get(), int(seed), self.args.out,
+        self.engine.generate(prompt, 1024, 1024, self.args.steps, 1.0, int(seed), self.args.out,
                              base_path=base, denoise=(meta.get('denoise') or 1.0), batch=1, sequential=True,
                              sampler=self.sampler_var.get())
 
@@ -698,7 +696,11 @@ class App:
                                   % (batch, size, size * cols + (cols - 1) * 6,
                                      'seeds %d-%d one at a time' % (seed, seed + batch - 1)
                                      if self.seq_var.get() else 'one batch of %d' % batch))
-        self.engine.generate(prompt, size, size, self.args.steps, self.cfg.get(),
+        try:
+            steps = int(self.steps_var.get())
+        except (AttributeError, ValueError):
+            steps = self.args.steps
+        self.engine.generate(prompt, size, size, steps, 1.0,
                              seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
                              sampler=self.sampler_var.get())
