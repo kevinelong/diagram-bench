@@ -669,9 +669,9 @@ class App:
         self.gal_canvas.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<MouseWheel>', self._on_gallery_wheel)
         self.gal_canvas.configure(takefocus=1)
-        for seq, fn in (('<Left>', lambda e: self._nav(-1, 0)), ('<Right>', lambda e: self._nav(1, 0)),
-                        ('<Up>', lambda e: self._nav(0, -1)), ('<Down>', lambda e: self._nav(0, 1)),
-                        ('<space>', self._nav_toggle), ('<Return>', self._nav_open)):
+        for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
+                        ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1)),
+                        ('<space>', self._nav_toggle_key), ('<Return>', self._nav_open_key)):
             self.gal_canvas.bind(seq, fn)
         self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
         for c in range(RECENT_COLS):
@@ -990,6 +990,9 @@ class App:
         lab.image = thumb
         lab.path = path
         lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p))
+        for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
+                        ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
+            lab.bind(seq, fn)
         lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
         return lab
 
@@ -1066,6 +1069,34 @@ class App:
         else:
             self.gal_bar.grid_remove()
             self.gal_canvas.yview_moveto(0)
+
+    def _strip_has_focus(self):
+        """True only when the keyboard is actually on the strip, not merely because a binding exists."""
+        w = self.root.focus_get()
+        if w is None:
+            return False
+        if w is self.gal_canvas:
+            return True
+        try:
+            return str(w).startswith(str(self.gal_canvas)) or w in self._tile_widgets.values()
+        except Exception:
+            return False
+
+    def _nav_key(self, _event, dx, dy):
+        """Arrow keys reach the gallery only from the gallery: never while the prompt box has the keyboard."""
+        if self._typing() or not self._strip_has_focus():
+            return None
+        return self._nav(dx, dy)
+
+    def _nav_toggle_key(self, event=None):
+        if self._typing() or not self._strip_has_focus():
+            return None
+        return self._nav_toggle()
+
+    def _nav_open_key(self, event=None):
+        if self._typing() or not self._strip_has_focus():
+            return None
+        return self._nav_open()
 
     def _nav(self, dx, dy):
         """Move the selection one tile, so the strip is usable without the mouse."""
@@ -1776,7 +1807,9 @@ class App:
         inner = ttk.Frame(canvas)
         canvas.create_window((0, 0), window=inner, anchor='nw')
         inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.bind_all('<MouseWheel>', lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units'))
+        wheel = lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units')
+        for w in (canvas, inner):
+            w.bind('<MouseWheel>', wheel)
 
         cols = 6
         self._all_thumbs = {}

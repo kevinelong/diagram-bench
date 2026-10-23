@@ -473,6 +473,21 @@ def main():
     check('Enter loads the selected tile as the base',
           app.base_path is not None and app.base_path.name == loaded.name)
     check('arrow keys are bound on the strip', bool(app.gal_canvas.bind('<Right>')))
+
+    # arrows must never reach the gallery while the prompt box has the keyboard
+    app.clear_selection(); root.update()
+    app.text.focus_force(); root.update()
+    root.event_generate('<Right>'); root.update()
+    check('a real arrow key while typing does not move the gallery', app.selected == [], str(app.selected))
+    app._nav_key(NS(), 1, 0)
+    check('and the gated handler ignores it too', app.selected == [])
+    app.text.insert('1.0', 'abc')
+    root.event_generate('<Up>'); root.event_generate('<Down>'); root.update()
+    check('up/down while typing stay in the prompt', app.selected == [], str(app.selected))
+    app.gal_canvas.focus_force(); root.update()
+    app._nav_key(NS(), 1, 0)
+    check('the same handler works once the strip has focus', len(app.selected) == 1, str(len(app.selected)))
+    app.text.delete('1.0', 'end')
     app.clear_base()
 
     print('\n-- prompt history')
