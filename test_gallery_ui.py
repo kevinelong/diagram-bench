@@ -660,6 +660,35 @@ def main():
     app.search_var.set('seed12'); app.refresh_gallery(); root.update()
     check('search narrows the strip', len(app._files) < 26 and all('seed12' in p.name for p in app._files),
           str(len(app._files)))
+
+    # the box now matches the sidecar, not just the name
+    app.search_var.set(''); app._run_search(); root.update()
+    app.search_var.set('image 7'); app._run_search(); root.update()
+    check('a prompt word matches without appearing in the filename',
+          len(app._files) == 1 and 'image 7' in json.loads(
+              app._files[0].with_suffix('.json').read_text(encoding='utf-8'))['prompt'].lower(),
+          '%d: %s' % (len(app._files), app._files[:1]))
+    app.search_var.set('seed105'); app._run_search(); root.update()
+    check('a seed matches', len(app._files) >= 1, str(len(app._files)))
+
+    # editing a sidecar invalidates the cache
+    target = app._files[0] if app._files else sorted(Path(app.args.out).glob('*.png'))[0]
+    meta = json.loads(target.with_suffix('.json').read_text(encoding='utf-8'))
+    meta['prompt'] = 'zebra crossing at noon'
+    target.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
+    app.search_var.set('zebra'); app._run_search(); root.update()
+    check('a changed sidecar is picked up', len(app._files) == 1, str(len(app._files)))
+
+    # typing debounces instead of filtering on every keystroke
+    app.search_var.set(''); app._run_search(); root.update()
+    before_files = list(app._files)
+    app.search_var.set('seed1')
+    app._on_search_typing()
+    check('typing schedules rather than filters', app._search_after is not None and app._files == before_files)
+    app._run_search(); root.update()
+    check('and the filter lands after the pause', app._files and len(app._files) <= len(before_files),
+          '%d of %d' % (len(app._files), len(before_files)))
+    app.search_var.set(''); app._run_search(); root.update()
     app.search_var.set(''); app.refresh_gallery(); root.update()
     app.clear_selection()
     click(app, app._files[0], ctrl=True)

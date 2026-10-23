@@ -607,6 +607,8 @@ class App:
         self._preview = False
         self._custom_styles = dict(self._settings.get('custom_styles') or {})
         self._llm_ok = False
+        self._meta_cache = {}        # name -> (mtime, searchable text), rebuilt as files change
+        self._search_after = None    # debounce id, so a keystroke does not re-filter the folder
         self._mask = None            # PIL 'L' at the picture's own size
         self._mask_painting = False
         self._brush = 40
@@ -646,8 +648,9 @@ class App:
         self.gal_title = ttk.Label(gal, text='Recent (%d)' % RECENT_N)
         self.gal_title.grid(row=0, column=0, columnspan=2, sticky='w')
         self.search_box = ttk.Entry(gal, textvariable=self.search_var, width=16)
+        self._tip(self.search_box, 'Search file names, prompts, styles, models, seeds and steps.')
         self.search_box.grid(row=1, column=0, sticky='ew', pady=(3, 0))
-        self.search_box.bind('<KeyRelease>', lambda e: self.refresh_gallery())
+        self.search_box.bind('<KeyRelease>', self._on_search_typing)
         self.starred_chk = ttk.Checkbutton(gal, text='\u2605 only', variable=self.starred_only,
                                            command=self.refresh_gallery)
         self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
@@ -981,9 +984,34 @@ class App:
         self._poll()
 
     # -- gallery: thumbnails -------------------------------------------------
-    def _all_files(self):
+    def _scan(self):
+        """One directory read: (path, mtime) for every png, newest first.
+
+        The filter and the cache check both need the mtime, so scanning once beats stat-ing each file twice.
+        """
         out = Path(self.args.out)
-        return sorted(out.glob('*.png'), key=lambda p: p.stat().st_mtime, reverse=True) if out.exists() else []
+        if not out.exists():
+            return []
+        rows, meta_mtimes = [], {}
+        try:
+            with os.scandir(out) as it:
+                for entry in it:
+                    low = entry.name.lower()
+                    try:
+                        if low.endswith('.json'):
+                            meta_mtimes[Path(entry.name).stem] = entry.stat().st_mtime
+                        elif low.endswith('.png') and entry.is_file():
+                            rows.append((Path(entry.path), entry.stat().st_mtime))
+                    except OSError:
+                        continue
+        except OSError:
+            return []
+        rows.sort(key=lambda r: -r[1])
+        self._meta_mtimes = meta_mtimes      # a sidecar edit must invalidate the search cache too
+        return rows
+
+    def _all_files(self):
+        return [p for p, _m in self._scan()]
 
     def _tile_widget(self, parent, path, thumb, size=52):
         lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
@@ -996,12 +1024,58 @@ class App:
         lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
         return lab
 
+    def _on_search_typing(self, _event=None):
+        """One filter per pause in typing: matching 780 sidecars on every keypress costs ~200 ms."""
+        if self._search_after is not None:
+            try:
+                self.root.after_cancel(self._search_after)
+            except Exception:
+                pass
+        self._search_after = self.root.after(250, self._run_search)
+
+    def _run_search(self):
+        self._search_after = None
+        self.refresh_gallery()
+
+    def _searchable(self, path, mtime=None):
+        """Everything a keyword can match: the file name plus the sidecar's prompt, style, model, seed and more.
+
+        Cached per file and validated by mtime, because a keystroke re-runs the filter over the whole folder.
+        """
+        if mtime is None:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                return path.name.lower()
+        sidecar_mtime = getattr(self, '_meta_mtimes', {}).get(path.stem)
+        hit = self._meta_cache.get(path.name)
+        if hit is not None and hit[0] == mtime and hit[1] == sidecar_mtime:
+            return hit[2]
+        parts = [path.name]
+        try:
+            meta = json.loads(path.with_suffix('.json').read_text(encoding='utf-8'))
+            for key in ('prompt', 'style', 'model', 'negative', 'sweep', 'base_image', 'mask'):
+                value = meta.get(key)
+                if value:
+                    parts.append(str(value))
+            if meta.get('seed') is not None:
+                parts.append(str(meta['seed']))
+            if meta.get('steps') is not None:
+                parts.append('%s steps' % meta['steps'])
+        except Exception:
+            pass
+        blob = ' '.join(parts).lower()
+        self._meta_cache[path.name] = (mtime, sidecar_mtime, blob)
+        return blob
+
     def _visible_files(self):
         """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
-        files = self._all_files()
+        rows = self._scan()
+        files = [p for p, _m in rows]
         needle = self.search_var.get().strip().lower()
         if needle:
-            files = [f for f in files if needle in f.name.lower()]
+            stamps = dict(rows)
+            files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
@@ -1876,7 +1950,7 @@ class App:
             self._all_widgets = {}
             win.destroy()
 
-        box.bind('<KeyRelease>', render)
+        box.bind('<KeyRelease>', lambda e: (self._on_search_typing(), render()))
         only.configure(command=render)
         ttk.Button(foot, text='Close', command=close_browser).pack(side='left')
         ttk.Button(foot, text='Select all', command=lambda: (self.select_all(), render())).pack(
