@@ -687,7 +687,7 @@ class App:
 
         btns = ttk.Frame(gal)
         btns.grid(row=3, column=0, columnspan=2, sticky='ew')
-        self.more_btn = ttk.Button(btns, text='More…', command=self.open_all)
+        self.more_btn = ttk.Button(btns, text='View All', command=self.open_all)
         self.more_btn.pack(fill='x')
         self.clear_base_btn = ttk.Button(btns, text='Clear base', command=self.clear_base)
         self.clear_base_btn.pack(fill='x', pady=(3, 0))
@@ -1013,16 +1013,24 @@ class App:
     def _all_files(self):
         return [p for p, _m in self._scan()]
 
-    def _tile_widget(self, parent, path, thumb, size=52):
+    def _tile_widget(self, parent, path, thumb, size=52, browser=False):
         lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
         lab.image = thumb
         lab.path = path
-        lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p))
+        lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser))
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
             lab.bind(seq, fn)
-        lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
+        if browser:
+            # a double click loads the picture and leaves the window open: closing it was easy to do by accident
+            lab.bind('<Double-Button-1>', lambda e, p=path: self._load_from_browser(p))
+        else:
+            lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
         return lab
+
+    def _load_from_browser(self, path):
+        self.select_file(path)
+        self.status.configure(text='loaded %s - the window stays open' % self._short_name(Path(path).name))
 
     def _on_search_typing(self, _event=None):
         """One filter per pause in typing: matching 780 sidecars on every keypress costs ~200 ms."""
@@ -1660,8 +1668,11 @@ class App:
         """The order shift-click ranges over: every file in the window that is currently shown."""
         return [p for p in getattr(self, '_files', []) if p in self._tile_widgets or p in self._all_widgets]
 
-    def _on_tile_click(self, event, path):
-        """Plain click loads the image as the base; ctrl toggles; shift extends from the anchor."""
+    def _on_tile_click(self, event, path, browser=False):
+        """Strip: a plain click loads as base. Browser: a plain click only selects, so nothing closes under you.
+
+        Ctrl toggles, shift extends from the anchor in whichever list the click came from.
+        """
         path = Path(path)
         try:
             self.gal_canvas.focus_set()      # so arrows and Space drive the strip after a click
@@ -1671,7 +1682,8 @@ class App:
         shift = bool(event.state & 0x0001)
 
         if shift and self._anchor is not None:
-            order = self._click_order()
+            order = ([p for p in self._browser_files if p in self._all_widgets] if browser
+                     else self._click_order())
             if self._anchor in order and path in order:
                 i, j = order.index(self._anchor), order.index(path)
                 if i > j:
@@ -1684,6 +1696,9 @@ class App:
                 self.selected.remove(path)
             else:
                 self.selected.append(path)
+            self._anchor = path
+        elif browser:
+            self.selected = [path]
             self._anchor = path
         else:
             self.selected = [path]
@@ -1885,6 +1900,7 @@ class App:
             self.hint.configure(text='no images yet')
             return
         win = tk.Toplevel(self.root)
+        win.title('View All')
         try:
             win.state('zoomed')
         except Exception:
@@ -1919,12 +1935,14 @@ class App:
         cols = 6
         self._all_thumbs = {}
         self._all_widgets = {}
+        self._browser_files = []
 
         def render(*_):
             for w in inner.winfo_children():
                 w.destroy()
             self._all_widgets = {}
             files = self._visible_files()
+            self._browser_files = list(files)
             count.configure(text='%d image%s shown' % (len(files), '' if len(files) == 1 else 's'))
             for i, p in enumerate(files):
                 tp = thumb_for(p)
@@ -1937,12 +1955,13 @@ class App:
                 self._all_thumbs[p] = ph
                 cell = tk.Frame(inner)
                 cell.grid(row=i // cols, column=i % cols, padx=3, pady=3)
-                lab = self._tile_widget(cell, p, ph)
+                lab = self._tile_widget(cell, p, ph, browser=True)
                 lab.configure(width=tp and 0)
                 lab.pack()
                 self._all_widgets[Path(p)] = lab
-                tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555').pack()
-                lab.bind('<Double-Button-1>', lambda e, q=p: (self.select_file(q), win.destroy()))
+                cap = tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555')
+                cap.pack()
+                cap.bind('<Button-1>', lambda e, q=p: self._on_tile_click(e, q, browser=True))
             canvas.yview_moveto(0)
             self._paint()
 
@@ -1953,6 +1972,8 @@ class App:
         box.bind('<KeyRelease>', lambda e: (self._on_search_typing(), render()))
         only.configure(command=render)
         ttk.Button(foot, text='Close', command=close_browser).pack(side='left')
+        ttk.Button(foot, text='Load selected', command=lambda: [
+            self._load_from_browser(p) for p in (self.selected[-1:] or [])]).pack(side='left', padx=(6, 0))
         ttk.Button(foot, text='Select all', command=lambda: (self.select_all(), render())).pack(
             side='left', padx=(6, 0))
         ttk.Button(foot, text='Delete', command=lambda: (self.delete_selected(), render())).pack(

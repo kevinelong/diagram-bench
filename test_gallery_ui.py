@@ -880,16 +880,46 @@ def main():
     fixed, hits = rp.repair('a fox, %s, %s' % (S, S))
     check('repair reports which suffix it fixed', bool(hits) and fixed.count(S) == 1, str(hits))
 
-    print('\n-- the browser window shares the selection')
+    print('\n-- View All: multiselect that cannot close the window under you')
+    check('the button is called View All', 'View All' in str(app.more_btn['text']), str(app.more_btn['text']))
     app.clear_selection()
+    app.clear_base()
     app.open_all()
     root.update()
-    check('browser registered every remaining file', len(app._all_widgets) == len(app._files),
+    wins = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.winfo_exists()]
+    browser = wins[-1]
+    check('the window is titled View All', 'View All' in browser.title(), browser.title())
+
+    check('the browser registers every file in view', len(app._all_widgets) == len(app._files),
           '%d vs %d' % (len(app._all_widgets), len(app._files)))
-    some = list(app._all_widgets)[1:4]
-    for p in some:
-        click(app, p, ctrl=True)
-    check('selection spans the browser', len(app.selected) == 3, str(len(app.selected)))
+    tiles = list(app._all_widgets)
+    app._on_tile_click(NS(state=0), tiles[0], browser=True)
+    check('a plain click selects without loading a base',
+          len(app.selected) == 1 and app.base_path is None, '%d selected' % len(app.selected))
+    app._on_tile_click(NS(state=0x0004), tiles[2], browser=True)
+    check('ctrl adds a second', len(app.selected) == 2, str(len(app.selected)))
+    app._on_tile_click(NS(state=0x0004), tiles[2], browser=True)
+    check('ctrl again removes it', len(app.selected) == 1, str(len(app.selected)))
+    app._on_tile_click(NS(state=0x0004), tiles[1], browser=True)
+    anchor = app.selected[-1]
+    app._on_tile_click(NS(state=0x0001), tiles[5], browser=True)
+    order = app._browser_files
+    expect = order[order.index(anchor):order.index(tiles[5]) + 1] if order.index(anchor) <= order.index(tiles[5]) else []
+    check('shift selects a range from the browser order',
+          len(app.selected) == len(expect) and all(p in app.selected for p in expect),
+          '%d vs %d' % (len(app.selected), len(expect)))
+    check('the window is still open after all of that', browser.winfo_exists() == 1)
+    check('the strip sees the same selection', all(p in app.selected for p in expect) and len(expect) > 1,
+          '%d of %d' % (sum(1 for p in expect if p in app.selected), len(expect)))
+
+    app._load_from_browser(tiles[3])
+    root.update()
+    check('double-click loads the picture', app.base_path is not None and app.base_path.name == tiles[3].name)
+    check('and does not close the window', browser.winfo_exists() == 1)
+    browser.destroy()
+    app.refresh_gallery()
+    root.update()
+
     root.update()
     shot(root, '07-browser-selected')
     # a search turns the strip into a result list over the whole folder, with no 18-tile cap
