@@ -214,7 +214,7 @@ The strip is capped at 12 for rendering speed, so *Select all* deletes at most 1
 There is no undo - the native confirmation dialog is the only guard.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
-carrying the same state bits Tk sends), asserts the selection, delete and older control behaviour, and screenshots each
+carrying the same state bits Tk sends), asserts 49 selection, delete and older-control checks, and screenshots each
 state: `python test_gallery_ui.py --shots <dir>`.
 
 ## Motion: animating the SVGs rather than the camera
