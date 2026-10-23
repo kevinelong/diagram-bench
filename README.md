@@ -173,7 +173,10 @@ batch, about 8x faster: 6 s vs 50 s for 9-up at 256 px).
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs
 crispness. CFG stays at the model's distilled 1.0.
 
-Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3)**. An N-up run asks
+Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3) / 16-up (4x4)**.
+Batch is the default (one queue, one model load); sequential seed+1 is the opt-in alternative. Measured 16-up at 384 px:
+11.3 s total (0.71 s per image), peak 11,661 MiB of 12,227 - so 16-up is usable at 256-448 and not above that on a 12 GB
+card, and the UI warns when you try. An N-up run asks
 ComfyUI for one batch, saves every tile separately, and composes the tiles into a single contact sheet which is what the
 window shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.
 

@@ -393,7 +393,7 @@ class Engine:
 
     def _compose_sheet(self, paths, out_dir, stamp, prompt, seed, width, height, meta):
         tiles = [Image.open(p).convert('RGB') for p in paths]
-        cols = 2 if len(tiles) == 4 else 3 if len(tiles) == 9 else max(1, int(math.ceil(math.sqrt(len(tiles)))))
+        cols = {4: 2, 9: 3, 16: 4}.get(len(tiles)) or max(1, int(math.ceil(math.sqrt(len(tiles)))))
         rows = int(math.ceil(len(tiles) / cols))
         tw, th = tiles[0].size
         gap = 6
@@ -480,8 +480,8 @@ class App:
         ttk.Label(row, text='layout').grid(row=0, column=3, padx=(10, 4))
         self.layout_var = tk.StringVar(value='single')
         ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
-                     values=['single', '4-up (2x2)', '9-up (3x3)']).grid(row=0, column=4, sticky='w')
-        self.seq_var = tk.BooleanVar(value=True)
+                     values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)']).grid(row=0, column=4, sticky='w')
+        self.seq_var = tk.BooleanVar(value=False)      # batch by default: one queue, one model load
         ttk.Checkbutton(row, text='seed+1 per tile', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
                                                                                 sticky='w', pady=(4, 0))
         ttk.Label(row, text='seed').grid(row=0, column=5, padx=(10, 4))
@@ -775,7 +775,7 @@ class App:
         print('ui: %s' % self.engine.cancel())
 
     def _batch(self):
-        return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9}.get(self.layout_var.get(), 1)
+        return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
 
     def generate(self):
         if self.busy:
@@ -810,7 +810,10 @@ class App:
         if batch == 1:
             self.status.configure(text='queued… one %d px image' % size)
         else:
-            cols = 2 if batch == 4 else 3
+            if batch >= 16 and size > 448:
+                self.hint.configure(text='16-up above 448 px needs more than a 12 GB card: '
+                                        '16 x 384 px already peaks near 11.7 GiB')
+            cols = 2 if batch == 4 else 4 if batch == 16 else 3
             self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
                                   % (batch, size, size * cols + (cols - 1) * 6,
                                      'seeds %d-%d one at a time' % (seed, seed + batch - 1)
@@ -863,7 +866,7 @@ class App:
                     meta = read_meta(path)
                     if meta and meta.get('tiles'):
                         n = len(meta['tiles'])
-                        cols = 2 if n == 4 else 3 if n == 9 else max(1, int(math.ceil(math.sqrt(n))))
+                        cols = {4: 2, 9: 3, 16: 4}.get(n) or max(1, int(math.ceil(math.sqrt(n))))
                         self._sheet = {'cols': cols, 'rows': int(math.ceil(n / cols)), 'tiles': meta['tiles']}
                     else:
                         self._sheet = None
