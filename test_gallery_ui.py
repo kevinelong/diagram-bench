@@ -260,6 +260,30 @@ def main():
     check('button locked while busy', 'disabled' in app.gen_btn.state())
     app.busy = False
 
+    print('\n-- n-ups run one tile at a time by default')
+    check('default is one at a time', app.seq_var.get() is True)
+    app.busy = False
+    app.layout_var.set('16-up (4x4)')
+    app.size_var.set('512')
+    app.engine.calls.clear()
+    app.generate(); root.update()
+    kw = app.engine.calls[-1][1]
+    check('16-up asks for 16', kw.get('batch') == 16, str(kw.get('batch')))
+    check('... and sequential=True', kw.get('sequential') is True, str(kw.get('sequential')))
+    check('status says one at a time', 'one at a time' in app.status['text'], app.status['text'])
+    check('no batch VRAM warning while sequential', '12 GB card' not in app.hint['text'], app.hint['text'])
+
+    app.busy = False
+    app.seq_var.set(False)
+    app.engine.calls.clear()
+    app.generate(); root.update()
+    kw = app.engine.calls[-1][1]
+    check('unticked asks for one batch', kw.get('sequential') is False)
+    check('batch VRAM warning returns at 16-up/512', '12 GB card' in app.hint['text'], app.hint['text'])
+    app.busy = False
+    app.seq_var.set(True)
+    app.layout_var.set('single')
+
     print('\n-- the browser window shares the selection')
     app.clear_selection()
     app.open_all()

@@ -516,8 +516,10 @@ class App:
         self.layout_var = tk.StringVar(value='single')
         ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
                      values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)']).grid(row=0, column=4, sticky='w')
-        self.seq_var = tk.BooleanVar(value=False)      # batch by default: one queue, one model load
-        ttk.Checkbutton(row, text='seed+1 per tile', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
+        # one at a time by default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
+        # individually reproducible and the VRAM peak stays that of a single image
+        self.seq_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(row, text='one at a time (seed+1)', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
                                                                                 sticky='w', pady=(4, 0))
         seedbox = ttk.Frame(row)
         seedbox.grid(row=1, column=3, sticky='w', pady=(4, 0))
@@ -1050,9 +1052,9 @@ class App:
         if batch == 1:
             self.status.configure(text='queued… one %d px image' % size)
         else:
-            if batch >= 16 and size > 448:
-                self.hint.configure(text='16-up above 448 px needs more than a 12 GB card: '
-                                        '16 x 384 px already peaks near 11.7 GiB')
+            if batch >= 16 and size > 448 and not self.seq_var.get():
+                self.hint.configure(text='16-up above 448 px in one batch needs more than a 12 GB card: '
+                                        '16 x 384 px already peaks near 11.7 GiB as a batch')
             cols = 2 if batch == 4 else 4 if batch == 16 else 3
             self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
                                   % (batch, size, size * cols + (cols - 1) * 6,

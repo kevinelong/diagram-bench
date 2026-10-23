@@ -168,20 +168,23 @@ The **seed** field has minus / plus buttons and a **Rnd** button (0-999,999,999)
 the default seed if the box holds something non-numeric.
 
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
-per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **seed+1 per tile** (an
-N-up runs one image at a time with successive seeds so each tile is individually reproducible; unticked asks for one
-batch, about 8x faster: 6 s vs 50 s for 9-up at 256 px).
+per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **one at a time
+(seed+1)**, which is the default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
+individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
+about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
 **Guidance (CFG) is deliberately not exposed**, because it was measured and removed: on this turbo model raising it from
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs
 crispness. CFG stays at the model's distilled 1.0.
 
 Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3) / 16-up (4x4)**.
-Batch is the default (one queue, one model load); sequential seed+1 is the opt-in alternative. Measured 16-up at 384 px:
-11.3 s total (0.71 s per image), peak 11,661 MiB of 12,227 - so 16-up is usable at 256-448 and not above that on a 12 GB
-card, and the UI warns when you try. An N-up run asks
-ComfyUI for one batch, saves every tile separately, and composes the tiles into a single contact sheet which is what the
-window shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.
+One at a time is the default; a single batch is the opt-in. Measured sequential 4-up at 256 px: 26.6 s (6.65 s per
+tile), peak 5,508 MiB - a single-image peak, and four separately named tiles. Measured as one batch, 16-up at 384 px:
+11.3 s total (0.71 s per image), peak 11,661 MiB of 12,227, so 16-up in one batch is usable at 256-448 and not above
+that on a 12 GB card - and the UI now warns only in that batch case, since one at a time does not raise the peak.
+
+Either way an N-up saves every tile separately and composes them into a single contact sheet, which is what the window
+shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.
 
 Every image is saved with a **sidecar JSON** (`<same name>.json`) recording the prompt, seed, size, steps, cfg, model,
 and - for an edit - the **absolute path of the base image and the strength used**. Selecting a row in the gallery
