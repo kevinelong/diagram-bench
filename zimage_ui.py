@@ -163,8 +163,8 @@ def copy_png_to_clipboard(path):
 
 THUMB_DIR = '.thumbs'
 THUMB_PX = 168
-RECENT_N = 20        # thumbnails in the sidebar strip (4 columns x 5 rows)
-RECENT_COLS = 4
+RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
+RECENT_COLS = 3
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 
 

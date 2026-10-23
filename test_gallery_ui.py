@@ -122,9 +122,9 @@ def main():
     shot(root, '01-start')
 
     print('\n-- gallery contents')
-    check('gallery shows 20 of 26 files', len(app._tile_widgets) == 20, str(len(app._tile_widgets)))
+    check('gallery shows 18 of 26 files', len(app._tile_widgets) == 18, str(len(app._tile_widgets)))
     check('all 26 known to the app', len(app._files) == 26, str(len(app._files)))
-    check('title reports the cap', app.gal_title['text'] == 'Recent (20 of 26)', app.gal_title['text'])
+    check('title reports the cap', app.gal_title['text'] == 'Recent (18 of 26)', app.gal_title['text'])
     check('strip scrolls when it overflows', app.gal_canvas.bbox('all')[3] > 0,
           str(app.gal_canvas.bbox('all')))
     newest = app._files[0]
@@ -168,7 +168,7 @@ def main():
 
     print('\n-- select all toggles, Esc clears')
     app.select_all()
-    check('select all takes the whole strip (20)', len(app.selected) == 20, str(len(app.selected)))
+    check('select all takes the whole strip (18)', len(app.selected) == 18, str(len(app.selected)))
     shot(root, '05-select-all')
     app.select_all()
     check('pressing it again clears', app.selected == [])

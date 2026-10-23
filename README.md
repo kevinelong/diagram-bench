@@ -195,8 +195,8 @@ splits a multi-word argument into several, so `--initial "a blue circle"` arrive
 
 ### Gallery: multiselect and delete
 
-The **Recent (20)** strip shows the newest 20 images as a grid of 92 px tiles, 4 across and 5 deep, and marks them for action
-instead of only loading them:
+The **Recent (18)** strip shows the newest 18 images as a grid of 92 px tiles, 3 across and 6 deep, and marks them for
+action instead of only loading them:
 
 | gesture | effect |
 |---|---|
@@ -213,7 +213,7 @@ shares the same selection and carries its own Delete, so a sweep can span both.
 
 The strip holds 20 (`RECENT_N`, `RECENT_COLS`, `RECENT_PX` at the top of the module) 4 across by 5 deep; the title
 reads *Recent (20 of 26)* once there are more files, the strip scrolls when the window is too short, and the scrollbar
-hides itself when everything fits. *Select all* therefore covers 20; use **More…** for a bigger sweep.
+hides itself when everything fits. *Select all* therefore covers 18; use **More…** for a bigger sweep.
 There is no undo - the native confirmation dialog is the only guard.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
