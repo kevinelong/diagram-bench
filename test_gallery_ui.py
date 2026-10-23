@@ -358,6 +358,26 @@ def main():
           'needs more than a 12 GB card' not in app.hint['text'], app.hint['text'])
     app.busy = False; app.layout_var.set('single'); app.text.delete('1.0', 'end')
 
+    print('\n-- the model picker is a visible choice, and Clear base mirrors Generate')
+    if app._adv_shown:
+        app.toggle_advanced()
+    root.update(); root.update_idletasks()
+    check('the model picker is visible while Advanced is closed', bool(app.model_cb.winfo_ismapped()))
+    check('it offers every installed profile', list(app.model_cb['values']) == list(zui.zg.MODELS),
+          str(app.model_cb['values']))
+    check('Clear base sits directly above Generate', app.clear_base_btn.winfo_y() < app.gen_btn.winfo_y(),
+          'clear y=%d generate y=%d' % (app.clear_base_btn.winfo_y(), app.gen_btn.winfo_y()))
+    check('and shares its width and height',
+          (app.clear_base_btn.winfo_width(), app.clear_base_btn.winfo_height()) ==
+          (app.gen_btn.winfo_width(), app.gen_btn.winfo_height()),
+          '%dx%d vs %dx%d' % (app.clear_base_btn.winfo_width(), app.clear_base_btn.winfo_height(),
+                              app.gen_btn.winfo_width(), app.gen_btn.winfo_height()))
+    app.clear_base(); root.update()
+    check('Clear base is disabled with nothing to clear', 'disabled' in app.clear_base_btn.state())
+    app.select_file(app._files[0]); root.update()
+    check('and enabled once a picture is the base', 'disabled' not in app.clear_base_btn.state())
+    app.clear_base(); root.update()
+
     print('\n-- the banner says what Enter will do')
     app.clear_base()
     app.layout_var.set('single')
@@ -436,6 +456,22 @@ def main():
           'one image at a time' in app.seq_chk['text'].lower(), app.seq_chk['text'])
     check('the chain box says reuse last image',
           'reuse last image' in app.chain_chk['text'].lower(), app.chain_chk['text'])
+
+    print('\n-- the button names the action; the line below reports the real time')
+    app._refresh_generate_label()
+    check('the button carries no estimate', '\u2248' not in str(app.gen_btn['text']), str(app.gen_btn['text']))
+    check('and names the action', 'Generate' in str(app.gen_btn['text']), str(app.gen_btn['text']))
+    app.run_started_at = time.time() - 7.2
+    app._run_total = 1
+    app._run_desc = '512 px \u00b7 4 steps \u00b7 z-image turbo'
+    app._run_recorded(app._files[0]); root.update()
+    check('the last run time is shown below the button',
+          app.last_label['text'].startswith('last image 7.2 s'), app.last_label['text'])
+    check('with the settings it actually ran at', '512 px' in app.last_label['text'], app.last_label['text'])
+    app.run_started_at = time.time() - 32.0
+    app._run_total = 16
+    app._run_recorded(app._files[1]); root.update()
+    check('an N-up also reports per-tile time', 'each' in app.last_label['text'], app.last_label['text'])
 
     print('\n-- per-tile progress')
     app._run_start = time.time() - 5.0

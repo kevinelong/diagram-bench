@@ -701,8 +701,6 @@ class App:
         btns.grid(row=3, column=0, columnspan=2, sticky='ew')
         self.more_btn = ttk.Button(btns, text='View All', command=self.open_all)
         self.more_btn.pack(fill='x')
-        self.clear_base_btn = ttk.Button(btns, text='Clear base', command=self.clear_base)
-        self.clear_base_btn.pack(fill='x', pady=(3, 0))
         self.refresh_btn = ttk.Button(btns, text='Refresh', command=self.refresh_gallery)
         self.refresh_btn.pack(fill='x', pady=(3, 0))
         self.folder_btn = ttk.Button(btns, text='Open folder', command=self.open_folder)
@@ -801,6 +799,13 @@ class App:
         self.style_cb.pack(side='left')
         self.save_style_btn = ttk.Button(stylerow, text='save style', command=self.save_style)
         self.save_style_btn.pack(side='left', padx=(4, 0))
+        # the checkpoint is a first-class choice, not an Advanced secret: picking one costs a model reload
+        ttk.Label(stylerow, text='model').pack(side='left', padx=(10, 4))
+        self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
+        self.model_cb = ttk.Combobox(stylerow, textvariable=self.model_var, width=14, state='readonly',
+                                     values=list(zg.MODELS))
+        self.model_cb.pack(side='left')
+        self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
         self.adv_btn.pack(side='left', padx=(12, 0))
 
@@ -820,23 +825,28 @@ class App:
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
+        self.clear_base_btn = ActionButton(left, text='Clear base', command=self.clear_base,
+                                           font=('Segoe UI', 13), bg='#e6e6e6', fg='#222222',
+                                           activebackground='#d6d6d6', activeforeground='#111111',
+                                           disabledforeground='#9a9a9a', relief='flat', bd=0,
+                                           height=2, cursor='hand2', takefocus=True)
+        self.clear_base_btn.grid(row=10, column=0, sticky='ew', pady=(10, 4))
+        self.clear_base_btn.state(['disabled'])
+
         self.gen_btn = ActionButton(left, text='\u26a1 Generate', command=self.generate,
                                     font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
                                     activebackground='#166b34', activeforeground='white',
                                     disabledforeground='#c9e6d2', relief='flat', bd=0,
                                     height=2, cursor='hand2', takefocus=True)
-        self.gen_btn.grid(row=10, column=0, sticky='ew', pady=(10, 0))
+        self.gen_btn.grid(row=11, column=0, sticky='ew', pady=(0, 0))
+        self.last_label = ttk.Label(left, text='', foreground='#555', anchor='center')
+        self.last_label.grid(row=12, column=0, sticky='ew', pady=(6, 0))
 
         self.advanced = ttk.Frame(left)
         self.advanced.grid(row=9, column=0, sticky='ew', pady=(4, 0))
         adv1 = ttk.Frame(self.advanced)
         adv1.pack(fill='x')
-        ttk.Label(adv1, text='model').pack(side='left')
-        self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
-        self.model_cb = ttk.Combobox(adv1, textvariable=self.model_var, width=15, state='readonly',
-                                     values=list(zg.MODELS))
-        self.model_cb.pack(side='left', padx=(4, 10))
-        self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
+
         adv_step = ttk.Frame(self.advanced)
         adv_step.pack(fill='x', pady=(4, 0))
         ttk.Label(adv_step, text='seed step').pack(side='left')
@@ -1238,8 +1248,8 @@ class App:
         if prof.get('steps'):
             self.steps_var.set(str(prof['steps']))
         self._update_banner()
-        self.hint.configure(text='%s: %s steps at cfg %.1f'
-                                 % (self.model_var.get(), prof.get('steps', '?'), prof.get('cfg', 1.0)))
+        self.hint.configure(text='%s: %s steps at cfg %.1f - the first image loads that checkpoint, '
+                                 'about 10-30 s' % (self.model_var.get(), prof.get('steps', '?'), prof.get('cfg', 1.0)))
 
     def set_sidebar(self, show):
         """Fold the gallery away so the picture can use the width."""
@@ -1560,6 +1570,24 @@ class App:
         self._runs.append({'time': datetime.now().strftime('%H:%M:%S'), 'file': Path(path).name,
                            'seed': self.seed.get(), 'model': self.model_var.get(),
                            'style': self.style_var.get(), 'wall': self._short_time(wall)})
+        self._last_run = (wall, getattr(self, '_run_total', 1) or 1, getattr(self, '_run_desc', ''))
+        self._refresh_last_label()
+
+    def _refresh_last_label(self):
+        """What the last run actually cost, measured - not what the next one might."""
+        if not hasattr(self, 'last_label'):
+            return
+        last = getattr(self, '_last_run', None)
+        if not last:
+            self.last_label.configure(text='')
+            return
+        wall, tiles, desc = last
+        if tiles > 1:
+            text = 'last run %s · %d tiles, %s each' % (self._short_time(wall), tiles,
+                                                            self._short_time(wall / tiles))
+        else:
+            text = 'last image %s' % self._short_time(wall)
+        self.last_label.configure(text='%s  ·  %s' % (text, desc) if desc else text)
 
     def show_run_log(self):
         win = tk.Toplevel(self.root)
@@ -1909,8 +1937,8 @@ class App:
                                    if meta.get('base_image') else ''))
         else:
             self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % Path(path).name)
-        self.status.configure(text='base: %s  (Enter to edit it, strength %.2f)'
-                              % (Path(path).name, self.denoise.get()))
+        self.status.configure(text='selected %s - Enter applies it at strength %.2f'
+                              % (self._short_name(Path(path).name), self.denoise.get()))
         self.refresh_gallery(select=path)
 
     def use_as_base(self):
@@ -2041,6 +2069,8 @@ class App:
         self._base_from_gallery = from_gallery
         self.base_path = Path(path)
         self.base_label.configure(text=self._short_name(self.base_path.name))
+        if hasattr(self, 'clear_base_btn'):
+            self.clear_base_btn.state(['!disabled'])
         if self._base_tip is None:
             self._base_tip = self._tip(self.base_label, '')
         self._base_tip.text = self.base_path.name
@@ -2119,6 +2149,8 @@ class App:
 
     def clear_base(self):
         self.base_path = None
+        if hasattr(self, 'clear_base_btn'):
+            self.clear_base_btn.state(['disabled'])
         self._base_from_gallery = False
         self.base_label.configure(text='(none - text to image)')
         self.hint.configure(text='')
@@ -2177,6 +2209,8 @@ class App:
         t(self.stop_btn, 'Interrupt this run. Tiles already written are kept.')
         t(self.size_cb, 'Image size in pixels. Bigger is slower and uses more VRAM.')
         t(self.layout_cb, 'How many images one press makes: 1, 4, 9 or 16, saved as separate tiles on one sheet.')
+        t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
+                         'once.')
         t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')
         t(self.sampler_cb, 'euler is clean. euler_ancestral injects noise every step: grain and more variation.')
         t(self.seed_entry, 'The seed picks the starting noise. Same seed and prompt give the same picture.')
@@ -2278,8 +2312,12 @@ class App:
     # -- progress and cost ---------------------------------------------------
     @staticmethod
     def _short_time(sec):
-        sec = int(round(max(0, sec)))
-        return '%d s' % sec if sec < 60 else '%d m %02d s' % (sec // 60, sec % 60)
+        sec = max(0.0, float(sec))
+        if sec < 10:
+            return '%.1f s' % sec          # seconds matter here: 6.4 and 9.8 are different decisions
+        if sec < 60:
+            return '%d s' % int(round(sec))
+        return '%d m %02d s' % (int(sec) // 60, int(sec) % 60)
 
     def _show_tile_progress(self, idx, total):
         self.ticks.configure(text='\u25cf' * idx + '\u25cb' * max(0, total - idx))
@@ -2290,20 +2328,13 @@ class App:
         self.status.configure(text='tile %d of %d%s' % (idx, total, eta))
 
     def _refresh_generate_label(self):
-        """Put the measured cost where the decision is made: on the button."""
-        try:
-            size = int(self.size_var.get())
-            steps = int(self.steps_var.get())
-        except (TypeError, ValueError):
-            return
-        n = self._batch()
-        per = SIZE_SECONDS.get(size, 14.0) * (steps / 4.0)
-        total = per * n * (1.35 if self._pending_hires else 1.0)
+        """Name the action, not the guess: what the button does depends on the selection, and the timing line under it
+        reports what the last run actually took."""
         painting = self._mask is not None and self._mask.getbbox() is not None
         label = ('\u26a1 Fill selection' if painting else
                  ('\u26a1 Expand' if any(self._pads) else '\u26a1 Generate'))
         if hasattr(self, 'gen_btn'):
-            self.gen_btn.configure(text='%s  \u00b7 \u2248 %s' % (label, self._short_time(total)))
+            self.gen_btn.configure(text=label)
 
     def _update_estimate(self, *_):
         """Estimate the cost of the chosen layout from the two configurations that were actually measured."""
@@ -2429,6 +2460,7 @@ class App:
                                      % (choice, n, vals[:4], '...' if len(vals) > 4 else ''))
         hires, self._pending_hires = self._pending_hires, 0.0
         self.run_started_at = time.time()
+        self._run_desc = '%s px · %s steps · %s' % (size, steps, model)
         self.engine.generate(full_prompt, size, size, steps, cfg,
                              seed, self.args.out,
                              base_path=(str(edit_base) if edit_base else None),

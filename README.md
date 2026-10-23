@@ -237,12 +237,15 @@ gallery click) puts the *unsuffixed* prompt back in the box, so rerendering cann
 touches into `.prompt-backups/`. It kept the user's edited words that had landed *between* two suffixes - of 717 sidecars,
 56 needed repair and the worst had the suffix three times mid-sentence.
 
-**Advanced → model** switches between profiles that are already on disk, each verified against ComfyUI's own node list:
+**model** sits in the always-visible row next to *style* - it is a first-class choice, not an Advanced secret, and the
+hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Four profiles, each verified
+against ComfyUI's own node list:
 
 | profile | weights | encoder | measured at 256 px, 4 steps |
 |---|---|---|---|
 | z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |
 | flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
+| flux2 klein | `flux-2-klein-4b-Q4_K_M.gguf` (UnetLoaderGGUF) | qwen_3_4b_fp4_flux2 (flux2) | **9.8 s** at 512 px, 4 steps, cfg 1.0 |
 | flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
 
 The negative prompt is a real node input now (node 5 was hard-coded empty), and cfg follows the profile rather than
@@ -266,9 +269,12 @@ so it still lines up.
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
 
-Generate is one large green button across the bottom of the prompt column (`⚡ Generate · ≈ 14 s`), so the commit key
-is where the eye ends up after reading the prompt, and it renames itself to *Fill selection* or *Expand* when the
-picture has a mask or pads. It carries its own cost (from the measured table), so the price is visible
+Generate is one large green button across the bottom of the prompt column, with **Clear base** immediately above it at
+the same width and height (grey, disabled until a picture is the base), so the commit key is where the eye ends up after
+reading the prompt and its companion action sits with it. It renames itself to *Fill selection* or *Expand* when the
+picture has a mask or pads. It shows no timing guess - the line under it reports what the **last run actually took**
+(`last image 6.7 s · 512 px · 4 steps · z-image turbo`, or `last run 30 s · 16 tiles, 2 s each`), measured per image
+rather than estimated. The estimate survives only in the layout-change hint, where it is explicitly a forecast, so the price is visible
 before the click, and the banner carries the memory: `VRAM ≈ 8.7/11.9 GiB` in red when a shape comes within 400 MiB of
 the card. Both come from peaks measured here with `nvidia-smi` at 0.25 s:
 
