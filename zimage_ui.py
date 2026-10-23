@@ -160,6 +160,40 @@ def copy_png_to_clipboard(path):
         return False, '%s: %s' % (type(e).__name__, e)
 
 
+THUMB_DIR = '.thumbs'
+THUMB_PX = 168
+
+
+def thumb_for(png, cache_root=None):
+    """Return a cached thumbnail path for `png`, creating it if missing or stale.
+
+    The cache lives in a `.thumbs` folder beside the images and is keyed by the image's name, so the gallery never
+    re-decodes a PNG it has already seen - and the cache is derived data, safe to delete at any time.
+    """
+    png = Path(png)
+    root = Path(cache_root) if cache_root else png.parent
+    cache = root / THUMB_DIR
+    cache.mkdir(parents=True, exist_ok=True)
+    out = cache / (png.stem + '.jpg')
+    try:
+        if out.exists() and out.stat().st_mtime >= png.stat().st_mtime:
+            return out
+        im = Image.open(png)
+        im.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
+        im.convert('RGB').save(out, 'JPEG', quality=82, optimize=True)
+    except Exception:
+        return None
+    return out
+
+
+def thumbs_for(paths, workers=8, cache_root=None):
+    """Build any missing thumbnails in parallel. Returns {path: thumb_or_None}."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        got = list(pool.map(lambda p: (p, thumb_for(p, cache_root)), paths))
+    return dict(got)
+
+
 def read_meta(png):
     """The sidecar written at save time: prompt, seed, size, base image, strength."""
     j = Path(png).with_suffix('.json')
@@ -400,22 +434,25 @@ class App:
         root.rowconfigure(0, weight=1)
 
         # ---- left: prompt + controls
-        # ---- far left: previous images
+        # ---- far left: the 12 most recent images as thumbnails
         gal = ttk.Frame(root, padding=(10, 10, 4, 10))
         gal.grid(row=0, column=0, sticky='nsew')
         gal.columnconfigure(0, weight=1)
-        gal.rowconfigure(1, weight=1)
-        ttk.Label(gal, text='Previous').grid(row=0, column=0, sticky='w')
-        self.gallery = tk.Listbox(gal, exportselection=False, activestyle='dotbox', font=('Segoe UI', 9))
-        self.gallery.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
-        self.gallery.bind('<<ListboxSelect>>', lambda e: self._on_pick())
-        self.gallery.bind('<Double-Button-1>', lambda e: self.generate())
+        ttk.Label(gal, text='Recent (12)').grid(row=0, column=0, columnspan=3, sticky='w')
+        self.recent = ttk.Frame(gal)
+        self.recent.grid(row=1, column=0, columnspan=3, sticky='nsew', pady=(4, 6))
+        for c in range(3):
+            self.recent.columnconfigure(c, weight=0)
+        self.recent_rows = 4
+        self._thumbs = {}                 # path -> PhotoImage, kept alive
+
         btns = ttk.Frame(gal)
-        btns.grid(row=2, column=0, sticky='ew')
-        ttk.Button(btns, text='Use as base', command=self.use_as_base).pack(fill='x')
+        btns.grid(row=2, column=0, columnspan=3, sticky='ew')
+        ttk.Button(btns, text='More…', command=self.open_all).pack(fill='x')
         ttk.Button(btns, text='Clear base', command=self.clear_base).pack(fill='x', pady=(3, 0))
         ttk.Button(btns, text='Refresh', command=self.refresh_gallery).pack(fill='x', pady=(3, 0))
         ttk.Button(btns, text='Open folder', command=self.open_folder).pack(fill='x', pady=(3, 0))
+        gal.rowconfigure(1, weight=1)
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
         left.grid(row=0, column=1, sticky='nsew')
@@ -514,32 +551,111 @@ class App:
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
 
-    # -- gallery -----------------------------------------------------------
-    def refresh_gallery(self, select=None):
+    # -- gallery: thumbnails -------------------------------------------------
+    def _all_files(self):
         out = Path(self.args.out)
-        files = sorted(out.glob('*.png'), key=lambda p: p.stat().st_mtime, reverse=True) if out.exists() else []
+        return sorted(out.glob('*.png'), key=lambda p: p.stat().st_mtime, reverse=True) if out.exists() else []
+
+    def _tile_widget(self, parent, path, thumb, size=52):
+        lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
+        lab.image = thumb
+        lab.path = path
+        lab.bind('<Button-1>', lambda e, p=path: self.select_file(p))
+        lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
+        return lab
+
+    def refresh_gallery(self, select=None):
+        files = self._all_files()
         self._files = files
         if self.base_path is not None and not any(f.name == self.base_path.name for f in files):
             self.clear_base()
-        self.gallery.delete(0, 'end')
-        for f in files:
-            self.gallery.insert('end', f.name)
-        if files:
-            idx = 0
-            if select:
-                for i, f in enumerate(files):
-                    if f.name == Path(select).name:
-                        idx = i
-                        break
-            self.gallery.selection_clear(0, 'end')
-            self.gallery.selection_set(idx)
-            self.gallery.see(idx)
+        recent = files[:12]
+        thumbs = thumbs_for(recent) if recent else {}
+        for w in self.recent.winfo_children():
+            w.destroy()
+        for i, p in enumerate(recent):
+            tp = thumbs.get(p)
+            if not tp:
+                continue
+            try:
+                from PIL import ImageTk
+                ph = ImageTk.PhotoImage(Image.open(tp))
+            except Exception:
+                continue
+            self._thumbs[p] = ph
+            lab = self._tile_widget(self.recent, p, ph)
+            lab.grid(row=i // 3, column=i % 3, padx=2, pady=2)
+            if select and p.name == Path(select).name:
+                lab.configure(relief='solid', bd=2)
 
-    def _picked(self):
-        sel = self.gallery.curselection()
-        if not sel:
-            return None
-        return self._files[sel[0]]
+    def select_file(self, path):
+        """One entry point for a click in the recent strip or the full browser."""
+        self._display(path)
+        self._set_base(path)
+        meta = read_meta(path)
+        if meta:
+            self.text.delete('1.0', 'end')
+            self.text.insert('1.0', meta.get('prompt') or '')
+            if meta.get('seed') is not None:
+                self.seed.set(str(meta['seed']))
+            self.hint.configure(text='restored prompt and seed %s from %s%s'
+                                % (meta.get('seed'), Path(path).name,
+                                   ('; itself edited %s at strength %s'
+                                    % (Path(meta['base_image']).name, meta.get('denoise')))
+                                   if meta.get('base_image') else ''))
+        else:
+            self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % Path(path).name)
+        self.status.configure(text='base: %s  (Enter to edit it, strength %.2f)'
+                              % (Path(path).name, self.denoise.get()))
+        self.refresh_gallery(select=path)
+
+    def use_as_base(self):
+        self.select_file(self.base_path) if self.base_path else \
+            self.hint.configure(text='click a thumbnail first')
+
+    def open_all(self):
+        """Full-screen browser: every image, scrolling, thumbnails cached on disk."""
+        files = self._all_files()
+        if not files:
+            self.hint.configure(text='no images yet')
+            return
+        win = tk.Toplevel(self.root)
+        win.title('All images — %d' % len(files))
+        try:
+            win.state('zoomed')
+        except Exception:
+            win.geometry('1200x800')
+        bar = ttk.Scrollbar(win, orient='vertical')
+        bar.pack(side='right', fill='y')
+        canvas = tk.Canvas(win, highlightthickness=0, background='#f4f4f5', yscrollcommand=bar.set)
+        canvas.pack(side='left', fill='both', expand=True)
+        bar.configure(command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=inner, anchor='nw')
+        inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind_all('<MouseWheel>', lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units'))
+
+        cols = 6
+        self._all_thumbs = {}
+        for i, p in enumerate(files):
+            tp = thumb_for(p)
+            if not tp:
+                continue
+            try:
+                from PIL import ImageTk
+                ph = ImageTk.PhotoImage(Image.open(tp))
+            except Exception:
+                continue
+            self._all_thumbs[p] = ph
+            cell = tk.Frame(inner)
+            cell.grid(row=i // cols, column=i % cols, padx=3, pady=3)
+            lab = self._tile_widget(cell, p, ph)
+            lab.configure(width=tp and 0)
+            lab.pack()
+            tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555').pack()
+            lab.bind('<Double-Button-1>', lambda e, q=p: (self.select_file(q), win.destroy()))
+        ttk.Button(inner, text='Close', command=win.destroy).grid(row=(len(files) // cols) + 1, column=0,
+                                                                 pady=6, sticky='w')
 
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
@@ -627,38 +743,6 @@ class App:
         self.canvas.delete('placeholder')
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
-
-    def _on_pick(self):
-        """Selecting a row shows it AND makes it the base; deselecting clears both."""
-        f = self._picked()
-        if not f:
-            self.clear_base()
-            return
-        self._display(f)
-        self._set_base(f)
-        meta = read_meta(f)
-        if meta:
-            self.text.delete('1.0', 'end')
-            self.text.insert('1.0', meta.get('prompt') or '')
-            if meta.get('seed') is not None:
-                self.seed.set(str(meta['seed']))
-            self.hint.configure(text='restored prompt and seed %s from %s%s'
-                                % (meta.get('seed'), f.name,
-                                   ('; itself edited %s at strength %s'
-                                    % (Path(meta['base_image']).name, meta.get('denoise')))
-                                   if meta.get('base_image') else ''))
-        else:
-            self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % f.name)
-        self.status.configure(text='base: %s  (Enter to edit it, strength %.2f)'
-                              % (f.name, self.denoise.get()))
-
-    def use_as_base(self):
-        f = self._picked()
-        if not f:
-            self.hint.configure(text='select an image in the list first')
-            return
-        self._set_base(f)
-        self._display(f)
 
     def clear_base(self):
         self.base_path = None
