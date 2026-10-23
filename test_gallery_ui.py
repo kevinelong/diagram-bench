@@ -277,10 +277,33 @@ def main():
     check('status confirms the write', 'wrote' in app.status['text'], app.status['text'])
     check('hint says the base is unchanged', 'base unchanged' in app.hint['text'], app.hint['text'])
 
+    print('\n-- the seed moves on after each generation')
+    app.seed.set('4242')
+    feed_image(app, fresh)
+    check('seed changes after a generation', app.seed.get() != '4242', app.seed.get())
+    check('hint reports the next seed', 'next seed' in app.hint['text'], app.hint['text'])
+    s1 = app.seed.get()
+    feed_image(app, fresh)
+    check('and again after the next one', app.seed.get() != s1, '%s -> %s' % (s1, app.seed.get()))
+
+    print('\n-- but a gallery pick keeps its own seed')
+    gal_item = app._files[2]
+    want = str(json.loads(gal_item.with_suffix('.json').read_text(encoding='utf-8'))['seed'])
+    click(app, gal_item)
+    check('clicking restores that image seed', app.seed.get() == want, '%s (want %s)' % (app.seed.get(), want))
+    seed_before = app.seed.get()
+    feed_image(app, fresh)
+    check('a gallery base does not randomise the seed', app.seed.get() == seed_before,
+          '%s -> %s' % (seed_before, app.seed.get()))
+    check('hint says the seed was kept', 'kept from the gallery' in app.hint['text'], app.hint['text'])
+
+    print('\n-- chaining still updates the base, and then the seed moves')
     app.chain_var.set(True)
+    seed_before = app.seed.get()
     feed_image(app, fresh)
     check('with the box ticked the new image is the base',
           app.base_path is not None and app.base_path.name == fresh.name)
+    check('a chained base randomises again', app.seed.get() != seed_before, app.seed.get())
     app.chain_var.set(False)
     app.clear_base()
 

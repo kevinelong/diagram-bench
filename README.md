@@ -167,6 +167,12 @@ loss.
 The **seed** field has minus / plus buttons and a **Rnd** button (0-999,999,999); the buttons clamp at 0 and fall back to
 the default seed if the box holds something non-numeric.
 
+The seed **randomises itself after every generation**, so pressing Enter twice gives two different images rather than
+the same one twice; the new value is guaranteed to differ from the old so the change is always visible, and the hint
+line reports it (`next seed 813589306`). The exception is a gallery pick: click an image and the seed becomes *that*
+image's seed and stays there through the edit, so a selected image is reproducible (`seed 555 kept`). Clear the base,
+or tick *reuse last image as base*, and the randomising resumes.
+
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **one at a time
 (seed+1)**, which is the default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is

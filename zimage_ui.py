@@ -421,6 +421,7 @@ class App:
         self._img = None
         self._raw = None
         self.base_path = None
+        self._base_from_gallery = False   # True only when a click in the gallery chose the base
         self._current = None
         self._files = []
         self._sheet = None            # {'cols','rows','tiles'} while a contact sheet is on screen
@@ -812,7 +813,7 @@ class App:
     def select_file(self, path):
         """One entry point for a click in the recent strip or the full browser."""
         self._display(path)
-        self._set_base(path)
+        self._set_base(path, from_gallery=True)
         meta = read_meta(path)
         if meta:
             self.text.delete('1.0', 'end')
@@ -913,7 +914,8 @@ class App:
         self.canvas.delete('placeholder')
         self.root.after_idle(self._redraw)
 
-    def _set_base(self, path):
+    def _set_base(self, path, from_gallery=False):
+        self._base_from_gallery = from_gallery
         self.base_path = Path(path)
         self.base_label.configure(text=self.base_path.name)
         self.hint.configure(text='next generation starts from %s at strength %.2f'
@@ -982,6 +984,7 @@ class App:
 
     def clear_base(self):
         self.base_path = None
+        self._base_from_gallery = False
         self.base_label.configure(text='(none - text to image)')
         self.hint.configure(text='')
         self._clear_picture()          # (there is no separate listbox here; repaint drops the base ring)
@@ -1018,7 +1021,12 @@ class App:
         self.seed.set(str(max(0, v + delta)))
 
     def random_seed(self):
-        self.seed.set(str(random.randint(0, 999_999_999)))
+        """A fresh seed that is never the value already in the box, so the change is always visible."""
+        cur = self.seed.get()
+        v = random.randint(0, 999_999_999)
+        while str(v) == cur:
+            v = random.randint(0, 999_999_999)
+        self.seed.set(str(v))
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
@@ -1125,10 +1133,17 @@ class App:
                     self.refresh_gallery(select=path)
                     if self.chain_var.get():
                         self._set_base(path)
+                        base_note = 'chained from %s' % Path(path).name
                     else:
-                        self.hint.configure(text='saved; base unchanged (%s)'
-                                            % ('none - next run is text to image' if self.base_path is None
-                                               else 'still %s' % self.base_path.name))
+                        base_note = 'base unchanged (%s)' % (
+                            'none - next run is text to image' if self.base_path is None
+                            else 'still %s' % self.base_path.name)
+                    if self._base_from_gallery:
+                        note = 'seed %s kept from the gallery image' % self.seed.get()
+                    else:
+                        self.random_seed()
+                        note = 'next seed %s' % self.seed.get()
+                    self.hint.configure(text='saved; %s; %s' % (base_note, note))
                     self._current = Path(path)
                     self.copy_btn.state(['!disabled'])
                 elif kind == 'error':
