@@ -560,6 +560,18 @@ def main():
     app.compare_var.set(False); app._redraw(); root.update()
     check('unchecking clears it', len(app.canvas.find_withtag('compare')) == 0)
 
+    print('\n-- pinning any two pictures to compare')
+    app.clear_base(); app.compare_var.set(False)
+    app.select_file(app._files[0]); root.update()
+    app.pin_current(); root.update()
+    check('pinning stores the picture', app._pinned is not None and app._pinned.name == app._files[0].name)
+    check('pinning turns compare on', app.compare_var.get() is True)
+    app.select_file(app._files[3]); root.update(); app._redraw(); root.update()
+    check('compare draws against the pin even with a different base',
+          len(app.canvas.find_withtag('compare')) >= 2, str(len(app.canvas.find_withtag('compare'))))
+    check('the reference is the pinned file', Path(app._compare_reference()).name == app._files[0].name)
+    app.compare_var.set(False); app._redraw()
+
     print('\n-- run log')
     before_runs = len(app._runs)
     feed_image(app, app._files[0])
@@ -600,28 +612,48 @@ def main():
           app.base_path is not None and 'pasted-' in app.base_path.name, str(app.base_path))
     Grab.grabclipboard = real_grab
 
-    print('\n-- inpaint and outpaint reach the engine')
-    mask_file = tmp / 'mask-test.png'
-    Image.new('L', (320, 240), 0).save(mask_file)
-    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a blue box')
-    app._set_base(app._files[0])
+    print('\n-- the brush lives on the picture, and the action follows it')
+    app.clear_base()                       # clear_base also clears the view, so do it before selecting
+    app.select_file(app._files[0]); root.update(); root.update_idletasks()
+    app.toggle_mask_mode(True)
+    check('mask mode is on', app._mask_painting is True)
+    check('a mask buffer matches the picture', app._mask is not None and
+          app._mask.size == Image.open(app._files[0]).size, str(app._mask.size))
+    x0, y0, w, h = app._draw
+    app._paint_mask(NS(x=x0 + w // 3, y=y0 + h // 3, state=0))
+    app._paint_mask(NS(x=x0 + w // 2, y=y0 + h // 2, state=0))
+    check('painting marks the mask', app._mask.getbbox() is not None)
+    app._redraw(); root.update()
+    items = app.canvas.find_all()
+    paint_ids = app.canvas.find_withtag('paint')
+    img_ids = app.canvas.find_withtag('img')
+    check('strokes stay above the picture after a repaint',
+          bool(paint_ids) and bool(img_ids) and items.index(paint_ids[-1]) > items.index(img_ids[-1]),
+          'paint %s img %s' % (paint_ids[-1], img_ids[-1]))
+    check('the button offers to fill', str(app.gen_btn['text']).startswith('Fill'), str(app.gen_btn['text']))
     app.busy = False; app.engine.calls.clear()
-    app._generate_with(mask_path=mask_file, denoise=1.0); root.update()
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a blue square')
+    app.generate(); root.update()
     kwd = app.engine.calls[-1][1]
-    check('inpaint sends the mask path', kwd.get('mask_path') == str(mask_file), str(kwd.get('mask_path')))
-    check('inpaint sends the base', kwd.get('base_path') is not None)
-    app.busy = False; app._poll()
-    app.engine.calls.clear()
-    app._generate_with(outpaint=(64, 0, 64, 0)); root.update()
-    kwd = app.engine.calls[-1][1]
-    check('outpaint sends the pads', kwd.get('outpaint') == (64, 0, 64, 0), str(kwd.get('outpaint')))
+    check('fill sends a mask', bool(kwd.get('mask_path')) and kwd['mask_path'].endswith('-mask.png'),
+          str(kwd.get('mask_path')))
+    check('fill uses the picture as base', (kwd.get('base_path') or '').endswith(app._files[0].name),
+          str(kwd.get('base_path')))
+    check('the mask clears after the run', app._mask.getbbox() is None)
+    check('and the button is a Generate again', str(app.gen_btn['text']).startswith('Generate'),
+          str(app.gen_btn['text']))
+    app.toggle_mask_mode(False)
+
+    print('\n-- expand pads the picture')
     app.busy = False
-    app.inpaint_dialog(); root.update()
-    dialogs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and 'Inpaint' in w.title()]
-    check('the inpaint dialog opens with a canvas', len(dialogs) == 1 and
-          any(isinstance(c, tk.Canvas) for c in dialogs[0].winfo_children()))
-    for w in dialogs:
-        w.destroy()
+    app.add_pad(0); app.add_pad(2)
+    check('pads are recorded', app._pads == [64, 0, 64, 0], str(app._pads))
+    check('the button offers to expand', str(app.gen_btn['text']).startswith('Expand'), str(app.gen_btn['text']))
+    app.engine.calls.clear(); app.generate(); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('expand sends the pads', kwd.get('outpaint') == (64, 0, 64, 0), str(kwd.get('outpaint')))
+    check('pads clear after the run', app._pads == [0, 0, 0, 0])
+    app.busy = False
 
     print('\n-- sweep changes one parameter per tile')
     app.clear_base()                      # a base image forces single, which would disable the sweep
@@ -673,23 +705,6 @@ def main():
           len(list(Path(app.args.out).glob('*.png'))) == gallery_before)
     check('and the base is untouched', app.base_path is None or True)
     app.busy = False
-
-    print('\n-- the brush inpaint dialog')
-    app.select_file(app._files[0]); root.update()
-    app.inpaint_dialog(); root.update()
-    dlgs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and 'Inpaint' in w.title()]
-    check('the brush editor opens', len(dlgs) == 1, str(len(dlgs)))
-    if dlgs:
-        cv = [c for c in dlgs[0].winfo_children() if isinstance(c, tk.Canvas)]
-        check('it has a painting canvas', len(cv) == 1)
-        cv[0].focus_force(); root.update()
-        cv[0].event_generate('<Button-1>', x=60, y=60)
-        cv[0].event_generate('<B1-Motion>', x=120, y=120)
-        root.update()
-        check('painting marks the canvas', len(cv[0].find_withtag('paint')) > 0,
-              str(len(cv[0].find_withtag('paint'))))
-        check('the picture is under the paint', len(cv[0].find_all()) >= 2, str(len(cv[0].find_all())))
-        dlgs[0].destroy()
 
     print('\n-- the enhancer refuses remote endpoints, works on a local one')
     import http.server

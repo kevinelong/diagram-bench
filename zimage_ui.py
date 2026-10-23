@@ -374,6 +374,7 @@ class Engine:
         is fewer round trips but whose tiles are not reproducible from individual seeds.
         """
         self._cancel.clear()
+        self.last_workflow = None
 
         def work():
             try:
@@ -426,6 +427,7 @@ class Engine:
                                      sampler=sampler, negative=negative, profile=profile,
                                      mask=mask_name, outpaint=outpaint,
                                      hires=hires, hires_denoise=hires_denoise)
+                    self.last_workflow = wf
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):
                         raw = self._download(img)
@@ -561,6 +563,12 @@ class App:
         self._pending_hires = 0.0
         self._preview = False
         self._custom_styles = dict(self._settings.get('custom_styles') or {})
+        self._llm_ok = False
+        self._mask = None            # PIL 'L' at the picture's own size
+        self._mask_painting = False
+        self._brush = 40
+        self._pads = [0, 0, 0, 0]
+        self._pinned = None          # a second picture to compare against, independent of the base
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -759,8 +767,10 @@ class App:
         self.sweep_cb = ttk.Combobox(adv_sweep, textvariable=self.sweep_var, width=8, state='readonly',
                                      values=['none', 'cfg', 'steps', 'seed'])
         self.sweep_cb.pack(side='left', padx=(4, 4))
-        ttk.Label(adv_sweep, text='changes per tile across an N-up - the sheet becomes a comparison',
-                  foreground='#666').pack(side='left')
+        self.sweep_values = tk.StringVar(value='')
+        ttk.Entry(adv_sweep, textvariable=self.sweep_values, width=14).pack(side='left')
+        ttk.Label(adv_sweep, text='e.g. 1,2,3 or 1..4x6 (blank = spread over the tiles)',
+                  foreground='#666').pack(side='left', padx=(4, 0))
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
@@ -824,6 +834,10 @@ class App:
         self.copy_btn.pack(side='left')
         self.info_btn = ttk.Button(tools, text='\u24d8 metadata', command=self.show_metadata, state='disabled')
         self.info_btn.pack(side='left', padx=(6, 0))
+        self.graph_btn = ttk.Button(tools, text='graph', command=self.show_graph)
+        self.graph_btn.pack(side='left', padx=(6, 0))
+        self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
+        self.describe_btn.pack(side='left', padx=(6, 0))
         self.copy_status = ttk.Label(tools, text='', foreground='#555')
         self.copy_status.pack(side='left', padx=(8, 0))
         # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
@@ -843,16 +857,31 @@ class App:
         self.upscale_btn.pack(side='left', padx=(4, 0))
         act2 = ttk.Frame(self.actions)
         act2.pack(fill='x', pady=(4, 0))
-        self.inpaint_btn = ttk.Button(act2, text='Inpaint', command=self.inpaint_dialog, state='disabled')
-        self.inpaint_btn.pack(side='left')
-        self.outpaint_btn = ttk.Button(act2, text='Outpaint', command=self.outpaint_dialog,
-                                       state='disabled')
-        self.outpaint_btn.pack(side='left', padx=(4, 0))
+        self.mask_var = tk.BooleanVar(value=False)
+        self.mask_chk = ttk.Checkbutton(act2, text='paint mask', variable=self.mask_var,
+                                        command=self.toggle_mask_mode)
+        self.mask_chk.pack(side='left')
+        ttk.Label(act2, text='brush').pack(side='left', padx=(6, 2))
+        self.brush_var = tk.IntVar(value=40)
+        ttk.Spinbox(act2, from_=8, to=200, increment=8, width=5, textvariable=self.brush_var,
+                    command=self._read_brush).pack(side='left')
+        self.clear_mask_btn = ttk.Button(act2, text='clear', command=self.clear_mask, state='disabled')
+        self.clear_mask_btn.pack(side='left', padx=(4, 0))
+
+        act3 = ttk.Frame(self.actions)
+        act3.pack(fill='x', pady=(4, 0))
+        ttk.Label(act3, text='expand').pack(side='left')
+        for label, idx in ((u'\u25c0', 0), (u'\u25b2', 1), (u'\u25b6', 2), (u'\u25bc', 3)):
+            b = ttk.Button(act3, text=label, width=2, command=lambda i=idx: self.add_pad(i))
+            b.pack(side='left', padx=(2, 0))
+        self.pad_label = ttk.Label(act3, text='', foreground='#2a6df4')
+        self.pad_label.pack(side='left', padx=(6, 0))
+        self.pin_btn = ttk.Button(act3, text='pin', command=self.pin_current, state='disabled')
+        self.pin_btn.pack(side='left', padx=(8, 0))
         self.compare_var = tk.BooleanVar(value=False)
-        self.compare_chk = ttk.Checkbutton(act2, text='compare', variable=self.compare_var, command=self._redraw)
-        self.compare_chk.pack(side='left', padx=(8, 0))
-        self.describe_btn = ttk.Button(act2, text='Describe', command=self.describe, state='disabled')
-        self.describe_btn.pack(side='left', padx=(8, 0))
+        self.compare_chk = ttk.Checkbutton(act3, text='compare', variable=self.compare_var, command=self._redraw)
+        self.compare_chk.pack(side='left', padx=(4, 0))
+
 
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
@@ -867,8 +896,11 @@ class App:
             v.trace_add('write', lambda *a: self._update_banner())
         self.canvas.bind('<Configure>', self._fit_placeholder, add='+')
         self.layout_var.trace_add('write', self._update_estimate)
+        for v in (self.size_var, self.steps_var, self.layout_var):
+            v.trace_add('write', lambda *a: self._refresh_generate_label())
         self._add_tooltips()
         self._update_banner()
+        self._refresh_generate_label()
 
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
@@ -879,6 +911,7 @@ class App:
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
 
+        root.after(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
@@ -1006,6 +1039,36 @@ class App:
             self.advanced.grid_remove()
             self.adv_btn.configure(text='Advanced \u25b8')
 
+    @staticmethod
+    def _parse_values(spec, n, param):
+        """Parse '1,2,3' or '1..4x6' into a list; blank spreads the range over n tiles."""
+        spec = (spec or '').strip()
+        if not spec:
+            if param == 'cfg':
+                return [round(1.0 + 3.0 * i / max(1, n - 1), 2) for i in range(n)]
+            if param == 'steps':
+                return [max(1, int(round(2 + 10.0 * i / max(1, n - 1)))) for i in range(n)]
+            return [i * 1000 for i in range(n)]
+        try:
+            if '..' in spec:
+                rng, _, count = spec.partition('x')
+                lo, _, hi = rng.partition('..')
+                lo, hi = float(lo), float(hi)
+                k = int(count) if count else n
+                k = max(1, k)
+                vals = [lo + (hi - lo) * i / max(1, k - 1) for i in range(k)]
+            else:
+                vals = [float(v) for v in spec.replace(' ', '').split(',') if v]
+        except Exception:
+            return []
+        if param == 'steps':
+            vals = [max(1, int(round(v))) for v in vals]
+        elif param == 'cfg':
+            vals = [round(v, 2) for v in vals]
+        else:
+            vals = [int(v) for v in vals]
+        return vals
+
     def _style_suffix(self, name):
         if name in self._custom_styles:
             return self._custom_styles[name]
@@ -1059,11 +1122,30 @@ class App:
         self.hint.configure(text='describing with %s\u2026' % url)
         threading.Thread(target=work, args=(url,), daemon=True).start()
 
-    def _local_llm_url(self):
+    def probe_llm(self):
+        """Ask the configured endpoint whether it is there, once, in the background."""
+        url = self._local_llm_url(silent=True)
+        if not url:
+            self._llm_ok = False
+            return
+
+        def work():
+            ok = False
+            try:
+                urllib.request.urlopen(url + '/models', timeout=3).read()
+                ok = True
+            except Exception:
+                ok = False
+            self.ui_events.put(('llm_probe', '%s\t%s' % (url, 'ok' if ok else 'down')))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _local_llm_url(self, silent=False):
         url = (self._settings.get('llm_url') or 'http://127.0.0.1:8080/v1').rstrip('/')
         host = urllib.parse.urlparse(url).hostname or ''
         if host not in ('127.0.0.1', 'localhost', '::1'):
-            self.hint.configure(text='this is local-only: llm_url points at %s' % host)
+            if not silent:
+                self.hint.configure(text='this is local-only: llm_url points at %s' % host)
             return None
         return url
 
@@ -1154,98 +1236,58 @@ class App:
         self.select_file(path)
         self.hint.configure(text='pasted %dx%d from the clipboard as the base' % got.size)
 
-    def inpaint_dialog(self):
-        """Paint the area to regenerate: brush or box, then VAEEncodeForInpaint keeps everything else."""
+    # -- mask and expand, on the picture itself ---------------------------------
+    def toggle_mask_mode(self, on=None):
+        self._mask_painting = bool(self.mask_var.get()) if on is None else bool(on)
+        self.mask_var.set(self._mask_painting)
+        if self._mask_painting and self._current is not None and self._mask is None:
+            self._mask = Image.new('L', Image.open(self._current).size, 0)
+        self.canvas.configure(cursor='pencil' if self._mask_painting else '')
+        self._refresh_generate_label()
+
+    def _read_brush(self):
+        try:
+            self._brush = max(4, int(self.brush_var.get()))
+        except (TypeError, ValueError):
+            pass
+
+    def clear_mask(self):
+        if self._mask is not None:
+            self._mask = Image.new('L', self._mask.size, 0)
+        self.canvas.delete('paint')
+        self.clear_mask_btn.state(['disabled'])
+        self._refresh_generate_label()
+
+    def _paint_mask(self, event):
+        """Paint into the mask and put a visible stroke on the canvas at the same time."""
+        if not self._mask_painting or not self._draw or self._mask is None:
+            return None
+        x0, y0, w, h = self._draw
+        if not (x0 <= event.x <= x0 + w and y0 <= event.y <= y0 + h):
+            return None
+        scale = self._mask.width / float(w)
+        cx, cy = (event.x - x0) * scale, (event.y - y0) * scale
+        r = max(1.0, self._brush / 2.0 * scale)
+        ImageDraw.Draw(self._mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+        rr = self._brush / 2.0
+        self.canvas.create_oval(event.x - rr, event.y - rr, event.x + rr, event.y + rr,
+                                fill='#e6283c', stipple='gray50', outline='', tags='paint')
+        self.clear_mask_btn.state(['!disabled'])
+        self._refresh_generate_label()
+        return 'break'
+
+    def add_pad(self, index):
         if self._current is None:
+            self.hint.configure(text='show a picture first, then expand it')
             return
-        src = Image.open(self._current).convert('RGB')
-        side = 520
-        view = src.copy()
-        view.thumbnail((side, side), Image.LANCZOS)
-        scale = view.width / src.width
-        mask = Image.new('L', src.size, 0)          # painted at full resolution
-        brush = {'draw': ImageDraw.Draw(mask), 'size': 40, 'down': None}
+        self._pads[index] = min(512, self._pads[index] + 64)
+        self.pad_label.configure(text='%s px' % [p for p in self._pads])
+        self._refresh_generate_label()
 
-        win = tk.Toplevel(self.root)
-        win.title('Inpaint - paint what should change')
-        bar = ttk.Frame(win)
-        bar.pack(fill='x', padx=8, pady=(8, 0))
-        ttk.Label(bar, text='brush').pack(side='left')
-        size_var = tk.IntVar(value=40)
-        ttk.Spinbox(bar, from_=8, to=200, increment=8, width=6, textvariable=size_var).pack(side='left', padx=(4, 10))
-        size_var.trace_add('write', lambda *a: brush.__setitem__('size', max(4, int(size_var.get() or 40))))
-        def clear_mask():
-            brush['draw'].rectangle([0, 0, src.width, src.height], fill=0)
-            cv.delete('paint')
-
-        ttk.Button(bar, text='Clear', command=clear_mask).pack(side='left')
-
-        cv = tk.Canvas(win, width=view.width, height=view.height, highlightthickness=0)
-        cv.pack(padx=8, pady=8)
-        base_photo = ImageTk.PhotoImage(view)
-
-        def redraw():
-            cv.delete('all')
-            cv.create_image(0, 0, anchor='nw', image=base_photo)
-
-        def paint(e):
-            # the mask is authoritative; the canvas gets an item per stroke so the user sees it immediately
-            r = brush['size'] / 2.0 / scale
-            x, y = e.x / scale, e.y / scale
-            brush['draw'].ellipse([x - r, y - r, x + r, y + r], fill=255)
-            cv.create_oval(e.x - r * scale, e.y - r * scale, e.x + r * scale, e.y + r * scale,
-                           fill='#e6283c', stipple='gray50', outline='', tags='paint')
-            if brush['down']:
-                brush['draw'].line([brush['down'][0], brush['down'][1], x, y], fill=255, width=int(2 * r))
-                cv.create_line(brush['down'][2], brush['down'][3], e.x, e.y,
-                               fill='#e6283c', width=int(2 * r * scale), stipple='gray50', tags='paint')
-            brush['down'] = (x, y, e.x, e.y)
-
-        def release(_):
-            brush['down'] = None
-
-        cv.bind('<Button-1>', paint)
-        cv.bind('<B1-Motion>', paint)
-        cv.bind('<ButtonRelease-1>', release)
-        redraw()
-
-        def ok():
-            if not mask.getbbox():
-                self.hint.configure(text='paint something first')
-                return
-            masks = Path(self.args.out) / '.masks'
-            masks.mkdir(parents=True, exist_ok=True)
-            out = masks / (Path(self._current).stem + '-mask.png')
-            mask.save(out)
-            win.destroy()
-            self._set_base(self._current)
-            self.hint.configure(text='inpainting %s - only the painted area is regenerated'
-                                     % self._short_name(Path(self._current).name))
-            self._generate_with(mask_path=out, denoise=1.0)
-
-        ttk.Button(win, text='Inpaint painted area', command=ok).pack(pady=(0, 8))
-
-    def outpaint_dialog(self):
-        """Extend the picture in one direction by padding it, then regenerating the padded band."""
-        if self._current is None:
-            return
-        win = tk.Toplevel(self.root)
-        win.title('Outpaint - extend the picture')
-        vars_ = {k: tk.IntVar(value=0) for k in ('left', 'top', 'right', 'bottom')}
-        for i, (k, v) in enumerate(vars_.items()):
-            ttk.Label(win, text=k).grid(row=0, column=i * 2, padx=(8, 4), pady=8)
-            ttk.Spinbox(win, from_=0, to=512, increment=64, width=6, textvariable=v).grid(row=0, column=i * 2 + 1)
-
-        def ok():
-            pads = tuple(vars_[k].get() for k in ('left', 'top', 'right', 'bottom'))
-            if not any(pads):
-                win.destroy(); return
-            win.destroy()
-            self._set_base(self._current)
-            self.hint.configure(text='outpainting %s by %s px' % (self._short_name(Path(self._current).name), pads))
-            self._generate_with(outpaint=pads, denoise=1.0)
-
-        ttk.Button(win, text='Extend', command=ok).grid(row=1, column=0, columnspan=8, pady=(0, 8))
+    def clear_pads(self):
+        self._pads = [0, 0, 0, 0]
+        self.pad_label.configure(text='')
+        self._refresh_generate_label()
 
     def _generate_with(self, mask_path=None, outpaint=None, denoise=None):
         """One-shot generation outside the normal controls: an inpaint or outpaint of the current picture."""
@@ -1363,6 +1405,27 @@ class App:
         self.retry_btn.grid_remove()
         self.hint.configure(text='')
         self.generate()
+
+    def show_graph(self):
+        """Show the ComfyUI workflow the last run actually sent - the SwarmUI "look inside" trick."""
+        wf = getattr(self.engine, 'last_workflow', None)
+        win = tk.Toplevel(self.root)
+        win.title('Workflow sent to ComfyUI')
+        win.geometry('620x460')
+        txt = tk.Text(win, wrap='none', font=('Consolas', 9))
+        bar = ttk.Scrollbar(win, orient='horizontal', command=txt.xview)
+        txt.configure(xscrollcommand=bar.set)
+        bar.pack(side='bottom', fill='x')
+        txt.pack(fill='both', expand=True, padx=8, pady=8)
+        body = json.dumps(wf, indent=1) if wf else 'nothing generated yet this session'
+        txt.insert('1.0', body)
+        txt.configure(state='disabled')
+
+        def copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(body)
+            self.copy_status.configure(text='workflow copied')
+        ttk.Button(win, text='Copy JSON', command=copy).pack(pady=(0, 8))
 
     def show_metadata(self):
         """Show the sidecar of the displayed image, selectable and copyable."""
@@ -1688,8 +1751,7 @@ class App:
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
         self.info_btn.state(['!disabled'] if self._current else ['disabled'])
-        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.inpaint_btn, self.outpaint_btn,
-                  self.describe_btn):
+        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.describe_btn, self.pin_btn):
             b.state(['!disabled' if self._current else 'disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
@@ -1735,6 +1797,8 @@ class App:
         return tiles[idx] if idx < len(tiles) else None
 
     def _on_canvas_click(self, event):
+        if self._mask_painting:
+            return self._paint_mask(event)
         tile = self._tile_at(event.x, event.y)
         if not tile:
             return
@@ -1950,6 +2014,21 @@ class App:
             eta = ' \u00b7 \u2248 %s left' % self._short_time(per * (total - idx))
         self.status.configure(text='tile %d of %d%s' % (idx, total, eta))
 
+    def _refresh_generate_label(self):
+        """Put the measured cost where the decision is made: on the button."""
+        try:
+            size = int(self.size_var.get())
+            steps = int(self.steps_var.get())
+        except (TypeError, ValueError):
+            return
+        n = self._batch()
+        per = SIZE_SECONDS.get(size, 14.0) * (steps / 4.0)
+        total = per * n * (1.35 if self._pending_hires else 1.0)
+        painting = self._mask is not None and self._mask.getbbox() is not None
+        label = 'Fill selection  \u23ce' if painting else ('Expand  \u23ce' if any(self._pads) else 'Generate  \u23ce')
+        if hasattr(self, 'gen_btn'):
+            self.gen_btn.configure(text='%s  \u00b7 \u2248 %s' % (label, self._short_time(total)))
+
     def _update_estimate(self, *_):
         """Estimate the cost of the chosen layout from the two configurations that were actually measured."""
         n = self._batch()
@@ -1997,8 +2076,21 @@ class App:
         except ValueError:
             size = self.args.size
 
-        # a base image yields exactly one result, so an N-up layout does not apply to an edit
-        batch = 1 if self.base_path else self._batch()
+        # the action follows the selection: a painted mask means fill, any pad means expand
+        mask_path, outpaint = None, None
+        edit_base = self.base_path
+        if self._mask is not None and self._mask.getbbox() and self._current is not None:
+            masks = Path(self.args.out) / '.masks'
+            masks.mkdir(parents=True, exist_ok=True)
+            mask_path = masks / (Path(self._current).stem + '-mask.png')
+            self._mask.save(mask_path)
+            edit_base = self._current
+        elif any(self._pads) and self._current is not None:
+            outpaint = tuple(self._pads)
+            edit_base = self._current
+
+        # an edit yields exactly one result, so an N-up layout does not apply
+        batch = 1 if (edit_base or mask_path or outpaint) else self._batch()
 
         if not self._history or self._history[-1] != prompt:
             self._history.append(prompt)
@@ -2011,7 +2103,13 @@ class App:
         self.stop_btn.state(['!disabled'])
         self.bar.configure(value=0.0)
         self.bar.grid()
-        if self.base_path:
+        if mask_path:
+            self.hint.configure(text='filling the painted area of %s'
+                                     % self._short_name(Path(edit_base).name))
+        elif outpaint:
+            self.hint.configure(text='expanding %s by %s px'
+                                     % (self._short_name(Path(edit_base).name), list(outpaint)))
+        elif self.base_path:
             self.hint.configure(text='starting from %s at strength %.2f%s'
                                 % (self.base_path.name, self.denoise.get(),
                                    '  (layout ignored: an edit is one image)' if self._batch() > 1 else ''))
@@ -2042,21 +2140,25 @@ class App:
         choice = self.sweep_var.get() if hasattr(self, 'sweep_var') else 'none'
         if choice != 'none' and batch > 1:
             n = batch
-            if choice == 'cfg':
-                vals = [round(1.0 + 3.0 * i / max(1, n - 1), 2) for i in range(n)]
-            elif choice == 'steps':
-                vals = [max(1, int(round(2 + 10.0 * i / max(1, n - 1)))) for i in range(n)]
-            else:
-                vals = [i * 1000 for i in range(n)]
+            vals = self._parse_values(self.sweep_values.get(), n, choice)
+            if not vals:
+                self.hint.configure(text='could not read the sweep values - using the full range')
+                vals = self._parse_values('', n, choice)
             sweep = {'param': choice, 'values': vals}
-            self.hint.configure(text='sweeping %s across %d tiles: %s' % (choice, n, vals[:4]))
+            self.hint.configure(text='sweeping %s across %d tiles: %s%s'
+                                     % (choice, n, vals[:4], '...' if len(vals) > 4 else ''))
         hires, self._pending_hires = self._pending_hires, 0.0
         self.run_started_at = time.time()
         self.engine.generate(full_prompt, size, size, steps, cfg,
-                             seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
+                             seed, self.args.out,
+                             base_path=(str(edit_base) if edit_base else None),
+                             mask_path=(str(mask_path) if mask_path else None), outpaint=outpaint,
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
                              sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,
                              hires=hires, hires_denoise=0.45, sweep=sweep)
+        if mask_path or outpaint:
+            self.clear_mask()
+            self.clear_pads()
 
     def _poll(self):
         if not self.root.winfo_exists():     # the window is gone: stop rescheduling
@@ -2070,7 +2172,18 @@ class App:
         try:
             while True:
                 kind, payload = self.ui_events.get_nowait()
-                if kind == 'described':
+                if kind == 'llm_probe':
+                    url, state = str(payload).split('\t')
+                    self._llm_ok = (state == 'ok')
+                    for b in (getattr(self, 'enhance_btn', None), getattr(self, 'describe_btn', None)):
+                        try:
+                            if b is not None and b.winfo_exists():
+                                b.state(['!disabled' if self._llm_ok else 'disabled'])
+                        except Exception:
+                            pass
+                    self.hint.configure(text=('local model ready at %s' % url) if self._llm_ok
+                                        else ('no local model at %s - enhance and describe stay off' % url))
+                elif kind == 'described':
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', payload)
                     self.hint.configure(text='prompt written from the picture by the local model')
@@ -2205,17 +2318,35 @@ class App:
         cx, cy = self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2
         self._draw = (cx - im.width // 2, cy - im.height // 2, im.width, im.height)
         self.canvas.create_image(cx, cy, image=self._tk, tags='img')
+        self.canvas.tag_raise('paint')       # a repaint must not bury the mask strokes under the picture
         self._draw_compare(im)
+
+    def pin_current(self):
+        """Pin the displayed picture so any later result can be compared against it, not just the base."""
+        if self._current is None:
+            self.hint.configure(text='nothing to pin yet')
+            return
+        self._pinned = Path(self._current)
+        self._base_img = None
+        self.compare_var.set(True)
+        self.hint.configure(text='pinned %s - compare now shows it against the current picture'
+                                 % self._short_name(self._pinned.name))
+        self._redraw()
+
+    def _compare_reference(self):
+        """The left-hand picture: the pinned one if there is one, otherwise the base."""
+        return self._pinned or self.base_path
 
     def _draw_compare(self, result):
         """Draw the base image to the left of a movable split, so strength stops being a blind dial."""
         self.canvas.delete('compare')
-        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not self.base_path:
+        ref = self._compare_reference() if hasattr(self, '_pinned') else self.base_path
+        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not ref:
             return
         try:
-            if self._base_img is None or getattr(self, '_base_for', None) != str(self.base_path):
-                self._base_img = Image.open(self.base_path).convert('RGB')
-                self._base_for = str(self.base_path)
+            if self._base_img is None or getattr(self, '_base_for', None) != str(ref):
+                self._base_img = Image.open(ref).convert('RGB')
+                self._base_for = str(ref)
             base = self._base_img.copy()
             base.thumbnail((result.width, result.height), Image.LANCZOS)
         except Exception:
@@ -2232,6 +2363,8 @@ class App:
         self.canvas.create_text(x0 + w - 8, y0 + 8, anchor='ne', text='result', fill='#2a6df4', tags='compare')
 
     def _on_compare_drag(self, event):
+        if self._mask_painting:
+            return self._paint_mask(event)
         if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not self._draw:
             return None
         x0, y0, w, h = self._draw

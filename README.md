@@ -245,12 +245,18 @@ Under the picture, three verbs and two editors:
 | **Vary** | same prompt from the sidecar, seed + 1 | - |
 | **Subtle** | re-samples the picture itself at strength 0.35 | - |
 | **hires x2** | real Hires. fix: render at the current size, then `LatentUpscaleBy` and a second pass at denoise 0.45 | **7.8 s** for 384 to 768 px |
-| **Inpaint** | paint with a brush (size 8-200) or box; only painted pixels are regenerated via `VAEEncodeForInpaint` | **13.7 s** |
-| **Outpaint** | pad one or more sides, then regenerate the band via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
-| **compare** | drag a split to see the base against the result, so strength stops being blind | - |
+| **paint mask -> Fill selection** | the brush lives on the picture: paint, and the Generate button becomes *Fill selection*; only painted pixels pass through `VAEEncodeForInpaint` | **8.9 s** on a 1040 px base |
+| **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
+| **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
+
+The Generate button carries its own cost (`Generate ⏎ · ≈ 14 s`, from the measured table), so the price is visible
+before the click. **graph** shows the exact ComfyUI workflow the last run sent, copyable - the simplest way to see what
+the window actually did. **enhance** and **Describe** are disabled with a reason until a local OpenAI-compatible
+endpoint answers at `llm_url` (probed once at startup, never off-machine).
 
 **Sweep** (Advanced) changes one parameter across the tiles of an N-up - `cfg`, `steps` or `seed` - so a 16-up sheet
-becomes a measured comparison rather than 16 guesses. Each tile records its own value in the sidecar; a measured 4-up
+becomes a measured comparison rather than 16 guesses; the values can be typed (`1,2,3` or `1..4x6`) instead of taking
+the default spread. Each tile records its own value in the sidecar; a measured 4-up
 sweep wrote cfg 1.0/2.0/3.0/4.0 in 28 s. **Preview** renders 2 steps at 256 px into `.previews/` without touching the
 gallery, for when 14 s is too long to wait on a guess. **save style** stores the current prompt as a reusable style.
 **Describe** captions the current picture through the same local endpoint the enhancer uses. Saved styles, favourites
