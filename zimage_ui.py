@@ -187,6 +187,8 @@ def settings_path():
 
 
 def load_settings():
+    if os.environ.get('ZIMAGE_NO_SETTINGS'):     # live tests must never touch a real profile
+        return {}
     try:
         data = json.loads(settings_path().read_text(encoding='utf-8'))
         return {k: v for k, v in data.items() if k in SETTINGS_KEYS}
@@ -195,6 +197,8 @@ def load_settings():
 
 
 def save_settings(data):
+    if os.environ.get('ZIMAGE_NO_SETTINGS'):
+        return False
     try:
         p = settings_path()
         p.parent.mkdir(parents=True, exist_ok=True)
