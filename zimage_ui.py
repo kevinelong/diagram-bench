@@ -314,6 +314,8 @@ class Engine:
                                    index=(run_i + k + 1) if total > 1 else None,
                                    of=total if total > 1 else None)
                         path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
+                        if total > 1:
+                            self.events.put(('tile', (raw, str(path), run_i + k + 1, total)))
 
                 if len(paths) == 1:
                     self.events.put(('image', (raws[0], str(paths[0]))))
@@ -358,6 +360,8 @@ class App:
         self.base_path = None
         self._current = None
         self._files = []
+        self._sheet = None            # {'cols','rows','tiles'} while a contact sheet is on screen
+        self._draw = None             # (x0, y0, w, h) of the drawn image on the canvas
 
         root.title('Z-Image — prompt and picture')
         try:
@@ -460,6 +464,7 @@ class App:
         self.canvas = tk.Canvas(right, background='#f4f4f5', highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', lambda e: self._redraw())
+        self.canvas.bind('<Button-1>', self._on_canvas_click)
         tools = ttk.Frame(right)
         tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
@@ -507,6 +512,14 @@ class App:
             return None
         return self._files[sel[0]]
 
+    def _display_raw(self, raw, path=None):
+        self._current = Path(path) if path else None
+        self.copy_btn.state(['!disabled'])
+        self.copy_status.configure(text='')
+        self._img = Image.open(io.BytesIO(raw))
+        self.canvas.delete('placeholder')
+        self.root.after_idle(self._redraw)
+
     def _display(self, path):
         self._current = Path(path)
         self.copy_btn.state(['!disabled'])
@@ -524,6 +537,52 @@ class App:
         self.base_label.configure(text=self.base_path.name)
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
+
+    def _tile_at(self, x, y):
+        """Which tile of the displayed sheet is at canvas (x, y)? Returns a tile path or None."""
+        if not self._sheet or not self._draw:
+            return None
+        x0, y0, w, h = self._draw
+        if not (x0 <= x <= x0 + w and y0 <= y <= y0 + h):
+            return None
+        cols, rows = self._sheet['cols'], self._sheet['rows']
+        col = min(int((x - x0) / (w / cols)), cols - 1)
+        row = min(int((y - y0) / (h / rows)), rows - 1)
+        idx = row * cols + col
+        tiles = self._sheet['tiles']
+        return tiles[idx] if idx < len(tiles) else None
+
+    def _on_canvas_click(self, event):
+        tile = self._tile_at(event.x, event.y)
+        if not tile:
+            return
+        self.enlarge(tile)
+
+    def enlarge(self, tile_path):
+        """Regenerate one tile on its own, at the model's native 1024 px, using the prompt and seed recorded for it."""
+        if self.busy:
+            self.hint.configure(text='busy - wait for the current run to finish')
+            return
+        meta = read_meta(tile_path)
+        if not meta:
+            self.hint.configure(text='no metadata beside %s' % Path(tile_path).name)
+            return
+        seed = meta.get('seed') or self.args.seed
+        prompt = meta.get('prompt') or self.text.get('1.0', 'end').strip()
+        if not prompt:
+            self.hint.configure(text='that tile has no recorded prompt')
+            return
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', prompt)
+        self.seed.set(str(seed))
+        self.busy = True
+        self.gen_btn.state(['disabled'])
+        self.bar.configure(value=0.0)
+        self.bar.grid()
+        base = meta.get('base_image')
+        self.status.configure(text='enlarging %s at 1024 px, seed %s' % (Path(tile_path).name, seed))
+        self.engine.generate(prompt, 1024, 1024, self.args.steps, self.cfg.get(), int(seed), self.args.out,
+                             base_path=base, denoise=(meta.get('denoise') or 1.0), batch=1, sequential=True)
 
     def copy_image(self):
         if not self._current:
@@ -655,9 +714,21 @@ class App:
                     self._on_ws(payload)
                 elif kind == 'ws_error':
                     self.hint.configure(text='progress feed unavailable (%s); the image still arrives' % payload)
+                elif kind == 'tile':
+                    raw, path, idx, total = payload
+                    self._sheet = None
+                    self._display_raw(raw, path)
+                    self.status.configure(text='tile %d of %d received' % (idx, total))
                 elif kind == 'image':
                     raw, path = payload
                     self._raw = raw
+                    meta = read_meta(path)
+                    if meta and meta.get('tiles'):
+                        n = len(meta['tiles'])
+                        cols = 2 if n == 4 else 3 if n == 9 else max(1, int(math.ceil(math.sqrt(n))))
+                        self._sheet = {'cols': cols, 'rows': int(math.ceil(n / cols)), 'tiles': meta['tiles']}
+                    else:
+                        self._sheet = None
                     self._show(raw)
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
@@ -703,8 +774,9 @@ class App:
         im = self._img.copy()
         im.thumbnail((w, h), Image.LANCZOS)   # never upscales, never overflows the canvas
         self._tk = ImageTk.PhotoImage(im)
-        self.canvas.create_image(self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
-                                 image=self._tk, tags='img')
+        cx, cy = self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2
+        self._draw = (cx - im.width // 2, cy - im.height // 2, im.width, im.height)
+        self.canvas.create_image(cx, cy, image=self._tk, tags='img')
 
     def on_close(self):
         self.status.configure(text='stopping…')
