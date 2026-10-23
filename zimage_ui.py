@@ -419,10 +419,19 @@ class Engine:
                         'hires_denoise': (hires_denoise if hires > 1.0 else None)}
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-                base_name = None
+                base_name, scale_base = None, None
                 if base_path:
                     base_name = zg.upload_image('http://%s:%d' % (self.host, self.port), base_path)
                     self.events.put(('status', 'base image uploaded: %s' % base_name))
+                    try:
+                        with Image.open(base_path) as _bi:
+                            bw, bh = _bi.size
+                        if (bw, bh) != (width, height):
+                            # the size selector wins: resizing the base is the only way an edit changes scale
+                            scale_base = (width, height)
+                            self.events.put(('status', 'base %dx%d resized to %dx%d' % (bw, bh, width, height)))
+                    except Exception:
+                        pass
                 mask_name = None
                 if mask_path:
                     mask_name = zg.upload_image('http://%s:%d' % (self.host, self.port), mask_path)
@@ -457,7 +466,7 @@ class Engine:
                                      batch=(1 if (sequential or base_name) else total),
                                      sampler=sampler, negative=negative, profile=profile,
                                      mask=mask_name, outpaint=outpaint,
-                                     hires=hires, hires_denoise=hires_denoise)
+                                     hires=hires, hires_denoise=hires_denoise, scale_base=scale_base)
                     self.last_workflow = wf
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):

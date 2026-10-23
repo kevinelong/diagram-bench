@@ -239,7 +239,7 @@ def get(path, timeout=30):
 
 def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1,
              sampler='euler', scheduler='simple', negative='', profile=None, mask=None, outpaint=None,
-             hires=0.0, hires_denoise=0.45):
+             hires=0.0, hires_denoise=0.45, scale_base=None):
     """ComfyUI graph for the four things this window can ask for.
 
     text to image : EmptySD3LatentImage -> KSampler(1.0) -> VAEDecode
@@ -274,17 +274,35 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
         if not base_image:
             raise ValueError('inpaint and outpaint need a base image')
         graph["10"] = {"class_type": "LoadImage", "inputs": {"image": base_image}}
+        img_ref = ["10", 0]
+        if scale_base:
+            # the size selector wins over the base image's own dimensions; centre-crop keeps the aspect
+            graph["16"] = {"class_type": "ImageScale",
+                           "inputs": {"image": img_ref, "upscale_method": "lanczos",
+                                      "width": int(scale_base[0]), "height": int(scale_base[1]),
+                                      "crop": "center"}}
+            img_ref = ["16", 0]
         if outpaint:
             # the node's padding inputs step by 8, and the key is 'feathering', not 'feather'
             pad = [int(round(max(0, v) / 8.0)) * 8 for v in outpaint]
             graph["12"] = {"class_type": "ImagePadForOutpaint",
-                           "inputs": {"image": ["10", 0], "left": pad[0], "top": pad[1],
+                           "inputs": {"image": img_ref, "left": pad[0], "top": pad[1],
                                       "right": pad[2], "bottom": pad[3], "feathering": 24}}
             pixels, mask_ref = ["12", 0], ["12", 1]
             denoise = 1.0
         else:
             graph["13"] = {"class_type": "LoadImageMask", "inputs": {"image": mask, "channel": "red"}}
-            pixels, mask_ref = ["10", 0], ["13", 0]
+            mask_ref = ["13", 0]
+            if scale_base:
+                # the mask must travel through the same resize as the picture or the two no longer line up
+                graph["17"] = {"class_type": "MaskToImage", "inputs": {"mask": mask_ref}}
+                graph["18"] = {"class_type": "ImageScale",
+                               "inputs": {"image": ["17", 0], "upscale_method": "bilinear",
+                                          "width": int(scale_base[0]), "height": int(scale_base[1]),
+                                          "crop": "center"}}
+                graph["19"] = {"class_type": "ImageToMask", "inputs": {"image": ["18", 0], "channel": "red"}}
+                mask_ref = ["19", 0]
+            pixels = img_ref
             denoise = 1.0 if denoise >= 1.0 else denoise
         graph["11"] = {"class_type": "VAEEncodeForInpaint",
                        "inputs": {"pixels": pixels, "vae": ["3", 0], "mask": mask_ref, "grow_mask_by": 8}}
@@ -292,7 +310,14 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
     elif base_image:
         # one base image yields one latent, so a batch would only multiply the same noise
         graph["10"] = {"class_type": "LoadImage", "inputs": {"image": base_image}}
-        graph["11"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": ["3", 0]}}
+        img_ref = ["10", 0]
+        if scale_base:
+            graph["16"] = {"class_type": "ImageScale",
+                           "inputs": {"image": img_ref, "upscale_method": "lanczos",
+                                      "width": int(scale_base[0]), "height": int(scale_base[1]),
+                                      "crop": "center"}}
+            img_ref = ["16", 0]
+        graph["11"] = {"class_type": "VAEEncode", "inputs": {"pixels": img_ref, "vae": ["3", 0]}}
         latent = ["11", 0]
         batch = 1
     else:

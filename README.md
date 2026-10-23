@@ -255,6 +255,12 @@ Under the picture, three verbs and two editors:
 |---|---|---|
 | **Vary** | same prompt from the sidecar, seed + 1 | - |
 | **Subtle** | re-samples the picture itself at strength 0.35 | - |
+Editing honours the size selector: an img2img or inpaint request **resizes the base to the chosen size** (centre
+crop, so the aspect is kept) instead of inheriting the base's dimensions. Measured: a 256 px base asked for 512
+returned 512x512 in 7.0 s, asked for 384 returned 384x384 in 6.7 s, and an inpaint with a 256 base and 256 mask at
+384 returned 384x384 in 8.0 s - the mask travels through the same resize (MaskToImage -> ImageScale -> ImageToMask)
+so it still lines up.
+
 | **hires x2** | real Hires. fix: render at the current size, then `LatentUpscaleBy` and a second pass at denoise 0.45 | **7.8 s** for 384 to 768 px |
 | **paint mask -> Fill selection** | the brush lives on the picture: paint, and the Generate button becomes *Fill selection*; only painted pixels pass through `VAEEncodeForInpaint` | **8.9 s** on a 1040 px base |
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |

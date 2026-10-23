@@ -713,6 +713,26 @@ def main():
           app.base_path is not None and 'pasted-' in app.base_path.name, str(app.base_path))
     Grab.grabclipboard = real_grab
 
+    print('\n-- the size selector wins over the base image\'s own size')
+    import zimage_gen as zgen
+    wf = zgen.workflow('a fox', 512, 512, 4, 1.0, 1, 'p', base_image='b.png', denoise=0.6,
+                       scale_base=(512, 512))
+    check('an edit carries an ImageScale to the requested size',
+          wf.get('16', {}).get('class_type') == 'ImageScale' and wf['16']['inputs']['width'] == 512,
+          str(wf.get('16')))
+    check('and VAEEncode reads the scaled picture', wf['11']['inputs']['pixels'] == ['16', 0],
+          str(wf['11']['inputs']['pixels']))
+    wf2 = zgen.workflow('a fox', 384, 384, 4, 1.0, 1, 'p', base_image='b.png', mask='m.png',
+                        scale_base=(384, 384))
+    check('an inpaint scales the mask with the picture',
+          wf2.get('17', {}).get('class_type') == 'MaskToImage'
+          and wf2.get('18', {}).get('class_type') == 'ImageScale'
+          and wf2.get('19', {}).get('class_type') == 'ImageToMask'
+          and wf2['11']['inputs']['mask'] == ['19', 0],
+          str(wf2['11']['inputs']))
+    wf3 = zgen.workflow('a fox', 512, 512, 4, 1.0, 1, 'p', base_image='b.png', denoise=0.6)
+    check('a base that already matches is left alone', '16' not in wf3 and wf3['11']['inputs']['pixels'] == ['10', 0])
+
     print('\n-- the brush lives on the picture, and the action follows it')
     app.clear_base()                       # clear_base also clears the view, so do it before selecting
     app.select_file(app._files[0]); root.update(); root.update_idletasks()
