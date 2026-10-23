@@ -217,6 +217,42 @@ Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` 
 On Windows, prefer `--initial-file` for a long or punctuated prompt: PowerShell's `Start-Process -ArgumentList`
 splits a multi-word argument into several, so `--initial "a blue circle"` arrives as `--initial a` plus strays.
 
+### Styles, models, and verbs on a picture
+
+The window is no longer only prompt-shaped. Fooocus's split between a small surface and an "Advanced" drawer is adopted
+directly: **style** and this picture's actions stay visible, while *model*, *steps*, *sampler* and *negative prompt* live
+behind **Advanced**.
+
+Styles are prompt suffixes (`STYLES` in the module) - the model is not retrained, words are appended: photo, icon,
+diagram, blueprint, watercolour, cinematic. The suffix applied is written into the sidecar as `style`.
+
+**Advanced → model** switches between profiles that are already on disk, each verified against ComfyUI's own node list:
+
+| profile | weights | encoder | measured at 256 px, 4 steps |
+|---|---|---|---|
+| z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |
+| flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
+| flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | 20 steps, cfg 3.5 by default |
+
+The negative prompt is a real node input now (node 5 was hard-coded empty), and cfg follows the profile rather than
+being pinned at 1.0.
+
+Under the picture, three verbs and two editors:
+
+| control | what it does | measured |
+|---|---|---|
+| **Vary** | same prompt from the sidecar, seed + 1 | - |
+| **Subtle** | re-samples the picture itself at strength 0.35 | - |
+| **x2** | regenerates at double size, same prompt and seed (there is no upscaler model here, and the tooltip says so) | - |
+| **Inpaint** | drag a box, that region is regenerated via `VAEEncodeForInpaint` | **13.7 s** |
+| **Outpaint** | pad one or more sides, then regenerate the band via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
+| **compare** | drag a split to see the base against the result, so strength stops being blind | - |
+
+`Ctrl+V` pastes an image from the clipboard as the base. **Run log** lists this session's runs with seed, model, style
+and wall time. The strip gained a search box, a **star** (favourites float to the top and persist) and a *★ only* filter.
+**Enhance** rewrites the prompt with a local OpenAI-compatible endpoint (`llm_url`, default
+`http://127.0.0.1:8080/v1`) and refuses any non-loopback host.
+
 ### Gallery: multiselect and delete
 
 The **Recent (18)** strip shows the newest 18 images as a grid of 92 px tiles, 3 across and 6 deep, and marks them for

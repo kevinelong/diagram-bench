@@ -15,6 +15,7 @@ import os
 import queue
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -376,6 +377,24 @@ def main():
     long_png.unlink(); long_png.with_suffix('.json').unlink(missing_ok=True)
     app.refresh_gallery()
 
+    print('\n-- the window still fits its own controls at the minimum size')
+    root.state('normal'); root.geometry('1080x680+30+30')
+    was_advanced = app._adv_shown
+    if not was_advanced:
+        app.toggle_advanced()
+    root.update(); root.update_idletasks()
+    need, have = app.actions.winfo_reqwidth(), app.actions.master.winfo_width()
+    check('the action bar is not clipped', need <= have, '%d needs %d' % (need, have))
+    neg_bottom = app.negative.winfo_rooty() + app.negative.winfo_height() - root.winfo_rooty()
+    check('the advanced panel fits vertically', neg_bottom <= root.winfo_height(),
+          '%d vs %d' % (neg_bottom, root.winfo_height()))
+    check('the prompt box leaves room for the rows below it',
+          app.text.winfo_height() < root.winfo_height() * 0.62,
+          '%d of %d px' % (app.text.winfo_height(), root.winfo_height()))
+    if not was_advanced:            # leave the window as the later checks expect it
+        app.toggle_advanced()
+        root.update()
+
     print('\n-- tooltips')
     check('every control has a tooltip', len(app._tips) >= 20, str(len(app._tips)))
     tip = app._tips[0]
@@ -471,6 +490,156 @@ def main():
     app._fit_placeholder(NS(width=300))
     width = app.canvas.itemcget(app.placeholder, 'width')
     check('placeholder wraps to the canvas width', width != '' and int(width) == 272, width)
+
+    print('\n-- advanced panel, negative prompt, style and model')
+    check('advanced is hidden by default', not app.advanced.winfo_ismapped())
+    app.toggle_advanced(); root.update()
+    check('toggling shows it', app.advanced.winfo_ismapped())
+    app.negative.delete('1.0', 'end'); app.negative.insert('1.0', 'blurry, watermark')
+    app.style_var.set('icon')
+    app.model_var.set('flux1 dev')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    args_, kwd = app.engine.calls[-1]
+    check('the style suffix reaches the prompt', args_[0].endswith(zui.STYLES['icon']), args_[0][-40:])
+    check('the negative prompt is sent', kwd.get('negative') == 'blurry, watermark', str(kwd.get('negative')))
+    check('the model profile is sent', kwd.get('profile') == 'flux1 dev', str(kwd.get('profile')))
+    check('cfg comes from the profile', args_[4] == 3.5, str(args_[4]))
+    check('the style is recorded', kwd.get('style') == 'icon')
+    check('the banner names the model and style', 'flux1 dev' in app.banner['text'] and 'style icon' in app.banner['text'],
+          app.banner['text'])
+    app.style_var.set('none'); app.model_var.set('z-image turbo')
+    app.negative.delete('1.0', 'end')
+    app.busy = False
+
+    print('\n-- vary, vary subtly, regen')
+    click(app, app._files[0])
+    base_seed = int(app.seed.get())
+    app.busy = False; app.engine.calls.clear()
+    app.vary('vary'); root.update()
+    check('vary drops the base', app.base_path is None)
+    check('vary steps the seed', int(app.seed.get()) == base_seed + 1, str(app.seed.get()))
+    check('vary restores the prompt', 'prompt for image' in app.text.get('1.0', 'end'))
+    check('vary did generate', len(app.engine.calls) == 1)
+
+    app.busy = False
+    click(app, app._files[1])
+    app.vary('subtle'); root.update()
+    check('vary subtly keeps the picture as base',
+          app.base_path is not None and app.base_path.name == app._files[1].name)
+    check('vary subtly uses strength 0.35', abs(app.denoise.get() - 0.35) < 1e-9, str(app.denoise.get()))
+
+    app.busy = False
+    click(app, app._files[2])
+    app.upscale(); root.update()
+    check('regen doubles the size', app.size_var.get() == '640', app.size_var.get())
+    check('regen keeps the prompt', 'prompt for image' in app.text.get('1.0', 'end'))
+    app.size_var.set('512'); app.busy = False
+
+    print('\n-- compare with base')
+    click(app, app._files[0])
+    app.compare_var.set(True); app._redraw(); root.update()
+    check('compare draws base, split and labels', len(app.canvas.find_withtag('compare')) >= 4,
+          str(len(app.canvas.find_withtag('compare'))))
+    x0, y0, w, h = app._draw
+    app._on_compare_drag(NS(x=x0 + w // 4, y=y0 + 10))
+    check('dragging moves the split', 0.15 < app._split < 0.35, str(round(app._split, 2)))
+    app.compare_var.set(False); app._redraw(); root.update()
+    check('unchecking clears it', len(app.canvas.find_withtag('compare')) == 0)
+
+    print('\n-- run log')
+    before_runs = len(app._runs)
+    feed_image(app, app._files[0])
+    check('a finished run is logged', len(app._runs) == before_runs + 1, str(len(app._runs)))
+    check('the log entry has seed, model and wall time',
+          bool(app._runs[-1]['seed']) and bool(app._runs[-1]['model']) and bool(app._runs[-1]['wall']))
+    app.show_run_log(); root.update()
+    logs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and 'Run log' in w.title()]
+    check('the run log window opens', len(logs) == 1, str(len(logs)))
+    for w in logs:
+        w.destroy()
+
+    print('\n-- gallery search, stars, filters')
+    app.search_var.set('seed12'); app.refresh_gallery(); root.update()
+    check('search narrows the strip', len(app._files) < 26 and all('seed12' in p.name for p in app._files),
+          str(len(app._files)))
+    app.search_var.set(''); app.refresh_gallery(); root.update()
+    app.clear_selection()
+    click(app, app._files[0], ctrl=True)
+    app.toggle_star(); root.update()
+    check('starring records the file', app._files[0].name in app._favorites)
+    check('stars persist to settings', app._files[0].name in (zui.load_settings().get('favorites') or []))
+    app.starred_only.set(True); app.refresh_gallery(); root.update()
+    check('starred-only filters to favourites', len(app._files) == 1, str(len(app._files)))
+    app.starred_only.set(False); app.refresh_gallery(); root.update()
+    app.toggle_star()
+    check('unstarring removes it', app._files[0].name not in app._favorites)
+
+    print('\n-- paste from the clipboard')
+    import PIL.ImageGrab as Grab
+    real_grab = Grab.grabclipboard
+    Grab.grabclipboard = lambda: None
+    app.paste_base()
+    check('an empty clipboard is reported', 'no image on the clipboard' in app.hint['text'], app.hint['text'])
+    Grab.grabclipboard = lambda: Image.new('RGB', (64, 48), 'navy')
+    app.paste_base(); root.update()
+    check('a pasted image becomes the base',
+          app.base_path is not None and 'pasted-' in app.base_path.name, str(app.base_path))
+    Grab.grabclipboard = real_grab
+
+    print('\n-- inpaint and outpaint reach the engine')
+    mask_file = tmp / 'mask-test.png'
+    Image.new('L', (320, 240), 0).save(mask_file)
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a blue box')
+    app._set_base(app._files[0])
+    app.busy = False; app.engine.calls.clear()
+    app._generate_with(mask_path=mask_file, denoise=1.0); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('inpaint sends the mask path', kwd.get('mask_path') == str(mask_file), str(kwd.get('mask_path')))
+    check('inpaint sends the base', kwd.get('base_path') is not None)
+    app.busy = False; app._poll()
+    app.engine.calls.clear()
+    app._generate_with(outpaint=(64, 0, 64, 0)); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('outpaint sends the pads', kwd.get('outpaint') == (64, 0, 64, 0), str(kwd.get('outpaint')))
+    app.busy = False
+    app.inpaint_dialog(); root.update()
+    dialogs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and 'Inpaint' in w.title()]
+    check('the inpaint dialog opens with a canvas', len(dialogs) == 1 and
+          any(isinstance(c, tk.Canvas) for c in dialogs[0].winfo_children()))
+    for w in dialogs:
+        w.destroy()
+
+    print('\n-- the enhancer refuses remote endpoints, works on a local one')
+    import http.server
+    app._settings['llm_url'] = 'http://example.com/v1'
+    app.enhance_prompt()
+    check('a remote endpoint is refused', 'local-only' in app.hint['text'], app.hint['text'])
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.dumps({'choices': [{'message': {'content': 'a crisp vector fox'}}]}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % srv.server_port
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app.enhance_prompt()
+    for _ in range(80):
+        app._poll(); root.update(); time.sleep(0.05)
+        if 'rewritten' in app.hint['text']:
+            break
+    check('a local model rewrites the prompt', 'vector fox' in app.text.get('1.0', 'end'),
+          app.text.get('1.0', 'end').strip())
+    srv.shutdown()
 
     print('\n-- the browser window shares the selection')
     app.clear_selection()

@@ -66,6 +66,23 @@ UNET = 'z_image_turbo_nvfp4.safetensors'
 CLIP = 'qwen_3_4b_fp4_mixed.safetensors'
 VAE = 'ae.safetensors'
 
+# Model profiles: everything that differs between checkpoints. Every file below is present in D:/models/comfyui and every
+# node type was confirmed in ComfyUI's /object_info before being listed (UnetLoaderGGUF comes from ComfyUI-GGUF).
+MODELS = {
+    'z-image turbo': {'unet': UNET, 'unet_node': 'UNETLoader',
+                      'clip': CLIP, 'clip_node': 'CLIPLoader', 'clip_type': 'lumina2',
+                      'vae': VAE, 'steps': 4, 'cfg': 1.0},
+    'flux1 schnell': {'unet': 'flux1-schnell-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
+                      'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
+                      'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
+                      'vae': 'ae.safetensors', 'steps': 4, 'cfg': 1.0},
+    'flux1 dev': {'unet': 'flux1-dev-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
+                  'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
+                  'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
+                  'vae': 'ae.safetensors', 'steps': 20, 'cfg': 3.5},
+}
+DEFAULT_MODEL = 'z-image turbo'
+
 
 OPEN_HELPER = Path(r'C:/Users/kevin/ai_bench/Open-Document.ps1')
 
@@ -221,40 +238,74 @@ def get(path, timeout=30):
 
 
 def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1,
-             sampler='euler', scheduler='simple'):
-    """ComfyUI graph. With `base_image` (a name already uploaded to ComfyUI's input dir) the graph becomes img2img:
-    LoadImage -> VAEEncode -> KSampler(denoise<1). Denoise 1.0 is text-to-image."""
-    if base_image:
-        # a base image gives one latent; batch only multiplies noise on a fresh latent, so it is ignored here
-        return {
-            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
-            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "lumina2"}},
-            "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
-            "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
-            "10": {"class_type": "LoadImage", "inputs": {"image": base_image}},
-            "11": {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": ["3", 0]}},
-            "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
-                                                      "latent_image": ["11", 0], "seed": seed, "steps": steps,
-                                                      "cfg": cfg, "sampler_name": sampler,
-                                                      "scheduler": scheduler, "denoise": denoise}},
-            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
-            "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}},
-        }
-    return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "lumina2"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+             sampler='euler', scheduler='simple', negative='', profile=None, mask=None, outpaint=None):
+    """ComfyUI graph for the four things this window can ask for.
+
+    text to image : EmptySD3LatentImage -> KSampler(1.0) -> VAEDecode
+    img2img       : LoadImage -> VAEEncode -> KSampler(denoise<1)
+    inpaint       : LoadImage + LoadImageMask -> VAEEncodeForInpaint -> KSampler
+    outpaint      : ImagePadForOutpaint -> VAEEncodeForInpaint -> KSampler
+
+    `profile` picks the checkpoint wiring (see MODELS); `negative` fills node 5, which used to be hard-coded empty.
+    """
+    prof = MODELS[profile or DEFAULT_MODEL]
+    if prof['clip_node'] == 'DualCLIPLoader':
+        clip_node = {"class_type": "DualCLIPLoader",
+                     "inputs": {"clip_name1": prof['clip'][0], "clip_name2": prof['clip'][1],
+                                "type": prof['clip_type']}}
+    else:
+        clip_node = {"class_type": "CLIPLoader",
+                     "inputs": {"clip_name": prof['clip'], "type": prof['clip_type']}}
+
+    unet_inputs = {"unet_name": prof['unet']}
+    if prof['unet_node'] == 'UNETLoader':      # UNETLoader requires weight_dtype; the GGUF loader does not accept it
+        unet_inputs['weight_dtype'] = prof.get('weight_dtype', 'default')
+
+    graph = {
+        "1": {"class_type": prof['unet_node'], "inputs": unet_inputs},
+        "2": clip_node,
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": prof['vae']}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
-        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
-        "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height,
-                                                             "batch_size": batch}},
-        "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
-                                                  "latent_image": ["6", 0], "seed": seed, "steps": steps, "cfg": cfg,
-                                                  "sampler_name": sampler, "scheduler": scheduler, "denoise": 1.0}},
-        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
-        "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
     }
+
+    if mask or outpaint:
+        if not base_image:
+            raise ValueError('inpaint and outpaint need a base image')
+        graph["10"] = {"class_type": "LoadImage", "inputs": {"image": base_image}}
+        if outpaint:
+            # the node's padding inputs step by 8, and the key is 'feathering', not 'feather'
+            pad = [int(round(max(0, v) / 8.0)) * 8 for v in outpaint]
+            graph["12"] = {"class_type": "ImagePadForOutpaint",
+                           "inputs": {"image": ["10", 0], "left": pad[0], "top": pad[1],
+                                      "right": pad[2], "bottom": pad[3], "feathering": 24}}
+            pixels, mask_ref = ["12", 0], ["12", 1]
+            denoise = 1.0
+        else:
+            graph["13"] = {"class_type": "LoadImageMask", "inputs": {"image": mask, "channel": "red"}}
+            pixels, mask_ref = ["10", 0], ["13", 0]
+            denoise = 1.0 if denoise >= 1.0 else denoise
+        graph["11"] = {"class_type": "VAEEncodeForInpaint",
+                       "inputs": {"pixels": pixels, "vae": ["3", 0], "mask": mask_ref, "grow_mask_by": 8}}
+        latent = ["11", 0]
+    elif base_image:
+        # one base image yields one latent, so a batch would only multiply the same noise
+        graph["10"] = {"class_type": "LoadImage", "inputs": {"image": base_image}}
+        graph["11"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": ["3", 0]}}
+        latent = ["11", 0]
+        batch = 1
+    else:
+        graph["6"] = {"class_type": "EmptySD3LatentImage",
+                      "inputs": {"width": width, "height": height, "batch_size": batch}}
+        latent = ["6", 0]
+
+    graph["7"] = {"class_type": "KSampler",
+                  "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
+                             "latent_image": latent, "seed": seed, "steps": steps, "cfg": cfg,
+                             "sampler_name": sampler, "scheduler": scheduler, "denoise": denoise}}
+    graph["8"] = {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}}
+    graph["9"] = {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}}
+    return graph
 
 
 def main(argv):

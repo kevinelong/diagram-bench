@@ -161,7 +161,19 @@ def copy_png_to_clipboard(path):
         return False, '%s: %s' % (type(e).__name__, e)
 
 
-SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history')
+SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
+                 'favorites')
+
+# Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
+STYLES = {
+    'none': '',
+    'photo': 'photograph, natural light, shallow depth of field',
+    'icon': 'flat vector icon, simple shapes, white background, minimal',
+    'diagram': 'clean technical diagram, thin black lines, white background, labelled',
+    'blueprint': 'engineering blueprint, white lines on blue, orthographic',
+    'watercolour': 'watercolour painting, soft washes, paper texture',
+    'cinematic': 'cinematic still, anamorphic, dramatic lighting, film grain',
+}
 
 # Measured cost of one sequential request at 4 steps, on this box, with the model cache disabled. The cost is flat
 # above 384 px - the per-request overhead dominates, not the pixel count - so area-based formulas are wrong here.
@@ -353,7 +365,8 @@ class Engine:
         return urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
-                 batch=1, sequential=True, sampler='euler'):
+                 batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
+                 outpaint=None, style=None):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -367,13 +380,21 @@ class Engine:
                 out = Path(out_dir)          # not out_dir: assigning that would shadow the parameter
                 out.mkdir(parents=True, exist_ok=True)
                 meta = {'steps': steps, 'cfg': cfg, 'denoise': (denoise if base_path else 1.0),
-                        'base_image': (str(base_path) if base_path else None)}
+                        'base_image': (str(base_path) if base_path else None),
+                        'negative': negative or None, 'style': style or None,
+                        'model': (profile or zg.DEFAULT_MODEL),
+                        'mask': (Path(mask_path).name if mask_path else None),
+                        'outpaint': list(outpaint) if outpaint else None}
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name = None
                 if base_path:
                     base_name = zg.upload_image('http://%s:%d' % (self.host, self.port), base_path)
                     self.events.put(('status', 'base image uploaded: %s' % base_name))
+                mask_name = None
+                if mask_path:
+                    mask_name = zg.upload_image('http://%s:%d' % (self.host, self.port), mask_path)
+                    self.events.put(('status', 'mask uploaded: %s' % mask_name))
                 client_id = self._listen_progress() if self.progress else None
 
                 total = 1 if base_name else max(1, batch)
@@ -390,18 +411,25 @@ class Engine:
                                      base_image=base_name,
                                      denoise=(1.0 if not base_name else denoise),
                                      batch=(1 if (sequential or base_name) else total),
-                                     sampler=sampler)
+                                     sampler=sampler, negative=negative, profile=profile,
+                                     mask=mask_name, outpaint=outpaint)
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):
                         raw = self._download(img)
+                        # outpaint changes the canvas, so name and record what was actually produced
+                        try:
+                            real_w, real_h = Image.open(io.BytesIO(raw)).size
+                        except Exception:
+                            real_w, real_h = width, height
                         suffix = '' if total == 1 else ('_%02d' % (run_i + k + 1))
-                        path = out / ('%s_%dx%d_seed%d%s.png' % (stamp, width, height, this_seed, suffix))
+                        path = out / ('%s_%dx%d_seed%d%s.png' % (stamp, real_w, real_h, this_seed, suffix))
                         path.write_bytes(raw)
                         paths.append(path)
                         raws.append(raw)
-                        rec = dict(meta, image=str(path), prompt=prompt, seed=this_seed, width=width,
-                                   height=height, created=datetime.now().isoformat(timespec='seconds'),
-                                   model=zg.UNET,
+                        rec = dict(meta, image=str(path), prompt=prompt, seed=this_seed, width=real_w,
+                                   height=real_h, created=datetime.now().isoformat(timespec='seconds'),
+                                   model=(profile or zg.DEFAULT_MODEL),
+                                   unet=zg.MODELS.get(profile or zg.DEFAULT_MODEL, {}).get('unet'),
                                    index=(run_i + k + 1) if total > 1 else None,
                                    of=total if total > 1 else None)
                         path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
@@ -505,7 +533,16 @@ class App:
         self._raw = None
         self._tips = []                   # populated as widgets appear, not in one later pass
         self._poll_id = None
+        self.ui_events = queue.Queue()    # results from worker threads (the prompt enhancer)
         self._settings = load_settings()
+        self._adv_shown = bool(self._settings.get('advanced') or False)
+        self._base_img = None
+        self._split = 0.5
+        self._runs = []
+        self._favorites = set(self._settings.get('favorites') or [])
+        self.search_var = tk.StringVar(value='')
+        self.starred_only = tk.BooleanVar(value=False)
+        self.run_started_at = None
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -522,7 +559,8 @@ class App:
             root.state('zoomed')   # fill the screen: prompt left, picture right
         except Exception:
             root.geometry('1180x720')
-        root.minsize(760, 480)
+        # gallery + prompt column + picture: 760 was a lie, the controls clipped below about 1020
+        root.minsize(1080, 680)
         root.columnconfigure(0, weight=0, minsize=210)
         root.columnconfigure(1, weight=0, minsize=420)
         root.columnconfigure(2, weight=1)
@@ -536,9 +574,15 @@ class App:
         gal.columnconfigure(0, weight=1)
         self.gal_title = ttk.Label(gal, text='Recent (%d)' % RECENT_N)
         self.gal_title.grid(row=0, column=0, columnspan=2, sticky='w')
+        self.search_box = ttk.Entry(gal, textvariable=self.search_var, width=16)
+        self.search_box.grid(row=1, column=0, sticky='ew', pady=(3, 0))
+        self.search_box.bind('<KeyRelease>', lambda e: self.refresh_gallery())
+        self.starred_chk = ttk.Checkbutton(gal, text='\u2605 only', variable=self.starred_only,
+                                           command=self.refresh_gallery)
+        self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = ttk.Frame(gal)
-        holder.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        holder.grid(row=2, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
         # width the canvas to the grid, or tk's default width clips the last column
@@ -568,7 +612,7 @@ class App:
         self._anchor = None               # shift-click range starts here
 
         btns = ttk.Frame(gal)
-        btns.grid(row=2, column=0, columnspan=2, sticky='ew')
+        btns.grid(row=3, column=0, columnspan=2, sticky='ew')
         self.more_btn = ttk.Button(btns, text='More…', command=self.open_all)
         self.more_btn.pack(fill='x')
         self.clear_base_btn = ttk.Button(btns, text='Clear base', command=self.clear_base)
@@ -584,11 +628,16 @@ class App:
         self.sel_all_btn.pack(side='left', fill='x', expand=True)
         self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
         self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.star_btn = ttk.Button(btns, text='\u2605 Star', command=self.toggle_star)
+        self.star_btn.pack(fill='x', pady=(6, 0))
+        self.log_btn = ttk.Button(btns, text='Run log', command=self.show_run_log)
+        self.log_btn.pack(fill='x', pady=(3, 0))
+
         self.sel_label = ttk.Label(btns, text='', foreground='#2a6df4')
         self.sel_label.pack(anchor='w', pady=(3, 0))
         ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
                   foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
-        gal.rowconfigure(1, weight=1)
+        gal.rowconfigure(2, weight=1)
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
         left.grid(row=0, column=1, sticky='nsew')
@@ -596,7 +645,8 @@ class App:
         left.rowconfigure(1, weight=1)
 
         ttk.Label(left, text='Prompt  (Enter generates · Shift+Enter adds a line)').grid(row=0, column=0, sticky='w')
-        self.text = tk.Text(left, wrap='word', width=48, height=18, undo=True, font=('Segoe UI', 10))
+        # a tall minimum height here pushes the rows below it off the bottom of the window once Advanced opens
+        self.text = tk.Text(left, wrap='word', width=48, height=7, undo=True, font=('Segoe UI', 10))
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
@@ -646,6 +696,16 @@ class App:
         self.seed_rnd = ttk.Button(seedbox, text='Rnd', width=4, command=self.random_seed)
         self.seed_rnd.pack(side='left', padx=(4, 0))
 
+        stylerow = ttk.Frame(row)
+        stylerow.grid(row=3, column=0, columnspan=5, sticky='w', pady=(6, 0))
+        ttk.Label(stylerow, text='style').pack(side='left', padx=(0, 4))
+        self.style_var = tk.StringVar(value=self._settings.get('style') or 'none')
+        self.style_cb = ttk.Combobox(stylerow, textvariable=self.style_var, width=12, state='readonly',
+                                     values=list(STYLES))
+        self.style_cb.pack(side='left')
+        self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
+        self.adv_btn.pack(side='left', padx=(12, 0))
+
         self.base_row = ttk.Frame(left)
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
         ttk.Label(self.base_row, text='base:').pack(side='left')
@@ -660,20 +720,32 @@ class App:
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
-        guide_row = ttk.Frame(left)
-        guide_row.grid(row=9, column=0, sticky='ew', pady=(4, 0))
-        ttk.Label(guide_row, text='steps').pack(side='left')
+        self.advanced = ttk.Frame(left)
+        self.advanced.grid(row=9, column=0, sticky='ew', pady=(4, 0))
+        adv1 = ttk.Frame(self.advanced)
+        adv1.pack(fill='x')
+        ttk.Label(adv1, text='model').pack(side='left')
+        self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
+        self.model_cb = ttk.Combobox(adv1, textvariable=self.model_var, width=15, state='readonly',
+                                     values=list(zg.MODELS))
+        self.model_cb.pack(side='left', padx=(4, 10))
+        ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
-        self.steps_cb = ttk.Combobox(guide_row, textvariable=self.steps_var, width=4, state='readonly',
+        self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
                                      values=['2', '4', '6', '8', '12'])
         self.steps_cb.pack(side='left', padx=4)
-        ttk.Label(guide_row, text='sampler').pack(side='left', padx=(12, 4))
+        ttk.Label(adv1, text='sampler').pack(side='left', padx=(12, 4))
         self.sampler_var = tk.StringVar(value=self._settings.get('sampler') or 'euler')
-        self.sampler_cb = ttk.Combobox(guide_row, textvariable=self.sampler_var, width=15, state='readonly',
+        self.sampler_cb = ttk.Combobox(adv1, textvariable=self.sampler_var, width=15, state='readonly',
                                        values=['euler', 'euler_ancestral'])
         self.sampler_cb.pack(side='left')
-        ttk.Label(guide_row, text='turbo is 4 steps, euler',
-                  foreground='#777').pack(side='left', padx=(8, 0))
+        adv2 = ttk.Frame(self.advanced)
+        adv2.pack(fill='x', pady=(4, 0))
+        ttk.Label(adv2, text='negative').pack(side='left', anchor='n')
+        self.negative = tk.Text(adv2, height=2, width=42, wrap='word', font=('Segoe UI', 9))
+        self.negative.pack(side='left', padx=(4, 0), fill='x', expand=True)
+        if not (self._settings.get('advanced') or False):
+            self.advanced.grid_remove()
 
         # ---- middle: progress (sits under the button, above the status line)
         # the banner answers the only question that matters before pressing Enter
@@ -722,6 +794,29 @@ class App:
         self.info_btn.pack(side='left', padx=(6, 0))
         self.copy_status = ttk.Label(tools, text='', foreground='#555')
         self.copy_status.pack(side='left', padx=(8, 0))
+        # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
+        self.actions = ttk.Frame(right)
+        self.actions.grid(row=2, column=0, sticky='ew', pady=(6, 0))
+        act1 = ttk.Frame(self.actions)
+        act1.pack(fill='x')
+        self.vary_btn = ttk.Button(act1, text='Vary', command=lambda: self.vary('vary'), state='disabled')
+        self.vary_btn.pack(side='left')
+        self.vary_soft_btn = ttk.Button(act1, text='Subtle', state='disabled',
+                                        command=lambda: self.vary('subtle'))
+        self.vary_soft_btn.pack(side='left', padx=(4, 0))
+        self.upscale_btn = ttk.Button(act1, text='\u00d72', command=self.upscale, state='disabled')
+        self.upscale_btn.pack(side='left', padx=(4, 0))
+        act2 = ttk.Frame(self.actions)
+        act2.pack(fill='x', pady=(4, 0))
+        self.inpaint_btn = ttk.Button(act2, text='Inpaint', command=self.inpaint_dialog, state='disabled')
+        self.inpaint_btn.pack(side='left')
+        self.outpaint_btn = ttk.Button(act2, text='Outpaint', command=self.outpaint_dialog,
+                                       state='disabled')
+        self.outpaint_btn.pack(side='left', padx=(4, 0))
+        self.compare_var = tk.BooleanVar(value=False)
+        self.compare_chk = ttk.Checkbutton(act2, text='compare', variable=self.compare_var, command=self._redraw)
+        self.compare_chk.pack(side='left', padx=(8, 0))
+
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
 
@@ -739,6 +834,10 @@ class App:
         self._update_banner()
 
         self.refresh_gallery()
+        root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
+        self.canvas.bind('<B1-Motion>', self._on_compare_drag)
+        self.style_var.trace_add('write', lambda *a: self._update_banner())
+        self.model_var.trace_add('write', lambda *a: self._update_banner())
         for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
@@ -767,9 +866,21 @@ class App:
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in files)]
+        needle = self.search_var.get().strip().lower()
+        if needle:
+            files = [f for f in files if needle in f.name.lower()]
+        if self.starred_only.get():
+            files = [f for f in files if f.name in self._favorites]
+        # favourites float to the top of the strip, then newest first
+        files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
+        self._files = files
         recent = files[:RECENT_N]
-        self.gal_title.configure(text=('Recent (%d)' % len(recent)) if len(files) <= RECENT_N
-                                 else ('Recent (%d of %d)' % (RECENT_N, len(files))))
+        label = 'Recent (%d)' % len(recent) if len(files) <= RECENT_N else 'Recent (%d of %d)' % (RECENT_N, len(files))
+        if self._favorites:
+            label += '  \u00b7  %d \u2605' % len(self._favorites)
+        if needle:
+            label += '  \u00b7  \u201c%s\u201d' % self.search_var.get().strip()
+        self.gal_title.configure(text=label)
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
@@ -838,6 +949,265 @@ class App:
         if self.selected:
             self.select_file(self.selected[-1])
         return 'break'
+
+    # -- the new actions -----------------------------------------------------
+    def toggle_advanced(self):
+        self._adv_shown = not self._adv_shown
+        if self._adv_shown:
+            self.advanced.grid()
+            self.adv_btn.configure(text='Advanced \u25be')
+        else:
+            self.advanced.grid_remove()
+            self.adv_btn.configure(text='Advanced \u25b8')
+
+    def _meta_of_current(self):
+        return (read_meta(self._current) if self._current else None) or {}
+
+    def vary(self, mode):
+        """Re-run this picture's prompt. 'vary' moves the seed; 'subtle' re-samples the picture itself at 0.35."""
+        meta = self._meta_of_current()
+        prompt = (meta.get('prompt') or '').strip()
+        if not prompt or self._current is None:
+            self.hint.configure(text='vary needs an image with its prompt recorded')
+            return
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', prompt)
+        if meta.get('style'):
+            self.style_var.set(meta['style'])
+        if meta.get('negative'):
+            self.negative.delete('1.0', 'end')
+            self.negative.insert('1.0', meta['negative'])
+        if meta.get('seed') is not None:
+            self.seed.set(str(meta['seed']))
+        if mode == 'subtle':
+            self._set_base(self._current)
+            self.denoise.set(0.35)
+            self.hint.configure(text='subtle variation: re-sampling %s at strength 0.35'
+                                     % self._short_name(Path(self._current).name))
+            self.generate()
+        else:
+            self.clear_base()
+            self.bump_seed(1)
+            self.hint.configure(text='variation: same prompt, seed %s' % self.seed.get())
+            self.generate()
+
+    def upscale(self):
+        """Regenerate at double size. This is not super-resolution: there is no upscaler model here, so the picture is
+        drawn again at 2x with the same prompt and seed, which keeps the composition at the model's own resolution."""
+        meta = self._meta_of_current()
+        if self._current is None or not (meta.get('prompt') or '').strip():
+            self.hint.configure(text='regen needs an image with its prompt recorded')
+            return
+        try:
+            w, h = Image.open(self._current).size
+        except Exception:
+            self.hint.configure(text='cannot read the size of %s' % Path(self._current).name)
+            return
+        target = min(1024, max(w, h) * 2)
+        self.size_var.set(str(target))
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', meta['prompt'])
+        if meta.get('seed') is not None:
+            self.seed.set(str(meta['seed']))
+        self.clear_base()
+        self.hint.configure(text='regen at %d px from the same prompt and seed (not a super-resolution pass)' % target)
+        self.generate()
+
+    def paste_base(self):
+        """Ctrl+V: take an image off the clipboard and use it as the base."""
+        from PIL import ImageGrab
+        try:
+            got = ImageGrab.grabclipboard()
+        except Exception as e:
+            self.hint.configure(text='clipboard unavailable: %s' % type(e).__name__)
+            return
+        if got is None:
+            self.hint.configure(text='no image on the clipboard')
+            return
+        if isinstance(got, list):
+            got = Image.open(got[0])
+        out = Path(self.args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / ('pasted-%s.png' % datetime.now().strftime('%Y%m%d-%H%M%S'))
+        got.convert('RGB').save(path)
+        path.with_suffix('.json').write_text(json.dumps(
+            {'prompt': '', 'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
+             'width': got.size[0], 'height': got.size[1]}), encoding='utf-8')
+        self.refresh_gallery()
+        self.select_file(path)
+        self.hint.configure(text='pasted %dx%d from the clipboard as the base' % got.size)
+
+    def inpaint_dialog(self):
+        """Pick a rectangle to regenerate. The rest of the picture is preserved by VAEEncodeForInpaint."""
+        if self._current is None:
+            return
+        src = Image.open(self._current).convert('RGB')
+        win = tk.Toplevel(self.root)
+        win.title('Inpaint - drag a box over what should change')
+        side = 520
+        view = src.copy()
+        view.thumbnail((side, side), Image.LANCZOS)
+        scale = view.width / src.width
+        photo = ImageTk.PhotoImage(view)
+        cv = tk.Canvas(win, width=view.width, height=view.height, highlightthickness=0)
+        cv.pack(padx=8, pady=8)
+        cv.create_image(0, 0, anchor='nw', image=photo)
+        cv.image = photo
+        state = {'start': None, 'rect': None}
+
+        def press(e):
+            state['start'] = (e.x, e.y)
+            if state['rect']:
+                cv.delete(state['rect'])
+            state['rect'] = cv.create_rectangle(e.x, e.y, e.x, e.y, outline='#2a6df4', width=2)
+
+        def drag(e):
+            if state['start'] and state['rect']:
+                cv.coords(state['rect'], state['start'][0], state['start'][1], e.x, e.y)
+
+        def ok():
+            if not state['start']:
+                win.destroy(); return
+            x0, y0, x1, y1 = cv.coords(state['rect'])
+            box = [int(min(x0, x1) / scale), int(min(y0, y1) / scale),
+                   int(max(x0, x1) / scale), int(max(y0, y1) / scale)]
+            if box[2] - box[0] < 8 or box[3] - box[1] < 8:
+                win.destroy(); return
+            mask = Image.new('L', src.size, 0)
+            ImageDraw.Draw(mask).rectangle(box, fill=255)
+            masks = Path(self.args.out) / '.masks'
+            masks.mkdir(parents=True, exist_ok=True)
+            out = masks / (Path(self._current).stem + '-mask.png')
+            mask.save(out)
+            win.destroy()
+            self._set_base(self._current)
+            self.hint.configure(text='inpainting %s - the boxed area is regenerated' % self._short_name(Path(self._current).name))
+            self._generate_with(mask_path=out, denoise=1.0)
+
+        cv.bind('<Button-1>', press)
+        cv.bind('<B1-Motion>', drag)
+        ttk.Button(win, text='Inpaint this area', command=ok).pack(pady=(0, 8))
+
+    def outpaint_dialog(self):
+        """Extend the picture in one direction by padding it, then regenerating the padded band."""
+        if self._current is None:
+            return
+        win = tk.Toplevel(self.root)
+        win.title('Outpaint - extend the picture')
+        vars_ = {k: tk.IntVar(value=0) for k in ('left', 'top', 'right', 'bottom')}
+        for i, (k, v) in enumerate(vars_.items()):
+            ttk.Label(win, text=k).grid(row=0, column=i * 2, padx=(8, 4), pady=8)
+            ttk.Spinbox(win, from_=0, to=512, increment=64, width=6, textvariable=v).grid(row=0, column=i * 2 + 1)
+
+        def ok():
+            pads = tuple(vars_[k].get() for k in ('left', 'top', 'right', 'bottom'))
+            if not any(pads):
+                win.destroy(); return
+            win.destroy()
+            self._set_base(self._current)
+            self.hint.configure(text='outpainting %s by %s px' % (self._short_name(Path(self._current).name), pads))
+            self._generate_with(outpaint=pads, denoise=1.0)
+
+        ttk.Button(win, text='Extend', command=ok).grid(row=1, column=0, columnspan=8, pady=(0, 8))
+
+    def _generate_with(self, mask_path=None, outpaint=None, denoise=None):
+        """One-shot generation outside the normal controls: an inpaint or outpaint of the current picture."""
+        if self.busy:
+            self.hint.configure(text='already generating')
+            return
+        prompt = self.text.get('1.0', 'end').strip()
+        if not prompt:
+            self.hint.configure(text='describe what should be there, then try again')
+            return
+        try:
+            size = int(self.size_var.get())
+        except ValueError:
+            size = self.args.size
+        try:
+            seed = int(self.seed.get())
+        except ValueError:
+            seed = self.args.seed
+        style = self.style_var.get()
+        suffix = STYLES.get(style, '')
+        full = (prompt + ', ' + suffix) if suffix else prompt
+        model = self.model_var.get()
+        self.busy = True
+        self.gen_btn.state(['disabled'])
+        self.ticks.configure(text='')
+        self.bar.configure(value=0.0); self.bar.grid()
+        self.status.configure(text='inpainting' if mask_path else 'outpainting')
+        self.engine.generate(full, size, size, int(self.steps_var.get()),
+                             zg.MODELS.get(model, {}).get('cfg', 1.0), seed, self.args.out,
+                             base_path=str(self.base_path), denoise=(denoise or 1.0), batch=1, sequential=True,
+                             sampler=self.sampler_var.get(),
+                             negative=self.negative.get('1.0', 'end').strip(),
+                             profile=model, mask_path=(str(mask_path) if mask_path else None),
+                             outpaint=outpaint, style=style)
+
+    def toggle_star(self):
+        names = [Path(p).name for p in self.selected]
+        if not names:
+            self.hint.configure(text='select a tile first')
+            return
+        if all(n in self._favorites for n in names):
+            self._favorites.difference_update(names)
+            self.status.configure(text='unstarred %d image%s' % (len(names), '' if len(names) == 1 else 's'))
+        else:
+            self._favorites.update(names)
+            self.status.configure(text='starred %d image%s' % (len(names), '' if len(names) == 1 else 's'))
+        self._persist()
+        self.refresh_gallery()
+
+    def _run_recorded(self, path):
+        wall = time.time() - self.run_started_at if self.run_started_at else 0
+        self._runs.append({'time': datetime.now().strftime('%H:%M:%S'), 'file': Path(path).name,
+                           'seed': self.seed.get(), 'model': self.model_var.get(),
+                           'style': self.style_var.get(), 'wall': self._short_time(wall)})
+
+    def show_run_log(self):
+        win = tk.Toplevel(self.root)
+        win.title('Run log - this session')
+        win.geometry('760x320')
+        cols = ('time', 'file', 'seed', 'model', 'style', 'wall')
+        tree = ttk.Treeview(win, columns=cols, show='headings', height=12)
+        for c, w in (('time', 90), ('file', 300), ('seed', 80), ('model', 110), ('style', 80), ('wall', 60)):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor='w')
+        for r in reversed(self._runs):
+            tree.insert('', 'end', values=(r['time'], r['file'], r['seed'], r['model'], r['style'], r['wall']))
+        tree.pack(fill='both', expand=True, padx=8, pady=8)
+        if not self._runs:
+            ttk.Label(win, text='nothing generated yet this session').pack(anchor='w', padx=10)
+
+    def enhance_prompt(self):
+        """Rewrite the prompt with a local OpenAI-compatible LLM. Off-machine URLs are refused."""
+        url = (self._settings.get('llm_url') or 'http://127.0.0.1:8080/v1').rstrip('/')
+        host = urllib.parse.urlparse(url).hostname or ''
+        if host not in ('127.0.0.1', 'localhost', '::1'):
+            self.hint.configure(text='enhance is local-only: llm_url points at %s' % host)
+            return
+        draft = self.text.get('1.0', 'end').strip()
+        if not draft:
+            self.hint.configure(text='type a draft first, then enhance')
+            return
+
+        def work():
+            body = json.dumps({'model': 'local', 'temperature': 0.7, 'max_tokens': 160,
+                               'messages': [
+                                   {'role': 'system', 'content': 'Rewrite the user image prompt into one vivid, '
+                                                                 'concrete paragraph under 60 words. Reply with the '
+                                                                 'prompt only.'},
+                                   {'role': 'user', 'content': draft}]}).encode('utf-8')
+            try:
+                req = urllib.request.Request(url + '/chat/completions', data=body,
+                                             headers={'Content-Type': 'application/json'})
+                raw = json.loads(urllib.request.urlopen(req, timeout=60).read())
+                self.ui_events.put(('enhanced', raw['choices'][0]['message']['content'].strip()))
+            except Exception as e:
+                self.ui_events.put(('enhance_failed', '%s: %s' % (type(e).__name__, e)))
+
+        self.hint.configure(text='enhancing with %s\u2026' % url)
+        threading.Thread(target=work, daemon=True).start()
 
     def retry(self):
         """Try the last request again after a transport failure."""
@@ -1107,6 +1477,7 @@ class App:
 
     def open_all(self):
         """Full-screen browser: every image, scrolling, thumbnails cached on disk."""
+        self.refresh_gallery()
         files = self._all_files()
         if not files:
             self.hint.configure(text='no images yet')
@@ -1168,6 +1539,8 @@ class App:
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
         self.info_btn.state(['!disabled'] if self._current else ['disabled'])
+        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.inpaint_btn, self.outpaint_btn):
+            b.state(['!disabled' if self._current else 'disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
         self.canvas.delete('placeholder')
@@ -1361,16 +1734,21 @@ class App:
             colour = '#2a6df4'
         n = self._batch()
         what = 'one image' if n == 1 else '%d tiles' % n
-        self.banner.configure(text='%s   ·   %s steps · %s · %s px · %s   ·   seed %s'
-                                   % (mode, self.steps_var.get(), self.sampler_var.get(), self.size_var.get(),
-                                      what, self.seed.get()),
+        style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
+        model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
+        self.banner.configure(text='%s   ·   %s · %s steps · %s · %s px · %s   ·   '
+                                   'style %s   ·   seed %s'
+                                   % (mode, model, self.steps_var.get(), self.sampler_var.get(),
+                                      self.size_var.get(), what, style, self.seed.get()),
                               foreground=colour)
 
     # -- persistence, starters, prompt history -------------------------------
     def _persist(self):
         self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
-                          'history': self._history[-20:]}
+                          'history': self._history[-20:], 'style': self.style_var.get(),
+                          'model': self.model_var.get(), 'advanced': self._adv_shown,
+                          'favorites': sorted(self._favorites)}
         return save_settings(self._settings)
 
     def use_starter(self, prompt):
@@ -1502,10 +1880,17 @@ class App:
             steps = int(self.steps_var.get())
         except (AttributeError, ValueError):
             steps = self.args.steps
-        self.engine.generate(prompt, size, size, steps, 1.0,
+        style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
+        suffix = STYLES.get(style, '')
+        full_prompt = (prompt + ', ' + suffix) if suffix else prompt
+        model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
+        cfg = zg.MODELS.get(model, {}).get('cfg', 1.0)
+        negative = self.negative.get('1.0', 'end').strip() if hasattr(self, 'negative') else ''
+        self.run_started_at = time.time()
+        self.engine.generate(full_prompt, size, size, steps, cfg,
                              seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
-                             sampler=self.sampler_var.get())
+                             sampler=self.sampler_var.get(), negative=negative, profile=model, style=style)
 
     def _poll(self):
         if not self.root.winfo_exists():     # the window is gone: stop rescheduling
@@ -1516,6 +1901,17 @@ class App:
             except Exception:
                 pass
             self._poll_id = None
+        try:
+            while True:
+                kind, payload = self.ui_events.get_nowait()
+                if kind == 'enhanced':
+                    self.text.delete('1.0', 'end')
+                    self.text.insert('1.0', payload)
+                    self.hint.configure(text='prompt rewritten by the local model')
+                elif kind == 'enhance_failed':
+                    self.hint.configure(text='enhance failed: %s' % payload)
+        except queue.Empty:
+            pass
         try:
             while True:
                 kind, payload = self.engine.events.get_nowait()
@@ -1583,6 +1979,7 @@ class App:
                         note = 'next seed %s' % self.seed.get()
                     self.hint.configure(text='saved; %s; %s' % (base_note, note))
                     self._current = Path(path)
+                    self._run_recorded(path)
                     self.copy_btn.state(['!disabled'])
                 elif kind == 'error':
                     self.busy = False
@@ -1628,6 +2025,41 @@ class App:
         cx, cy = self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2
         self._draw = (cx - im.width // 2, cy - im.height // 2, im.width, im.height)
         self.canvas.create_image(cx, cy, image=self._tk, tags='img')
+        self._draw_compare(im)
+
+    def _draw_compare(self, result):
+        """Draw the base image to the left of a movable split, so strength stops being a blind dial."""
+        self.canvas.delete('compare')
+        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not self.base_path:
+            return
+        try:
+            if self._base_img is None or getattr(self, '_base_for', None) != str(self.base_path):
+                self._base_img = Image.open(self.base_path).convert('RGB')
+                self._base_for = str(self.base_path)
+            base = self._base_img.copy()
+            base.thumbnail((result.width, result.height), Image.LANCZOS)
+        except Exception:
+            return
+        if base.size != result.size:
+            base = base.resize(result.size, Image.LANCZOS)
+        cut = int(base.width * self._split)
+        strip = base.crop((0, 0, cut, base.height))
+        self._tk_cmp = ImageTk.PhotoImage(strip)
+        x0, y0, w, h = self._draw
+        self.canvas.create_image(x0, y0, anchor='nw', image=self._tk_cmp, tags='compare')
+        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#2a6df4', width=2, tags='compare')
+        self.canvas.create_text(x0 + 8, y0 + 8, anchor='nw', text='base', fill='#2a6df4', tags='compare')
+        self.canvas.create_text(x0 + w - 8, y0 + 8, anchor='ne', text='result', fill='#2a6df4', tags='compare')
+
+    def _on_compare_drag(self, event):
+        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not self._draw:
+            return None
+        x0, y0, w, h = self._draw
+        if not (x0 <= event.x <= x0 + w):
+            return None
+        self._split = max(0.02, min(0.98, (event.x - x0) / float(w)))
+        self._redraw()
+        return 'break'
 
     def _on_destroy(self, event=None):
         """Cancel the poll loop however the window goes away, not just via the close button."""
