@@ -164,6 +164,9 @@ and the worker stops waiting. Measured response 0.2 s; the server stays up, and 
 sequential N-up keeps the tiles it already wrote (the status line says how many), so stopping mid-grid is not a total
 loss.
 
+The **seed** field has minus / plus buttons and a **Rnd** button (0-999,999,999); the buttons clamp at 0 and fall back to
+the default seed if the box holds something non-numeric.
+
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **seed+1 per tile** (an
 N-up runs one image at a time with successive seeds so each tile is individually reproducible; unticked asks for one

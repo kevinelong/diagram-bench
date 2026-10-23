@@ -25,6 +25,7 @@ import json
 import math
 import os
 import queue
+import random
 import socket
 import struct
 import subprocess
@@ -484,9 +485,14 @@ class App:
         self.seq_var = tk.BooleanVar(value=False)      # batch by default: one queue, one model load
         ttk.Checkbutton(row, text='seed+1 per tile', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
                                                                                 sticky='w', pady=(4, 0))
-        ttk.Label(row, text='seed').grid(row=0, column=5, padx=(10, 4))
+        seedbox = ttk.Frame(row)
+        seedbox.grid(row=1, column=3, sticky='w', pady=(4, 0))
+        ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
         self.seed = tk.StringVar(value=str(args.seed))
-        ttk.Entry(row, textvariable=self.seed, width=10).grid(row=0, column=6, sticky='w')
+        ttk.Entry(seedbox, textvariable=self.seed, width=10).pack(side='left')
+        ttk.Button(seedbox, text='\u2212', width=2, command=lambda: self.bump_seed(-1)).pack(side='left', padx=(3, 0))
+        ttk.Button(seedbox, text='+', width=2, command=lambda: self.bump_seed(1)).pack(side='left', padx=(2, 0))
+        ttk.Button(seedbox, text='Rnd', width=4, command=self.random_seed).pack(side='left', padx=(4, 0))
 
         self.base_row = ttk.Frame(left)
         self.base_row.grid(row=6, column=0, sticky='ew', pady=(8, 0))
@@ -773,6 +779,16 @@ class App:
         self.status.configure(text='stopping…')
         self.stop_btn.state(['disabled'])
         print('ui: %s' % self.engine.cancel())
+
+    def bump_seed(self, delta):
+        try:
+            v = int(self.seed.get())
+        except ValueError:
+            v = self.args.seed
+        self.seed.set(str(max(0, v + delta)))
+
+    def random_seed(self):
+        self.seed.set(str(random.randint(0, 999_999_999)))
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
