@@ -163,6 +163,9 @@ def copy_png_to_clipboard(path):
 
 THUMB_DIR = '.thumbs'
 THUMB_PX = 168
+RECENT_N = 20        # thumbnails in the sidebar strip (4 columns x 5 rows)
+RECENT_COLS = 4
+RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 
 
 def thumb_for(png, cache_root=None):
@@ -435,16 +438,33 @@ class App:
         root.rowconfigure(0, weight=1)
 
         # ---- left: prompt + controls
-        # ---- far left: the 12 most recent images as thumbnails
+        # ---- far left: the most recent images as thumbnails
+        plate = ttk.Style().lookup('TFrame', 'background') or '#f0f0f0'
         gal = ttk.Frame(root, padding=(10, 10, 4, 10))
         gal.grid(row=0, column=0, sticky='nsew')
         gal.columnconfigure(0, weight=1)
-        ttk.Label(gal, text='Recent (12)').grid(row=0, column=0, columnspan=3, sticky='w')
-        self.recent = ttk.Frame(gal)
-        self.recent.grid(row=1, column=0, columnspan=3, sticky='nsew', pady=(4, 6))
-        for c in range(3):
+        self.gal_title = ttk.Label(gal, text='Recent (%d)' % RECENT_N)
+        self.gal_title.grid(row=0, column=0, columnspan=2, sticky='w')
+        # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
+        holder = ttk.Frame(gal)
+        holder.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        holder.columnconfigure(0, weight=1)
+        holder.rowconfigure(0, weight=1)
+        # width the canvas to the grid, or tk's default width clips the last column
+        self.gal_canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0, background=plate,
+                                    width=RECENT_COLS * (RECENT_PX + 8))
+        self.gal_canvas.grid(row=0, column=0, sticky='nsew')
+        self.gal_bar = ttk.Scrollbar(holder, orient='vertical', command=self.gal_canvas.yview)
+        self.gal_bar.grid(row=0, column=1, sticky='ns')
+        self.gal_canvas.configure(yscrollcommand=self.gal_bar.set)
+        self.recent = ttk.Frame(self.gal_canvas)
+        self._gal_item = self.gal_canvas.create_window((0, 0), window=self.recent, anchor='nw')
+        self.recent.bind('<Configure>', self._on_strip_resize)
+        self.gal_canvas.bind('<Configure>', self._on_strip_resize)
+        self.gal_canvas.bind('<MouseWheel>', self._on_gallery_wheel)
+        self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
+        for c in range(RECENT_COLS):
             self.recent.columnconfigure(c, weight=0)
-        self.recent_rows = 4
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
         self._all_widgets = {}            # same, for the "More..." window
@@ -452,7 +472,7 @@ class App:
         self._anchor = None               # shift-click range starts here
 
         btns = ttk.Frame(gal)
-        btns.grid(row=2, column=0, columnspan=3, sticky='ew')
+        btns.grid(row=2, column=0, columnspan=2, sticky='ew')
         ttk.Button(btns, text='More…', command=self.open_all).pack(fill='x')
         ttk.Button(btns, text='Clear base', command=self.clear_base).pack(fill='x', pady=(3, 0))
         ttk.Button(btns, text='Refresh', command=self.refresh_gallery).pack(fill='x', pady=(3, 0))
@@ -594,7 +614,9 @@ class App:
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in files)]
-        recent = files[:12]
+        recent = files[:RECENT_N]
+        self.gal_title.configure(text=('Recent (%d)' % len(recent)) if len(files) <= RECENT_N
+                                 else ('Recent (%d of %d)' % (RECENT_N, len(files))))
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
@@ -605,14 +627,35 @@ class App:
                 continue
             try:
                 from PIL import ImageTk
-                ph = ImageTk.PhotoImage(Image.open(tp))
+                im = Image.open(tp)
+                im.thumbnail((RECENT_PX, RECENT_PX), Image.LANCZOS)
+                ph = ImageTk.PhotoImage(im)
             except Exception:
                 continue
             self._thumbs[p] = ph
             lab = self._tile_widget(self.recent, p, ph)
-            lab.grid(row=i // 3, column=i % 3, padx=2, pady=2)
+            lab.grid(row=i // RECENT_COLS, column=i % RECENT_COLS, padx=1, pady=1)
+            lab.bind('<MouseWheel>', self._on_gallery_wheel)
             self._tile_widgets[Path(p)] = lab
         self._paint()
+
+    def _on_strip_resize(self, event=None):
+        """Keep the scroll region current and show the scrollbar only when the strip overflows."""
+        box = self.gal_canvas.bbox('all')
+        if box:
+            self.gal_canvas.configure(scrollregion=box)
+        self.gal_canvas.itemconfigure(self._gal_item, width=self.gal_canvas.winfo_width())
+        content_h = (box[3] - box[1]) if box else 0
+        need = content_h > self.gal_canvas.winfo_height() + 1
+        if need:
+            self.gal_bar.grid()
+        else:
+            self.gal_bar.grid_remove()
+            self.gal_canvas.yview_moveto(0)
+
+    def _on_gallery_wheel(self, event):
+        self.gal_canvas.yview_scroll(int(-event.delta / 120), 'units')
+        return 'break'
 
     # -- gallery: selection --------------------------------------------------
     def _click_order(self):
@@ -680,7 +723,7 @@ class App:
         if self._all_widgets:
             pool = [p for p in self._click_order() if p in self._all_widgets]
         else:
-            pool = [p for p in self._files[:12] if p in self._tile_widgets]
+            pool = [p for p in self._files[:RECENT_N] if p in self._tile_widgets]
         if pool and len(self.selected) == len(pool) and all(p in self.selected for p in pool):
             self.selected = []
         else:

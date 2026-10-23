@@ -109,7 +109,7 @@ def main():
         SHOTS.mkdir(parents=True, exist_ok=True)
 
     tmp = Path(tempfile.mkdtemp(prefix='gal-test-'))
-    files = make_gallery(tmp)
+    files = make_gallery(tmp, 26)   # more than the strip holds, so the cap is exercised
     root = tk.Tk()
     try:
         ttk.Style().theme_use('vista')
@@ -122,8 +122,11 @@ def main():
     shot(root, '01-start')
 
     print('\n-- gallery contents')
-    check('gallery shows 12 of 14 files', len(app._tile_widgets) == 12, str(len(app._tile_widgets)))
-    check('all 14 known to the app', len(app._files) == 14, str(len(app._files)))
+    check('gallery shows 20 of 26 files', len(app._tile_widgets) == 20, str(len(app._tile_widgets)))
+    check('all 26 known to the app', len(app._files) == 26, str(len(app._files)))
+    check('title reports the cap', app.gal_title['text'] == 'Recent (20 of 26)', app.gal_title['text'])
+    check('strip scrolls when it overflows', app.gal_canvas.bbox('all')[3] > 0,
+          str(app.gal_canvas.bbox('all')))
     newest = app._files[0]
     oldest = app._files[-1]
     check('newest file is first in the strip', newest in app._tile_widgets)
@@ -135,8 +138,8 @@ def main():
     check('one selected', len(app.selected) == 1, str(len(app.selected)))
     check('it is the clicked file', app.selected[0].name == newest.name)
     check('it became the base', app.base_path is not None and app.base_path.name == newest.name)
-    check('prompt restored from sidecar', 'prompt for image 13' in app.text.get('1.0', 'end'))
-    check('seed restored', app.seed.get() == '113', app.seed.get())
+    check('prompt restored from sidecar', 'prompt for image 25' in app.text.get('1.0', 'end'))
+    check('seed restored', app.seed.get() == '125', app.seed.get())
     check('display loaded', app._current is not None and app._current.name == newest.name)
     check('delete button enabled', str(app.del_btn['state']) == 'normal')
     check('label reports 1 selected', app.sel_label['text'] == '1 selected', app.sel_label['text'])
@@ -165,7 +168,7 @@ def main():
 
     print('\n-- select all toggles, Esc clears')
     app.select_all()
-    check('select all takes the whole strip (12)', len(app.selected) == 12, str(len(app.selected)))
+    check('select all takes the whole strip (20)', len(app.selected) == 20, str(len(app.selected)))
     shot(root, '05-select-all')
     app.select_all()
     check('pressing it again clears', app.selected == [])
@@ -210,7 +213,7 @@ def main():
     # the strip backfills from the remaining files, so count the targets' own thumbs, not the directory
     check('thumbnails gone', not any((tmp / '.thumbs' / (t.stem + '.jpg')).exists() for t in targets))
     check('selection emptied', app.selected == [])
-    check('gallery dropped to 12 files', len(app._files) == 12, str(len(app._files)))
+    check('gallery dropped to 24 files', len(app._files) == 24, str(len(app._files)))
     check('status reports the count', 'deleted 2' in app.status['text'], app.status['text'])
     shot(root, '06-after-delete')
 
