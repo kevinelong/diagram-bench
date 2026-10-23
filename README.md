@@ -348,10 +348,21 @@ Dropping nine words changed the palette 5.1x and the layout 1.17x, while full-re
 eight seeds under the long prompt are eight takes on one photograph; under three words the seed chooses the backdrop,
 frame type and accessories.
 
-Changing the checkpoint moves it further, same prompt and seeds: flux1 schnell 57.90/41.68/0.51 and flux1 dev
-70.23/58.63/0.61 against z-image's 40.79/23.70/0.23 - so flux dev gives roughly 2.7x the palette spread, less than the
-5.1x that loosening the prompt buys. Results, sheets and the seeds used are in `variety/`; the images themselves go to
-`%TEMP%\variety-images` because they are large. Re-run with:
+Changing the checkpoint moves it further, same prompt and seeds, all recorded in `variety/`:
+
+| condition | detail | composition | palette | s/image |
+|---|---|---|---|---|
+| z-image turbo, 4 steps, cfg 1.0 (`prompt-specificity/p01`) | 40.79 | 23.70 | 0.23 | 5.6 |
+| flux1 schnell, 4 steps, cfg 1.0 (`model-flux-schnell/p01`) | 57.90 | 41.68 | 0.51 | 14.2 |
+| flux1 dev, 20 steps, cfg 3.5 (`model-flux-dev/p01`) | 70.23 | 58.63 | 0.61 | 34.2 |
+
+Flux dev gives about 2.7x the palette spread - less than the 5.1x that loosening the prompt buys - at 6x the time:
+34.2 s per image against 5.6 s. An earlier version of this file quoted 1.3 s and 3.9 s per image for the flux runs;
+that was a bug in the throwaway script, which timed only the last image of each set. The figures above come from
+variety_probe.py, which times every image.
+
+Each folder holds `result.json` (seeds, settings, all four statistics) and the contact sheet; the images themselves go
+to `%TEMP%\variety-images` because they are large. Re-run with:
 
     python variety_probe.py --prompt "a red bicycle leaning against a weathered brick wall at golden sunset" \
                             --prompt "a red bicycle" --count 8 --out variety/prompt-specificity

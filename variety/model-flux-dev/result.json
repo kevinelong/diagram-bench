@@ -1,0 +1,55 @@
+{
+ "profile": "flux1 dev",
+ "steps": 20,
+ "cfg": 3.5,
+ "size": 512,
+ "seeds": [
+  1000,
+  1001,
+  1002,
+  1003,
+  1004,
+  1005,
+  1006,
+  1007
+ ],
+ "created": "2026-10-23T14:23:10",
+ "conditions": [
+  {
+   "slug": "p01",
+   "prompt": "a red bicycle leaning against a weathered brick wall at golden sunset",
+   "words": 12,
+   "seconds_per_image": 34.2,
+   "images": [
+    "20261023-142310_512x512_seed1000.png",
+    "20261023-142344_512x512_seed1001.png",
+    "20261023-142416_512x512_seed1002.png",
+    "20261023-142450_512x512_seed1003.png",
+    "20261023-142524_512x512_seed1004.png",
+    "20261023-142555_512x512_seed1005.png",
+    "20261023-142636_512x512_seed1006.png",
+    "20261023-142707_512x512_seed1007.png"
+   ],
+   "metrics": {
+    "detail": {
+     "mean": 70.23,
+     "min": 39.62,
+     "median": 69.44,
+     "max": 102.62
+    },
+    "composition": {
+     "mean": 58.63,
+     "min": 22.63,
+     "median": 57.61,
+     "max": 97.46
+    },
+    "palette": {
+     "mean": 0.61,
+     "min": 0.24,
+     "median": 0.59,
+     "max": 0.93
+    }
+   }
+  }
+ ]
+}
