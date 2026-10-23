@@ -509,7 +509,12 @@ def main():
     check('the style is recorded', kwd.get('style') == 'icon')
     check('the banner names the model and style', 'flux1 dev' in app.banner['text'] and 'style icon' in app.banner['text'],
           app.banner['text'])
-    app.style_var.set('none'); app.model_var.set('z-image turbo')
+    app.model_var.set('flux1 dev'); app._on_model_change(); root.update()
+    check('picking a model applies its step count', app.steps_var.get() == '20', app.steps_var.get())
+    check('and says so', 'steps at cfg 3.5' in app.hint['text'], app.hint['text'])
+    app.model_var.set('z-image turbo'); app._on_model_change()
+    check('switching back restores 4 steps', app.steps_var.get() == '4', app.steps_var.get())
+    app.style_var.set('none')
     app.negative.delete('1.0', 'end')
     app.busy = False
 

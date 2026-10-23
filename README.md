@@ -232,10 +232,11 @@ diagram, blueprint, watercolour, cinematic. The suffix applied is written into t
 |---|---|---|---|
 | z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |
 | flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
-| flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | 20 steps, cfg 3.5 by default |
+| flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
 
 The negative prompt is a real node input now (node 5 was hard-coded empty), and cfg follows the profile rather than
-being pinned at 1.0.
+being pinned at 1.0. Picking a model also applies that model's step count - flux dev at the z-image default of 4 steps
+would look broken, so the switch sets 20 and says so in the hint line.
 
 Under the picture, three verbs and two editors:
 

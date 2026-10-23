@@ -729,6 +729,7 @@ class App:
         self.model_cb = ttk.Combobox(adv1, textvariable=self.model_var, width=15, state='readonly',
                                      values=list(zg.MODELS))
         self.model_cb.pack(side='left', padx=(4, 10))
+        self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
@@ -951,6 +952,15 @@ class App:
         return 'break'
 
     # -- the new actions -----------------------------------------------------
+    def _on_model_change(self, event=None):
+        """A profile brings its own step count: flux dev at 4 steps would look broken."""
+        prof = zg.MODELS.get(self.model_var.get()) or {}
+        if prof.get('steps'):
+            self.steps_var.set(str(prof['steps']))
+        self._update_banner()
+        self.hint.configure(text='%s: %s steps at cfg %.1f'
+                                 % (self.model_var.get(), prof.get('steps', '?'), prof.get('cfg', 1.0)))
+
     def toggle_advanced(self):
         self._adv_shown = not self._adv_shown
         if self._adv_shown:
