@@ -220,10 +220,11 @@ def get(path, timeout=30):
     return json.loads(urllib.request.urlopen(HOST + path, timeout=timeout).read())
 
 
-def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0):
+def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1):
     """ComfyUI graph. With `base_image` (a name already uploaded to ComfyUI's input dir) the graph becomes img2img:
     LoadImage -> VAEEncode -> KSampler(denoise<1). Denoise 1.0 is text-to-image."""
     if base_image:
+        # a base image gives one latent; batch only multiplies noise on a fresh latent, so it is ignored here
         return {
             "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
             "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "lumina2"}},
@@ -245,7 +246,8 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
-        "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height,
+                                                             "batch_size": batch}},
         "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
                                                   "latent_image": ["6", 0], "seed": seed, "steps": steps, "cfg": cfg,
                                                   "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},

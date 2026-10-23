@@ -159,6 +159,10 @@ python zimage_ui.py                 # prompt box left, picture right, progress b
 close, but leaves a server it did not start alone. Enter generates, Shift+Enter adds a newline. Step progress comes from
 ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
 
+Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3)**. An N-up run asks
+ComfyUI for one batch, saves every tile separately, and composes the tiles into a single contact sheet which is what the
+window shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.
+
 Every image is saved with a **sidecar JSON** (`<same name>.json`) recording the prompt, seed, size, steps, cfg, model,
 and - for an edit - the **absolute path of the base image and the strength used**. Selecting a row in the gallery
 restores that prompt and seed into the boxes, and *Copy image* puts the PNG on the Windows clipboard.
