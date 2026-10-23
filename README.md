@@ -159,6 +159,11 @@ python zimage_ui.py                 # prompt box left, picture right, progress b
 close, but leaves a server it did not start alone. Enter generates, Shift+Enter adds a newline. Step progress comes from
 ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
 
+**Stop** halts a run so parameters can be changed without waiting: it POSTs ComfyUI's `/interrupt`, clears the queue,
+and the worker stops waiting. Measured response 0.2 s; the server stays up, and the next run works immediately. A
+sequential N-up keeps the tiles it already wrote (the status line says how many), so stopping mid-grid is not a total
+loss.
+
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **seed+1 per tile** (an
 N-up runs one image at a time with successive seeds so each tile is individually reproducible; unticked asks for one

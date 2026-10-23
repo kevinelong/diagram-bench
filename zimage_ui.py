@@ -171,6 +171,10 @@ def read_meta(png):
         return None
 
 
+class GenerationCancelled(Exception):
+    """Raised inside the worker when the user pressed Stop; the partial run is discarded."""
+
+
 class Engine:
     """Server lifecycle plus one-generation-at-a-time generation, all off the UI thread."""
 
@@ -182,6 +186,7 @@ class Engine:
         self.owned = False
         self.ready = False
         self.events = queue.Queue()
+        self._cancel = threading.Event()
         self._stop = threading.Event()
         self._ws = None
 
@@ -245,11 +250,23 @@ class Engine:
         self._ws.start()
         return client_id
 
+    def cancel(self):
+        """Halt the running generation: interrupt the sampler, drop anything queued, and stop the worker waiting."""
+        self._cancel.set()
+        for path, payload in (('/interrupt', {}), ('/queue', {'clear': True})):
+            try:
+                self._post(path, payload, timeout=15)
+            except Exception:
+                pass
+        return 'interrupt sent'
+
     def _queue_wait(self, wf):
         """Queue a workflow and wait for its images to appear in history. Returns a list of output image dicts."""
         pid = self._post('/prompt', {'prompt': wf})['prompt_id']
         started = time.monotonic()
         while time.monotonic() - started < 900:
+            if self._cancel.is_set():
+                raise GenerationCancelled()
             h = self._get('/history/' + pid, timeout=30)
             if pid in h:
                 entry = h[pid]
@@ -274,6 +291,8 @@ class Engine:
         and the VRAM peak stays that of a single image. sequential=False asks ComfyUI for one batch of N latents, which
         is fewer round trips but whose tiles are not reproducible from individual seeds.
         """
+        self._cancel.clear()
+
         def work():
             try:
                 out = Path(out_dir)          # not out_dir: assigning that would shadow the parameter
@@ -292,6 +311,8 @@ class Engine:
                 runs = range(total) if (sequential or base_name) else [0]
                 paths, raws = [], []
                 for run_i in runs:
+                    if self._cancel.is_set():
+                        raise GenerationCancelled()
                     this_seed = seed + run_i if (sequential and not base_name) else seed
                     if total > 1:
                         self.events.put(('status', 'tile %d of %d (seed %d)' % (run_i + 1, total, this_seed)))
@@ -323,6 +344,9 @@ class Engine:
                     return
                 sheet_path = self._compose_sheet(paths, out, stamp, prompt, seed, width, height, meta)
                 self.events.put(('image', (sheet_path.read_bytes(), str(sheet_path))))
+            except GenerationCancelled:
+                saved = len([p for p in locals().get('paths', []) if Path(p).exists()])
+                self.events.put(('cancelled', saved))
             except urllib.error.HTTPError as e:
                 body = e.read().decode('utf-8', 'replace')
                 hint = ''
@@ -410,6 +434,8 @@ class App:
         row.columnconfigure(3, weight=1)
         self.gen_btn = ttk.Button(row, text='Generate  ⏎', command=self.generate)
         self.gen_btn.grid(row=0, column=0, sticky='w')
+        self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
+        self.stop_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
         ttk.Label(row, text='size').grid(row=0, column=1, padx=(12, 4))
         self.size_var = tk.StringVar(value=str(args.size))
         ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
@@ -580,6 +606,7 @@ class App:
         self.seed.set(str(seed))
         self.busy = True
         self.gen_btn.state(['disabled'])
+        self.stop_btn.state(['!disabled'])
         self.bar.configure(value=0.0)
         self.bar.grid()
         base = meta.get('base_image')
@@ -656,6 +683,13 @@ class App:
         self.text.insert('insert', '\n')
         return 'break'
 
+    def stop(self):
+        if not self.busy:
+            return
+        self.status.configure(text='stopping…')
+        self.stop_btn.state(['disabled'])
+        print('ui: %s' % self.engine.cancel())
+
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9}.get(self.layout_var.get(), 1)
 
@@ -680,6 +714,7 @@ class App:
 
         self.busy = True
         self.gen_btn.state(['disabled'])
+        self.stop_btn.state(['!disabled'])
         self.bar.configure(value=0.0)
         self.bar.grid()
         if self.base_path:
@@ -723,6 +758,16 @@ class App:
                     self._on_ws(payload)
                 elif kind == 'ws_error':
                     self.hint.configure(text='progress feed unavailable (%s); the image still arrives' % payload)
+                elif kind == 'cancelled':
+                    self.busy = False
+                    self.gen_btn.state(['!disabled'])
+                    self.stop_btn.state(['disabled'])
+                    self.bar.grid_remove()
+                    n = payload if isinstance(payload, int) else 0
+                    self.status.configure(text=('stopped - nothing was saved'
+                                                if n == 0 else
+                                                'stopped - %d image%s already saved; tweak and press Enter again'
+                                                % (n, '' if n == 1 else 's')))
                 elif kind == 'tile':
                     raw, path, idx, total = payload
                     self._sheet = None
@@ -741,6 +786,7 @@ class App:
                     self._show(raw)
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
+                    self.stop_btn.state(['disabled'])
                     self.bar.grid_remove()
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
@@ -750,6 +796,7 @@ class App:
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
+                    self.stop_btn.state(['disabled'])
                     self.bar.grid_remove()
                     self.status.configure(text='error')
                     self.hint.configure(text=payload)
