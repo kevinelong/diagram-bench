@@ -333,6 +333,29 @@ There is no undo inside the window, but the delete itself is reversible in Explo
 carrying the same state bits Tk sends), asserts 49 selection, delete and older-control checks, and screenshots each
 state: `python test_gallery_ui.py --shots <dir>`.
 
+## How much do seeds actually vary? (`variety_probe.py`)
+
+Seeds decide almost nothing once the prompt names the scene. Measured with `variety_probe.py`, eight seeds
+(1000-1007), z-image turbo, 512 px, 4 steps, and three independent measures:
+
+| condition | words | detail | composition | palette |
+|---|---|---|---|---|
+| "a red bicycle leaning against a weathered brick wall at golden sunset" | 12 | 40.79 | 23.70 | **0.23** |
+| "a red bicycle" | 3 | 40.84 | 27.63 | **1.17** |
+
+Dropping nine words changed the palette 5.1x and the layout 1.17x, while full-resolution detail did not move at all
+(40.79 vs 40.84) - detail is dominated by texture noise in both cases and is useless for this question. The same
+eight seeds under the long prompt are eight takes on one photograph; under three words the seed chooses the backdrop,
+frame type and accessories.
+
+Changing the checkpoint moves it further, same prompt and seeds: flux1 schnell 57.90/41.68/0.51 and flux1 dev
+70.23/58.63/0.61 against z-image's 40.79/23.70/0.23 - so flux dev gives roughly 2.7x the palette spread, less than the
+5.1x that loosening the prompt buys. Results, sheets and the seeds used are in `variety/`; the images themselves go to
+`%TEMP%\variety-images` because they are large. Re-run with:
+
+    python variety_probe.py --prompt "a red bicycle leaning against a weathered brick wall at golden sunset" \
+                            --prompt "a red bicycle" --count 8 --out variety/prompt-specificity
+
 ## Motion: animating the SVGs rather than the camera
 
 The image models here cannot make video. What we *can* do is animate the SVG documents we already generate,

@@ -1,0 +1,91 @@
+{
+ "profile": "z-image turbo",
+ "steps": 4,
+ "cfg": 1.0,
+ "size": 512,
+ "seeds": [
+  1000,
+  1001,
+  1002,
+  1003,
+  1004,
+  1005,
+  1006,
+  1007
+ ],
+ "created": "2026-10-23T14:18:42",
+ "conditions": [
+  {
+   "slug": "p01",
+   "prompt": "a red bicycle leaning against a weathered brick wall at golden sunset",
+   "words": 12,
+   "seconds_per_image": 5.6,
+   "images": [
+    "20261023-141842_512x512_seed1000.png",
+    "20261023-141848_512x512_seed1001.png",
+    "20261023-141853_512x512_seed1002.png",
+    "20261023-141858_512x512_seed1003.png",
+    "20261023-141903_512x512_seed1004.png",
+    "20261023-141909_512x512_seed1005.png",
+    "20261023-141915_512x512_seed1006.png",
+    "20261023-141921_512x512_seed1007.png"
+   ],
+   "metrics": {
+    "detail": {
+     "mean": 40.79,
+     "min": 37.18,
+     "median": 40.3,
+     "max": 47.87
+    },
+    "composition": {
+     "mean": 23.7,
+     "min": 17.29,
+     "median": 22.47,
+     "max": 36.13
+    },
+    "palette": {
+     "mean": 0.23,
+     "min": 0.16,
+     "median": 0.22,
+     "max": 0.32
+    }
+   }
+  },
+  {
+   "slug": "p02",
+   "prompt": "a red bicycle",
+   "words": 3,
+   "seconds_per_image": 7.3,
+   "images": [
+    "20261023-141927_512x512_seed1000.png",
+    "20261023-141933_512x512_seed1001.png",
+    "20261023-141940_512x512_seed1002.png",
+    "20261023-141953_512x512_seed1003.png",
+    "20261023-142000_512x512_seed1004.png",
+    "20261023-142006_512x512_seed1005.png",
+    "20261023-142013_512x512_seed1006.png",
+    "20261023-142019_512x512_seed1007.png"
+   ],
+   "metrics": {
+    "detail": {
+     "mean": 40.84,
+     "min": 19.12,
+     "median": 36.79,
+     "max": 78.11
+    },
+    "composition": {
+     "mean": 27.63,
+     "min": 8.73,
+     "median": 25.17,
+     "max": 63.74
+    },
+    "palette": {
+     "mean": 1.17,
+     "min": 0.26,
+     "median": 1.08,
+     "max": 1.76
+    }
+   }
+  }
+ ]
+}
