@@ -162,7 +162,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs')
+                 'favorites', 'custom_styles', 'runs', 'sidebar')
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -213,6 +213,7 @@ THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
 RECENT_COLS = 3
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
+FILTER_CAP = 200     # while a search is active the strip is a result list, not a recency window
 
 
 def thumb_for(png, cache_root=None):
@@ -573,6 +574,7 @@ class App:
         self._brush = 40
         self._pads = [0, 0, 0, 0]
         self._pinned = None          # a second picture to compare against, independent of the base
+        self._sidebar = self._settings.get('sidebar', True)
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -601,6 +603,7 @@ class App:
         plate = ttk.Style().lookup('TFrame', 'background') or '#f0f0f0'
         gal = ttk.Frame(root, padding=(10, 10, 4, 10))
         gal.grid(row=0, column=0, sticky='nsew')
+        self.gal = gal
         gal.columnconfigure(0, weight=1)
         self.gal_title = ttk.Label(gal, text='Recent (%d)' % RECENT_N)
         self.gal_title.grid(row=0, column=0, columnspan=2, sticky='w')
@@ -662,12 +665,20 @@ class App:
         self.star_btn.pack(fill='x', pady=(6, 0))
         self.log_btn = ttk.Button(btns, text='Run log', command=self.show_run_log)
         self.log_btn.pack(fill='x', pady=(3, 0))
+        self.collapse_btn = ttk.Button(btns, text='Hide gallery \u00ab', command=lambda: self.set_sidebar(False))
+        self.collapse_btn.pack(fill='x', pady=(6, 0))
 
         self.sel_label = ttk.Label(btns, text='', foreground='#2a6df4')
         self.sel_label.pack(anchor='w', pady=(3, 0))
         ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
                   foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
         gal.rowconfigure(2, weight=1)
+
+        self.rail = ttk.Frame(root, padding=(4, 12, 0, 10))
+        self.rail.grid(row=0, column=0, sticky='ns')
+        self.rail_btn = ttk.Button(self.rail, text='\u00bb', width=2, command=lambda: self.set_sidebar(True))
+        self.rail_btn.pack(anchor='n')
+        self.rail.grid_remove()
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
         left.grid(row=0, column=1, sticky='nsew')
@@ -915,6 +926,8 @@ class App:
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
 
+        if not self._sidebar:
+            self.set_sidebar(False)
         root.after(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
@@ -933,27 +946,39 @@ class App:
         lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
         return lab
 
-    def refresh_gallery(self, select=None):
+    def _visible_files(self):
+        """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
         files = self._all_files()
-        self._files = files
-        if self.base_path is not None and not any(f.name == self.base_path.name for f in files):
-            self.clear_base()
-        # a deleted or moved file must not stay selected
-        self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in files)]
         needle = self.search_var.get().strip().lower()
         if needle:
             files = [f for f in files if needle in f.name.lower()]
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
-        # favourites float to the top of the strip, then newest first
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
+        return files
+
+    def refresh_gallery(self, select=None):
+        everything = self._all_files()
+        if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
+            self.clear_base()
+        # a deleted or moved file must not stay selected
+        self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
+        files = self._visible_files()
         self._files = files
-        recent = files[:RECENT_N]
-        label = 'Recent (%d)' % len(recent) if len(files) <= RECENT_N else 'Recent (%d of %d)' % (RECENT_N, len(files))
+        # a search turns the strip into a result list, so it shows matches from the whole folder, not 18 of them
+        filtering = bool(self.search_var.get().strip()) or bool(self.starred_only.get())
+        cap = FILTER_CAP if filtering else RECENT_N
+        recent = files[:cap]
+        if filtering:
+            label = 'Matches (%d of %d)' % (len(recent), len(files))
+        else:
+            label = ('Recent (%d)' % len(recent) if len(files) <= RECENT_N
+                     else 'Recent (%d of %d)' % (RECENT_N, len(files)))
         if self._favorites:
             label += '  \u00b7  %d \u2605' % len(self._favorites)
+        needle = self.search_var.get().strip()
         if needle:
-            label += '  \u00b7  \u201c%s\u201d' % self.search_var.get().strip()
+            label += '  \u00b7  \u201c%s\u201d' % needle
         self.gal_title.configure(text=label)
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
@@ -1033,6 +1058,19 @@ class App:
         self._update_banner()
         self.hint.configure(text='%s: %s steps at cfg %.1f'
                                  % (self.model_var.get(), prof.get('steps', '?'), prof.get('cfg', 1.0)))
+
+    def set_sidebar(self, show):
+        """Fold the gallery away so the picture can use the width."""
+        self._sidebar = bool(show)
+        if self._sidebar:
+            self.rail.grid_remove()
+            self.gal.grid()
+            self.root.columnconfigure(0, minsize=210)
+        else:
+            self.gal.grid_remove()
+            self.rail.grid()
+            self.root.columnconfigure(0, minsize=44)
+        self._persist()
 
     def toggle_advanced(self):
         self._adv_shown = not self._adv_shown
@@ -1692,18 +1730,31 @@ class App:
             self.hint.configure(text='click a thumbnail first')
 
     def open_all(self):
-        """Full-screen browser: every image, scrolling, thumbnails cached on disk."""
+        """Every image, scrolling, with the same search and star filters as the strip."""
         self.refresh_gallery()
-        files = self._all_files()
-        if not files:
+        if not self._all_files():
             self.hint.configure(text='no images yet')
             return
         win = tk.Toplevel(self.root)
-        win.title('All images — %d' % len(files))
         try:
             win.state('zoomed')
         except Exception:
             win.geometry('1200x800')
+
+        head = ttk.Frame(win)
+        head.pack(side='top', fill='x', padx=8, pady=(8, 0))
+        ttk.Label(head, text='search').pack(side='left')
+        box = ttk.Entry(head, textvariable=self.search_var, width=22)
+        box.pack(side='left', padx=(4, 8))
+        only = ttk.Checkbutton(head, text='\u2605 only', variable=self.starred_only)
+        only.pack(side='left')
+        ttk.Button(head, text='\u2605 Star selected', command=lambda: (self.toggle_star(), render())).pack(
+            side='left', padx=(8, 0))
+        count = ttk.Label(head, text='', foreground='#555')
+        count.pack(side='left', padx=(10, 0))
+
+        foot = ttk.Frame(win)
+        foot.pack(side='bottom', fill='x', pady=6, padx=8)
         bar = ttk.Scrollbar(win, orient='vertical')
         bar.pack(side='right', fill='y')
         canvas = tk.Canvas(win, highlightthickness=0, background='#f4f4f5', yscrollcommand=bar.set)
@@ -1717,39 +1768,45 @@ class App:
         cols = 6
         self._all_thumbs = {}
         self._all_widgets = {}
-        foot = ttk.Frame(win)
-        foot.pack(side='bottom', fill='x', pady=6, padx=6)
-        for i, p in enumerate(files):
-            tp = thumb_for(p)
-            if not tp:
-                continue
-            try:
-                from PIL import ImageTk
-                ph = ImageTk.PhotoImage(Image.open(tp))
-            except Exception:
-                continue
-            self._all_thumbs[p] = ph
-            cell = tk.Frame(inner)
-            cell.grid(row=i // cols, column=i % cols, padx=3, pady=3)
-            lab = self._tile_widget(cell, p, ph)
-            lab.configure(width=tp and 0)
-            lab.pack()
-            self._all_widgets[Path(p)] = lab
-            tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555').pack()
-            lab.bind('<Double-Button-1>', lambda e, q=p: (self.select_file(q), win.destroy()))
+
+        def render(*_):
+            for w in inner.winfo_children():
+                w.destroy()
+            self._all_widgets = {}
+            files = self._visible_files()
+            count.configure(text='%d image%s shown' % (len(files), '' if len(files) == 1 else 's'))
+            for i, p in enumerate(files):
+                tp = thumb_for(p)
+                if not tp:
+                    continue
+                try:
+                    ph = ImageTk.PhotoImage(Image.open(tp))
+                except Exception:
+                    continue
+                self._all_thumbs[p] = ph
+                cell = tk.Frame(inner)
+                cell.grid(row=i // cols, column=i % cols, padx=3, pady=3)
+                lab = self._tile_widget(cell, p, ph)
+                lab.configure(width=tp and 0)
+                lab.pack()
+                self._all_widgets[Path(p)] = lab
+                tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555').pack()
+                lab.bind('<Double-Button-1>', lambda e, q=p: (self.select_file(q), win.destroy()))
+            canvas.yview_moveto(0)
+            self._paint()
 
         def close_browser():
             self._all_widgets = {}
             win.destroy()
 
+        box.bind('<KeyRelease>', render)
+        only.configure(command=render)
         ttk.Button(foot, text='Close', command=close_browser).pack(side='left')
-        ttk.Button(foot, text='Select all', command=self.select_all).pack(side='left', padx=(6, 0))
-        self.br_del = ttk.Button(foot, text='Delete', command=self.delete_selected)
-        self.br_del.pack(side='left', padx=(6, 0))
-        self.br_count = ttk.Label(foot, text='', foreground='#2a6df4')
-        self.br_count.pack(side='left', padx=(8, 0))
-
-        self._paint()
+        ttk.Button(foot, text='Select all', command=lambda: (self.select_all(), render())).pack(
+            side='left', padx=(6, 0))
+        ttk.Button(foot, text='Delete', command=lambda: (self.delete_selected(), render())).pack(
+            side='left', padx=(6, 0))
+        render()
 
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
@@ -1968,6 +2025,7 @@ class App:
                           'model': self.model_var.get(), 'advanced': self._adv_shown,
                           'favorites': sorted(self._favorites),
                           'custom_styles': self._custom_styles,
+                          'sidebar': self._sidebar,
                           'runs': self._runs[-50:]}
         return save_settings(self._settings)
 

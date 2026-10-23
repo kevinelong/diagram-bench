@@ -378,6 +378,19 @@ def main():
     long_png.unlink(); long_png.with_suffix('.json').unlink(missing_ok=True)
     app.refresh_gallery()
 
+    print('\n-- the gallery folds away when the picture needs the width')
+    check('the gallery starts visible', bool(app.gal.winfo_ismapped()))
+    wide_before = app.canvas.winfo_width()
+    app.set_sidebar(False); root.update(); root.update_idletasks()
+    check('folding hides the gallery', not app.gal.winfo_ismapped())
+    check('and shows the rail', bool(app.rail.winfo_ismapped()))
+    check('the picture column grows',
+          app.canvas.winfo_width() > wide_before + 100,
+          '%d -> %d' % (wide_before, app.canvas.winfo_width()))
+    app.set_sidebar(True); root.update(); root.update_idletasks()
+    check('unfolding restores it', bool(app.gal.winfo_ismapped()) and not app.rail.winfo_ismapped())
+    check('the state is remembered', zui.load_settings().get('sidebar') is True)
+
     print('\n-- the window still fits its own controls at the minimum size')
     root.state('normal'); root.geometry('1080x680+30+30')
     was_advanced = app._adv_shown
@@ -780,7 +793,17 @@ def main():
     check('selection spans the browser', len(app.selected) == 3, str(len(app.selected)))
     root.update()
     shot(root, '07-browser-selected')
-    check('browser delete button enabled', str(app.br_del['state']) == 'normal')
+    # a search turns the strip into a result list over the whole folder, with no 18-tile cap
+    app.search_var.set('seed'); app.refresh_gallery(); root.update()
+    matches = len(app._files)
+    check('every match is drawn while filtering', len(app._tile_widgets) == matches,
+          '%d tiles of %d matches' % (len(app._tile_widgets), matches))
+    check('and the cap no longer applies', matches <= zui.RECENT_N or len(app._tile_widgets) > zui.RECENT_N,
+          '%d tiles vs cap %d' % (len(app._tile_widgets), zui.RECENT_N))
+    check('the title says it is a match list', app.gal_title['text'].startswith('Matches'), app.gal_title['text'])
+    app.search_var.set(''); app.refresh_gallery(); root.update()
+    check('clearing the search returns to a recency window', len(app._tile_widgets) == zui.RECENT_N,
+          str(len(app._tile_widgets)))
 
     for w in root.winfo_children():
         if isinstance(w, tk.Toplevel):
