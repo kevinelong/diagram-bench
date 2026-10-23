@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 import zimage_gen as zg
@@ -446,6 +446,10 @@ class App:
             self.recent.columnconfigure(c, weight=0)
         self.recent_rows = 4
         self._thumbs = {}                 # path -> PhotoImage, kept alive
+        self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
+        self._all_widgets = {}            # same, for the "More..." window
+        self.selected = []                # ordered list of paths marked for action
+        self._anchor = None               # shift-click range starts here
 
         btns = ttk.Frame(gal)
         btns.grid(row=2, column=0, columnspan=3, sticky='ew')
@@ -453,6 +457,16 @@ class App:
         ttk.Button(btns, text='Clear base', command=self.clear_base).pack(fill='x', pady=(3, 0))
         ttk.Button(btns, text='Refresh', command=self.refresh_gallery).pack(fill='x', pady=(3, 0))
         ttk.Button(btns, text='Open folder', command=self.open_folder).pack(fill='x', pady=(3, 0))
+
+        selrow = ttk.Frame(btns)
+        selrow.pack(fill='x', pady=(6, 0))
+        ttk.Button(selrow, text='Select all', command=self.select_all).pack(side='left', fill='x', expand=True)
+        self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
+        self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.sel_label = ttk.Label(btns, text='', foreground='#2a6df4')
+        self.sel_label.pack(anchor='w', pady=(3, 0))
+        ttk.Label(btns, text='ctrl+click adds · shift+click ranges\nDel / Ctrl+A / Esc', foreground='#777',
+                  font=('Segoe UI', 7), justify='left').pack(anchor='w')
         gal.rowconfigure(1, weight=1)
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
@@ -553,6 +567,9 @@ class App:
             self.text.insert('1.0', prefill)
 
         self.refresh_gallery()
+        for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
+                        ('<Escape>', self._on_escape)):
+            root.bind(seq, fn)
 
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
@@ -566,7 +583,7 @@ class App:
         lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
         lab.image = thumb
         lab.path = path
-        lab.bind('<Button-1>', lambda e, p=path: self.select_file(p))
+        lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p))
         lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
         return lab
 
@@ -575,10 +592,13 @@ class App:
         self._files = files
         if self.base_path is not None and not any(f.name == self.base_path.name for f in files):
             self.clear_base()
+        # a deleted or moved file must not stay selected
+        self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in files)]
         recent = files[:12]
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
+        self._tile_widgets = {}
         for i, p in enumerate(recent):
             tp = thumbs.get(p)
             if not tp:
@@ -591,8 +611,154 @@ class App:
             self._thumbs[p] = ph
             lab = self._tile_widget(self.recent, p, ph)
             lab.grid(row=i // 3, column=i % 3, padx=2, pady=2)
-            if select and p.name == Path(select).name:
-                lab.configure(relief='solid', bd=2)
+            self._tile_widgets[Path(p)] = lab
+        self._paint()
+
+    # -- gallery: selection --------------------------------------------------
+    def _click_order(self):
+        """The order shift-click ranges over: every file in the window that is currently shown."""
+        return [p for p in getattr(self, '_files', []) if p in self._tile_widgets or p in self._all_widgets]
+
+    def _on_tile_click(self, event, path):
+        """Plain click loads the image as the base; ctrl toggles; shift extends from the anchor."""
+        path = Path(path)
+        ctrl = bool(event.state & 0x0004)
+        shift = bool(event.state & 0x0001)
+
+        if shift and self._anchor is not None:
+            order = self._click_order()
+            if self._anchor in order and path in order:
+                i, j = order.index(self._anchor), order.index(path)
+                if i > j:
+                    i, j = j, i
+                self.selected = order[i:j + 1]
+            else:
+                self.selected = [path]
+        elif ctrl:
+            if path in self.selected:
+                self.selected.remove(path)
+            else:
+                self.selected.append(path)
+            self._anchor = path
+        else:
+            self.selected = [path]
+            self._anchor = path
+            self.select_file(path)          # still the one-click path to "use this image"
+            return                          # select_file rebuilds the grid, which paints it
+        self._paint()
+
+    def _paint(self):
+        """Colour the selection ring and the base-image border without rebuilding thumbnails."""
+        ring = '#2a6df4'
+        plate = ttk.Style().lookup('TFrame', 'background') or '#f0f0f0'
+        base_name = self.base_path.name if self.base_path else None
+        seen = {}
+        seen.update(self._tile_widgets)
+        seen.update(self._all_widgets)
+        for p, lab in seen.items():
+            try:
+                sel = any(Path(p).name == Path(s).name for s in self.selected)
+                is_base = base_name is not None and Path(p).name == base_name
+                lab.configure(highlightthickness=3, highlightbackground=ring if sel else plate,
+                              relief='solid' if is_base else 'flat', bd=2 if is_base else 1)
+            except Exception:
+                pass
+        n = len(self.selected)
+        if hasattr(self, 'del_btn'):
+            self.del_btn.configure(text='Delete (%d)' % n if n else 'Delete',
+                                   state='normal' if n else 'disabled')
+        if hasattr(self, 'sel_label'):
+            self.sel_label.configure(text='%d selected' % n if n else '')
+        for btn, lab in ((getattr(self, 'br_del', None), getattr(self, 'br_count', None)),):
+            if btn is not None and btn.winfo_exists():
+                btn.configure(text='Delete (%d)' % n if n else 'Delete', state='normal' if n else 'disabled')
+            if lab is not None and lab.winfo_exists():
+                lab.configure(text='%d selected' % n if n else '')
+
+    def select_all(self):
+        """Select every image in the window in play; pressing it again clears."""
+        if self._all_widgets:
+            pool = [p for p in self._click_order() if p in self._all_widgets]
+        else:
+            pool = [p for p in self._files[:12] if p in self._tile_widgets]
+        if pool and len(self.selected) == len(pool) and all(p in self.selected for p in pool):
+            self.selected = []
+        else:
+            self.selected = list(pool)
+        self._anchor = pool[0] if pool else None
+        self._paint()
+
+    def clear_selection(self):
+        self.selected = []
+        self._anchor = None
+        self._paint()
+
+    # -- gallery: delete -----------------------------------------------------
+    def _delete_one(self, png):
+        """Remove the PNG, its sidecar and its cached thumbnail. True if the image itself went."""
+        png = Path(png)
+        gone = False
+        for f in (png, png.with_suffix('.json'), png.parent / THUMB_DIR / (png.stem + '.jpg')):
+            try:
+                if f.exists():
+                    f.unlink()
+                    gone = gone or f == png
+            except Exception as e:
+                self.hint.configure(text='could not delete %s: %s' % (f.name, e))
+        return gone
+
+    def delete_selected(self):
+        paths = [Path(p) for p in self.selected if Path(p).exists()]
+        if not paths:
+            self.hint.configure(text='nothing selected to delete - ctrl+click thumbnails first')
+            return 0
+        n = len(paths)
+        if not messagebox.askyesno(
+                'Delete images',
+                'Delete %d image%s and the metadata beside %s?\n\nThis removes the file%s from disk.'
+                % (n, '' if n == 1 else 's', 'it' if n == 1 else 'them', '' if n == 1 else 's'),
+                parent=self.root):
+            return 0
+        gone = [p for p in paths if self._delete_one(p)]
+        base_gone = self.base_path is not None and any(
+            p.name == self.base_path.name for p in paths)
+        if base_gone:
+            self.clear_base()
+        if self._current is not None and any(p.name == self._current.name for p in paths):
+            self.canvas.delete('img')
+            self.canvas.delete('placeholder')
+            self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
+                                    text='that image was deleted')
+            self.copy_btn.state(['disabled'])
+            self._img = None
+            self._current = None
+        self.selected = [p for p in self.selected if p not in paths]
+        self.refresh_gallery()
+        self.status.configure(text='deleted %d image%s%s'
+                              % (len(gone), '' if len(gone) == 1 else 's',
+                                 '; base cleared' if base_gone else ''))
+        return len(gone)
+
+    # -- keyboard ------------------------------------------------------------
+    def _typing(self):
+        w = self.root.focus_get()
+        return w is not None and w.winfo_class() in ('Text', 'Entry', 'TEntry', 'TCombobox', 'Spinbox')
+
+    def _on_delete_key(self, event=None):
+        if self._typing():
+            return None
+        self.delete_selected()
+        return 'break'
+
+    def _on_ctrl_a(self, event=None):
+        if self._typing():
+            return None
+        self.select_all()
+        return 'break'
+
+    def _on_escape(self, event=None):
+        self.clear_selection()
+        return None
 
     def select_file(self, path):
         """One entry point for a click in the recent strip or the full browser."""
@@ -643,6 +809,9 @@ class App:
 
         cols = 6
         self._all_thumbs = {}
+        self._all_widgets = {}
+        foot = ttk.Frame(win)
+        foot.pack(side='bottom', fill='x', pady=6, padx=6)
         for i, p in enumerate(files):
             tp = thumb_for(p)
             if not tp:
@@ -658,10 +827,22 @@ class App:
             lab = self._tile_widget(cell, p, ph)
             lab.configure(width=tp and 0)
             lab.pack()
+            self._all_widgets[Path(p)] = lab
             tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555').pack()
             lab.bind('<Double-Button-1>', lambda e, q=p: (self.select_file(q), win.destroy()))
-        ttk.Button(inner, text='Close', command=win.destroy).grid(row=(len(files) // cols) + 1, column=0,
-                                                                 pady=6, sticky='w')
+
+        def close_browser():
+            self._all_widgets = {}
+            win.destroy()
+
+        ttk.Button(foot, text='Close', command=close_browser).pack(side='left')
+        ttk.Button(foot, text='Select all', command=self.select_all).pack(side='left', padx=(6, 0))
+        self.br_del = ttk.Button(foot, text='Delete', command=self.delete_selected)
+        self.br_del.pack(side='left', padx=(6, 0))
+        self.br_count = ttk.Label(foot, text='', foreground='#2a6df4')
+        self.br_count.pack(side='left', padx=(8, 0))
+
+        self._paint()
 
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
@@ -754,8 +935,8 @@ class App:
         self.base_path = None
         self.base_label.configure(text='(none - text to image)')
         self.hint.configure(text='')
-        self.gallery.selection_clear(0, 'end')
-        self._clear_picture()
+        self._clear_picture()          # (there is no separate listbox here; repaint drops the base ring)
+        self._paint()
         self.status.configure(text='text to image — nothing selected')
 
     def open_folder(self):

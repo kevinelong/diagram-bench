@@ -193,6 +193,30 @@ Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` 
 On Windows, prefer `--initial-file` for a long or punctuated prompt: PowerShell's `Start-Process -ArgumentList`
 splits a multi-word argument into several, so `--initial "a blue circle"` arrives as `--initial a` plus strays.
 
+### Gallery: multiselect and delete
+
+The **Recent (12)** strip marks images for action instead of only loading them:
+
+| gesture | effect |
+|---|---|
+| click | selects that image, loads it, makes it the base, restores prompt and seed |
+| **ctrl+click** | adds or removes that image from the selection, leaving the base alone |
+| **shift+click** | selects the range from the last clicked image to this one |
+| **Select all** | takes the whole strip; pressing it again clears |
+| **Delete (N)** | confirms, then removes the PNG, its sidecar and its cached thumbnail |
+| **Del / Ctrl+A / Esc** | delete selection, select all, clear selection - ignored while the prompt box has focus |
+
+Two states are visible at once and do not conflict: a **blue ring** means "selected", a **black border** means "loaded
+as the base", so one tile can be both. Deleting the base clears it and resets the picture pane. The **More…** window
+shares the same selection and carries its own Delete, so a sweep can span both.
+
+The strip is capped at 12 for rendering speed, so *Select all* deletes at most 12; use **More…** for a bigger sweep.
+There is no undo - the native confirmation dialog is the only guard.
+
+`test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
+carrying the same state bits Tk sends), asserts the selection, delete and older control behaviour, and screenshots each
+state: `python test_gallery_ui.py --shots <dir>`.
+
 ## Motion: animating the SVGs rather than the camera
 
 The image models here cannot make video. What we *can* do is animate the SVG documents we already generate,
