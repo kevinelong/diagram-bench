@@ -650,6 +650,7 @@ class App:
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
         ttk.Label(self.base_row, text='base:').pack(side='left')
         self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555')
+        self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
         ttk.Label(self.base_row, text='strength').pack(side='left')
         self.denoise = tk.DoubleVar(value=0.6)
@@ -676,8 +677,11 @@ class App:
 
         # ---- middle: progress (sits under the button, above the status line)
         # the banner answers the only question that matters before pressing Enter
-        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground='#1a1a1a')
+        # wraplength caps the requested width, so a long file name can never widen this column
+        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground='#1a1a1a',
+                                wraplength=430, justify='left')
         self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
+        self._tip(self.banner, 'What the next Generate will do, with the base file name in full.')
         self.ticks = ttk.Label(left, text='', foreground='#2a6df4', font=('Consolas', 10))
         self.ticks.grid(row=4, column=0, sticky='w')
 
@@ -1185,7 +1189,10 @@ class App:
     def _set_base(self, path, from_gallery=False):
         self._base_from_gallery = from_gallery
         self.base_path = Path(path)
-        self.base_label.configure(text=self.base_path.name)
+        self.base_label.configure(text=self._short_name(self.base_path.name))
+        if self._base_tip is None:
+            self._base_tip = self._tip(self.base_label, '')
+        self._base_tip.text = self.base_path.name
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
         self._update_banner()
@@ -1337,6 +1344,12 @@ class App:
         t(self.sel_all_btn, 'Select every tile in the strip; press again to clear.')
         t(self.del_btn, 'Send the selected images, their metadata and thumbnails to the Recycle Bin.')
 
+    @staticmethod
+    def _short_name(name, keep=26):
+        """Elide a long filename from the front, keeping the tail - that is where seed and sheet size live."""
+        name = str(name)
+        return name if len(name) <= keep else '\u2026' + name[-(keep - 1):]
+
     def _update_banner(self):
         """Say what the next Generate will do, in one line, before it is pressed."""
         if not hasattr(self, 'banner'):
@@ -1344,7 +1357,7 @@ class App:
         if self.base_path is None:
             mode, colour = 'TEXT → IMAGE', '#1a1a1a'
         else:
-            mode = 'EDIT %s at %.2f' % (self.base_path.name, self.denoise.get())
+            mode = 'EDIT %s at %.2f' % (self._short_name(self.base_path.name), self.denoise.get())
             colour = '#2a6df4'
         n = self._batch()
         what = 'one image' if n == 1 else '%d tiles' % n

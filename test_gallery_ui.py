@@ -356,9 +356,25 @@ def main():
     first_tile = app._files[0]
     click(app, first_tile)
     check('banner switches to EDIT', app.banner['text'].startswith('EDIT'), app.banner['text'])
-    check('banner names the base file', first_tile.name in app.banner['text'], app.banner['text'])
+    check('banner names the base file (elided)', app._short_name(first_tile.name) in app.banner['text'],
+          app.banner['text'])
     app.clear_base()
     check('clearing the base returns to TEXT', app.banner['text'].startswith('TEXT'), app.banner['text'])
+
+    # a long file name must not steal width from the picture: the banner and base label elide it
+    long_png = tmp / '20261023-120000_512x512_seed123_sheet_16up_v2_final.png'
+    long_png.write_bytes(app._files[0].read_bytes())
+    long_png.with_suffix('.json').write_bytes(app._files[0].with_suffix('.json').read_bytes())
+    app.clear_base(); root.update(); root.update_idletasks()
+    wide = app.canvas.winfo_width()
+    app._set_base(long_png); root.update(); root.update_idletasks()
+    check('a long base name does not shrink the picture', app.canvas.winfo_width() >= wide - 4,
+          '%d -> %d px' % (wide, app.canvas.winfo_width()))
+    check('the banner width is capped', app.banner.winfo_reqwidth() <= 460, str(app.banner.winfo_reqwidth()))
+    check('the banner elides the name', '\u2026' in app.banner['text'], app.banner['text'])
+    app.clear_base()
+    long_png.unlink(); long_png.with_suffix('.json').unlink(missing_ok=True)
+    app.refresh_gallery()
 
     print('\n-- tooltips')
     check('every control has a tooltip', len(app._tips) >= 20, str(len(app._tips)))
