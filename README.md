@@ -193,6 +193,19 @@ Flags: `--port` (8006), `--size` (1024), `--steps` (4), `--cfg` (1.0), `--seed` 
 On Windows, prefer `--initial-file` for a long or punctuated prompt: PowerShell's `Start-Process -ArgumentList`
 splits a multi-word argument into several, so `--initial "a blue circle"` arrives as `--initial a` plus strays.
 
+## Motion: animating the SVGs rather than the camera
+
+The image models here cannot make video. What we *can* do is animate the SVG documents we already generate,
+which keeps every frame crisp instead of scaling a bitmap:
+
+    python svg_motion.py assemble grounded_ref/flow-1.svg out/assemble 48   # boxes slide in, arrows draw themselves
+    python svg_motion.py reveal   grounded_ref/flow-1.svg out/reveal   48   # pure stroke-dashoffset line-draw
+    python svg_morph.py  a.svg b.svg out/morph 48                           # structural morph; needs matched structure
+
+Frame SVGs are rasterised once each in headless Chromium and encoded with ffmpeg (WSL). Measured clips,
+the marker/dashoffset gotcha, the morph correspondence problem, and the video-model sizing are in
+[MOTION-2026-10-22.md](MOTION-2026-10-22.md).
+
 ## Licence
 
 **FSL-1.1-MIT** — see `LICENSE.md`. The scripts, harness, prompts and result documents here are licensed under the
