@@ -238,7 +238,8 @@ def get(path, timeout=30):
 
 
 def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1,
-             sampler='euler', scheduler='simple', negative='', profile=None, mask=None, outpaint=None):
+             sampler='euler', scheduler='simple', negative='', profile=None, mask=None, outpaint=None,
+             hires=0.0, hires_denoise=0.45):
     """ComfyUI graph for the four things this window can ask for.
 
     text to image : EmptySD3LatentImage -> KSampler(1.0) -> VAEDecode
@@ -303,7 +304,17 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
                   "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
                              "latent_image": latent, "seed": seed, "steps": steps, "cfg": cfg,
                              "sampler_name": sampler, "scheduler": scheduler, "denoise": denoise}}
-    graph["8"] = {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}}
+    last = ["7", 0]
+    if hires and hires > 1.0:
+        # hires fix, A1111 style: upscale the latent, then a second pass at low denoise adds detail to the enlargement
+        graph["14"] = {"class_type": "LatentUpscaleBy",
+                       "inputs": {"samples": last, "upscale_method": "nearest-exact", "scale_by": float(hires)}}
+        graph["15"] = {"class_type": "KSampler",
+                       "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
+                                  "latent_image": ["14", 0], "seed": seed, "steps": steps, "cfg": cfg,
+                                  "sampler_name": sampler, "scheduler": scheduler, "denoise": hires_denoise}}
+        last = ["15", 0]
+    graph["8"] = {"class_type": "VAEDecode", "inputs": {"samples": last, "vae": ["3", 0]}}
     graph["9"] = {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}}
     return graph
 

@@ -777,8 +777,8 @@ def main():
     app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % vsrv.server_port
     app.select_file(app._files[0]); root.update()
     app.describe()
-    for _ in range(80):
-        app._poll(); root.update(); time.sleep(0.05)
+    for _ in range(300):        # a local round trip, but give it a real window rather than 4 s of luck
+        app._poll(); root.update(); time.sleep(0.02)
         if 'written from the picture' in app.hint['text']:
             break
     check('describe writes a prompt from the image', 'fox sitting on a log' in app.text.get('1.0', 'end'),

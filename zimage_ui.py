@@ -1378,40 +1378,6 @@ class App:
         self.pad_label.configure(text='')
         self._refresh_generate_label()
 
-    def _generate_with(self, mask_path=None, outpaint=None, denoise=None):
-        """One-shot generation outside the normal controls: an inpaint or outpaint of the current picture."""
-        if self.busy:
-            self.hint.configure(text='already generating')
-            return
-        prompt = self.text.get('1.0', 'end').strip()
-        if not prompt:
-            self.hint.configure(text='describe what should be there, then try again')
-            return
-        try:
-            size = int(self.size_var.get())
-        except ValueError:
-            size = self.args.size
-        try:
-            seed = int(self.seed.get())
-        except ValueError:
-            seed = self.args.seed
-        style = self.style_var.get()
-        suffix = STYLES.get(style, '')
-        full = (prompt + ', ' + suffix) if suffix else prompt
-        model = self.model_var.get()
-        self.busy = True
-        self.gen_btn.state(['disabled'])
-        self.ticks.configure(text='')
-        self.bar.configure(value=0.0); self.bar.grid()
-        self.status.configure(text='inpainting' if mask_path else 'outpainting')
-        self.engine.generate(full, size, size, int(self.steps_var.get()),
-                             zg.MODELS.get(model, {}).get('cfg', 1.0), seed, self.args.out,
-                             base_path=str(self.base_path), denoise=(denoise or 1.0), batch=1, sequential=True,
-                             sampler=self.sampler_var.get(),
-                             negative=self.negative.get('1.0', 'end').strip(),
-                             profile=model, mask_path=(str(mask_path) if mask_path else None),
-                             outpaint=outpaint, style=style)
-
     def toggle_star(self):
         names = [Path(p).name for p in self.selected]
         if not names:
