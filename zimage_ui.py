@@ -2491,6 +2491,8 @@ class App:
                     self._display_raw(raw, path)
                     self._run_total = total
                     self._show_tile_progress(idx, total)
+                    # each tile is already on disk: show it in the strip now, not when the whole sheet finishes
+                    self.refresh_gallery()
                 elif kind == 'image':
                     raw, path = payload
                     if self._preview:

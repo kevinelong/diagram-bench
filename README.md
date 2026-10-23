@@ -204,6 +204,10 @@ tile), peak 5,508 MiB - a single-image peak, and four separately named tiles. Me
 11.3 s total (0.71 s per image), peak 11,661 MiB of 12,227, so 16-up in one batch is usable at 256-448 and not above
 that on a 12 GB card - and the UI now warns only in that batch case, since one at a time does not raise the peak.
 
+Each tile appears in the gallery **as it finishes**, not when the run ends - the strip is refreshed on every `tile`
+event, so a 16-up fills in as it goes and a new image is selectable while the rest are still rendering. Measured on a
+live 4-up at 256 px: gallery counts 1, 2, 3 at 5.9 s, 12.0 s and 17.9 s, then 5 when the sheet landed at 30.3 s.
+
 Either way an N-up saves every tile separately and composes them into a single contact sheet, which is what the window
 shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.
 

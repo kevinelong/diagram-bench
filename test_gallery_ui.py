@@ -899,6 +899,23 @@ def main():
     fixed, hits = rp.repair('a fox, %s, %s' % (S, S))
     check('repair reports which suffix it fixed', bool(hits) and fixed.count(S) == 1, str(hits))
 
+    print('\n-- tiles appear in the gallery as each one lands')
+    fresh = tmp / '20261023-235959_256x256_seed4242_07.png'
+    Image.new('RGB', (64, 64), 'teal').save(fresh)
+    fresh.with_suffix('.json').write_text(json.dumps({'prompt': 'tile seven', 'seed': 4242}), encoding='utf-8')
+    before_tiles = len(app._files)
+    app.engine.events.put(('tile', (fresh.read_bytes(), str(fresh), 7, 16)))
+    app._poll(); root.update()
+    check('a finished tile is listed straight away',
+          any(Path(p).name == fresh.name for p in app._files), '%d files' % len(app._files))
+    check('and it is drawn in the strip', any(Path(p).name == fresh.name for p in app._tile_widgets),
+          str(len(app._tile_widgets)))
+    check('the strip grew by one', len(app._files) == before_tiles + 1,
+          '%d -> %d' % (before_tiles, len(app._files)))
+    check('the tile counter shows progress', 'tile 7 of 16' in app.status['text'], app.status['text'])
+    fresh.unlink(); fresh.with_suffix('.json').unlink(missing_ok=True)
+    app.refresh_gallery(); root.update()
+
     print('\n-- View All: multiselect that cannot close the window under you')
     check('the button is called View All', 'View All' in str(app.more_btn['text']), str(app.more_btn['text']))
     app.clear_selection()
