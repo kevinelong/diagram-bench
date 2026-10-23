@@ -1511,8 +1511,9 @@ class App:
         r = max(1.0, self._brush / 2.0 * scale)
         ImageDraw.Draw(self._mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
         rr = self._brush / 2.0
+        # a crisp outline as well as the fill: the stipple alone disappeared on busy pictures
         self.canvas.create_oval(event.x - rr, event.y - rr, event.x + rr, event.y + rr,
-                                fill='#e6283c', stipple='gray50', outline='', tags='paint')
+                                fill='#e6283c', stipple='gray50', outline='#8f0b1f', width=1, tags='paint')
         self.clear_mask_btn.state(['!disabled'])
         self._refresh_generate_label()
         return 'break'
@@ -2618,9 +2619,16 @@ class App:
         self._tk_cmp = ImageTk.PhotoImage(strip)
         x0, y0, w, h = self._draw
         self.canvas.create_image(x0, y0, anchor='nw', image=self._tk_cmp, tags='compare')
-        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#2a6df4', width=2, tags='compare')
-        self.canvas.create_text(x0 + 8, y0 + 8, anchor='nw', text='base', fill='#2a6df4', tags='compare')
-        self.canvas.create_text(x0 + w - 8, y0 + 8, anchor='ne', text='result', fill='#2a6df4', tags='compare')
+        # a white/dark pair so the split stays visible on any picture
+        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#101010', width=4, tags='compare')
+        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#ffffff', width=2, tags='compare')
+        # labels sit on their own chip: bare text over an image was unreadable and collided with content
+        for text, anchor, tx in (('base', 'nw', x0 + 8), ('result', 'ne', x0 + w - 8)):
+            chip_w = 8 + 7 * len(text)
+            cx0 = tx - 4 if anchor == 'nw' else tx - chip_w + 4
+            self.canvas.create_rectangle(cx0, y0 + 6, cx0 + chip_w, y0 + 24, fill='#101010', outline='',
+                                         tags='compare')
+            self.canvas.create_text(tx, y0 + 15, anchor=anchor, text=text, fill='#ffffff', tags='compare')
 
     def _on_compare_drag(self, event):
         if self._mask_painting:
