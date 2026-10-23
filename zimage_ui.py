@@ -618,6 +618,7 @@ class App:
         self._preview = False
         self._custom_styles = dict(self._settings.get('custom_styles') or {})
         self._llm_ok = False
+        self._browser_win = None     # the single View All window
         self._meta_cache = {}        # name -> (mtime, searchable text), rebuilt as files change
         self._search_after = None    # debounce id, so a keystroke does not re-filter the folder
         self._mask = None            # PIL 'L' at the picture's own size
@@ -1696,10 +1697,11 @@ class App:
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
         path = Path(path)
-        try:
-            self.gal_canvas.focus_set()      # so arrows and Space drive the strip after a click
-        except Exception:
-            pass
+        if not browser:
+            try:
+                self.gal_canvas.focus_set()  # so arrows and Space drive the strip after a click
+            except Exception:
+                pass
         ctrl = bool(event.state & 0x0004)
         shift = bool(event.state & 0x0001)
 
@@ -1917,11 +1919,18 @@ class App:
 
     def open_all(self):
         """Every image, scrolling, with the same search and star filters as the strip."""
+        existing = getattr(self, '_browser_win', None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
         self.refresh_gallery()
         if not self._all_files():
             self.hint.configure(text='no images yet')
             return
         win = tk.Toplevel(self.root)
+        self._browser_win = win
         win.title('View All')
         try:
             win.state('zoomed')
@@ -1989,8 +1998,10 @@ class App:
 
         def close_browser():
             self._all_widgets = {}
+            self._browser_win = None
             win.destroy()
 
+        win.protocol('WM_DELETE_WINDOW', close_browser)
         box.bind('<KeyRelease>', lambda e: (self._on_search_typing(), render()))
         only.configure(command=render)
         ttk.Button(foot, text='Close', command=close_browser).pack(side='left')

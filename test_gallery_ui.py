@@ -936,6 +936,24 @@ def main():
     fresh.unlink(); fresh.with_suffix('.json').unlink(missing_ok=True)
     app.refresh_gallery(); root.update()
 
+    print('\n-- View All opens once, and clicking a tile does not send it behind')
+    app.clear_selection()
+    app.open_all(); root.update()
+    app.open_all(); app.open_all(); root.update()
+    wins = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.winfo_exists()]
+    check('three clicks open one window', len(wins) == 1, str(len(wins)))
+    app.text.focus_force(); root.update()
+    app._on_tile_click(NS(state=0), list(app._all_widgets)[2], browser=True); root.update()
+    check('a click in the window still selects', len(app.selected) == 1, str(len(app.selected)))
+    check('and does not pull focus to the main strip', root.focus_get() is not app.gal_canvas,
+          str(root.focus_get()))
+    check('the window is still there afterwards', bool(wins[0].winfo_exists()))
+    wins[0].destroy(); root.update()
+    app.open_all(); root.update()
+    again = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.winfo_exists()]
+    check('closing and reopening gives exactly one', len(again) == 1, str(len(again)))
+    again[0].destroy(); root.update()
+
     print('\n-- View All: multiselect that cannot close the window under you')
     check('the button is called View All', 'View All' in str(app.more_btn['text']), str(app.more_btn['text']))
     app.clear_selection()
