@@ -42,6 +42,7 @@ from tkinter import messagebox, simpledialog, ttk
 from PIL import Image, ImageDraw, ImageTk
 
 import zimage_gen as zg
+from rephrase import rephrase_text
 
 
 # --------------------------------------------------------------------------- websocket (text frames only)
@@ -750,35 +751,40 @@ class App:
         row.grid(row=2, column=0, sticky='ew')
         row.columnconfigure(3, weight=1)
         # Generate itself now lives at the bottom of the column; this row holds the modifiers and second actions
+        rephrase_row = ttk.Frame(row)
+        rephrase_row.grid(row=0, column=0, columnspan=6, sticky='w', pady=(2, 2))
+        self.rephrase_btn = ttk.Button(rephrase_row, text='\u21bb rephrase', command=self.rephrase)
+        self.rephrase_btn.pack(side='left')
+
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
-        self.stop_btn.grid(row=0, column=0, sticky='w')
+        self.stop_btn.grid(row=1, column=0, sticky='w')
         self.retry_btn = ttk.Button(row, text='Retry', command=self.retry)
-        self.retry_btn.grid(row=0, column=0, sticky='w')
+        self.retry_btn.grid(row=1, column=0, sticky='w')
         self.retry_btn.grid_remove()
         self.preview_btn = ttk.Button(row, text='Preview', command=self.preview)
-        self.preview_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
-        ttk.Label(row, text='size').grid(row=0, column=2, padx=(12, 4))
+        self.preview_btn.grid(row=1, column=1, sticky='w', padx=(6, 0))
+        ttk.Label(row, text='size').grid(row=1, column=2, padx=(12, 4))
         self.size_var = tk.StringVar(value=str(self._settings.get('size') or args.size))
         self.size_cb = ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
                                     values=['256', '320', '384', '448', '512', '640', '768', '1024'])
-        self.size_cb.grid(row=0, column=3, sticky='w')
-        ttk.Label(row, text='layout').grid(row=0, column=4, padx=(10, 4))
+        self.size_cb.grid(row=1, column=3, sticky='w')
+        ttk.Label(row, text='layout').grid(row=1, column=4, padx=(10, 4))
         self.layout_var = tk.StringVar(value=self._settings.get('layout') or 'single')
         self.layout_cb = ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
                                       values=['single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'])
-        self.layout_cb.grid(row=0, column=5, sticky='w')
+        self.layout_cb.grid(row=1, column=5, sticky='w')
 
         # one at a time by default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
         # individually reproducible and the VRAM peak stays that of a single image
         self.seq_var = tk.BooleanVar(value=True)
         self.seq_chk = ttk.Checkbutton(row, text='one image at a time', variable=self.seq_var)
-        self.seq_chk.grid(row=1, column=0, columnspan=3, sticky='w', pady=(4, 0))
+        self.seq_chk.grid(row=2, column=0, columnspan=3, sticky='w', pady=(4, 0))
         # off by default: a generation is text to image unless an image was picked from the gallery
         self.chain_var = tk.BooleanVar(value=False)
         self.chain_chk = ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var)
-        self.chain_chk.grid(row=2, column=0, columnspan=4, sticky='w', pady=(2, 0))
+        self.chain_chk.grid(row=3, column=0, columnspan=4, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
-        seedbox.grid(row=1, column=3, columnspan=3, sticky='w', pady=(4, 0))
+        seedbox.grid(row=2, column=3, columnspan=3, sticky='w', pady=(4, 0))
         ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
         self.seed = tk.StringVar(value=str(args.seed))
         self.seed_entry = ttk.Entry(seedbox, textvariable=self.seed, width=10)
@@ -791,7 +797,7 @@ class App:
         self.seed_rnd.pack(side='left', padx=(4, 0))
 
         stylerow = ttk.Frame(row)
-        stylerow.grid(row=3, column=0, columnspan=5, sticky='w', pady=(6, 0))
+        stylerow.grid(row=4, column=0, columnspan=5, sticky='w', pady=(6, 0))
         ttk.Label(stylerow, text='style').pack(side='left', padx=(0, 4))
         self.style_var = tk.StringVar(value=self._settings.get('style') or 'none')
         self.style_cb = ttk.Combobox(stylerow, textvariable=self.style_var, width=12, state='readonly',
@@ -1332,6 +1338,31 @@ class App:
 
     def _meta_of_current(self):
         return (read_meta(self._current) if self._current else None) or {}
+
+    def rephrase(self):
+        """Swap the prompt's words for synonyms. Offline and deterministic: pressing again walks the variants."""
+        text = self.text.get('1.0', 'end').strip()
+        if not text:
+            self.hint.configure(text='nothing to rephrase yet - type a prompt first')
+            return
+        # each press re-derives from the original wording, so the variants cycle instead of collapsing into each other
+        base = getattr(self, '_rephrase_base', None)
+        if base is None or text != getattr(self, '_rephrase_last', None):
+            base = text
+            self._rephrase_base = base
+            self._rephrase_turn = 0
+        self._rephrase_turn = getattr(self, '_rephrase_turn', 0) + 1
+        new, changed = rephrase_text(base, self._rephrase_turn)
+        if not changed:
+            self.hint.configure(text='no known synonyms in that prompt - try different words, or enhance with a '
+                                     'local model')
+            self._rephrase_turn -= 1
+            return
+        self._rephrase_last = new
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', new)
+        self.hint.configure(text='rephrased %d word%s - press again for another variant'
+                                 % (changed, '' if changed == 1 else 's'))
 
     def save_style(self):
         """Store the current prompt as a reusable style, the way A1111 keeps styles.csv."""
@@ -2209,6 +2240,7 @@ class App:
         t(self.stop_btn, 'Interrupt this run. Tiles already written are kept.')
         t(self.size_cb, 'Image size in pixels. Bigger is slower and uses more VRAM.')
         t(self.layout_cb, 'How many images one press makes: 1, 4, 9 or 16, saved as separate tiles on one sheet.')
+        t(self.rephrase_btn, 'Rewrites the prompt using synonyms. Offline: press again for another variant.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
                          'once.')
         t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')

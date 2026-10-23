@@ -179,6 +179,13 @@ per step, which adds grain and is the real "randomisation" knob), **strength** f
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
+**rephrase** sits directly under the prompt box and rewrites it with synonyms from a curated map (`rephrase.py`) - no
+model, no server, so it always works. Each press re-derives from the *original* wording and walks the next variant, so
+three presses give three different phrasings rather than converging; editing the text starts the cycle again. Whole
+words only, capitalisation carried over, and repeated words collapsed, so "leaning against a wall" cannot become
+"propped against against". It reports how many words moved ("rephrased 7 words"), and says so plainly when a prompt has
+no known synonyms instead of pretending it did something.
+
 Every control carries a one-line tooltip, and a **banner** above the progress bar states what the next Generate will
 do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one image · seed 1234`, switching to
 `EDIT img.png at 0.60` when a base is set. Choosing a layout prints its measured cost (`16 tiles · ≈ 3 m 39 s one at a

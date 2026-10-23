@@ -943,6 +943,41 @@ def main():
     app._persist()
     check('runs are persisted', bool(zui.load_settings().get('runs')), str(len(zui.load_settings().get('runs') or [])))
 
+    print('\n-- rephrase swaps known words for synonyms, offline')
+    import rephrase as rp2
+    check('no synonym entry lists its own key',
+          not any(o.lower() == k.lower() for k, v in rp2.SYNONYMS.items() for o in v))
+    out, n = rp2.rephrase_text('a red bicycle', 1)
+    check('known words are swapped', n == 2 and out == 'a crimson bike', out)
+    check('capitalisation is carried over', rp2.rephrase_text('A Red Bicycle', 1)[0] == 'A Crimson Bike')
+    check('unknown words are untouched', rp2.rephrase_text('a zorblax', 1) == ('a zorblax', 0))
+    check('punctuation survives', rp2.rephrase_text('red, blue; green.', 1)[0] == 'crimson, cobalt; emerald.')
+    check('two-word swaps do not double an adjacent word',
+          'against against' not in rp2.rephrase_text('leaning against a wall', 2)[0],
+          rp2.rephrase_text('leaning against a wall', 2)[0])
+    variants = {rp2.rephrase_text('a red bicycle', n)[0] for n in (1, 2, 3, 4)}
+    check('different turns give different phrasings', len(variants) >= 3, str(sorted(variants)))
+
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'a red bicycle leaning against a weathered brick wall at golden sunset')
+    root.update()
+    check('the rephrase button sits under the prompt box',
+          app.rephrase_btn.winfo_rooty() >= app.text.winfo_rooty() + app.text.winfo_height() - 4,
+          'button y=%d, prompt bottom=%d' % (app.rephrase_btn.winfo_rooty(),
+                                             app.text.winfo_rooty() + app.text.winfo_height()))
+    app.rephrase(); first = app.text.get('1.0', 'end').strip(); root.update()
+    check('pressing it rewrites the prompt', first != 'a red bicycle leaning against a weathered brick wall at golden sunset',
+          first)
+    check('and says how many words moved', 'rephrased' in app.hint['text'], app.hint['text'])
+    app.rephrase(); second = app.text.get('1.0', 'end').strip()
+    app.rephrase(); third = app.text.get('1.0', 'end').strip()
+    check('each press is a different variant', len({first, second, third}) == 3, ' | '.join([first, second, third]))
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a zorblax')
+    app.rephrase()
+    check('an unknown prompt is reported, not silently kept',
+          'no known synonyms' in app.hint['text'], app.hint['text'])
+    app.text.delete('1.0', 'end')
+
     print('\n-- the prompt repair tool')
     import repair_prompts as rp
     S = zui.STYLES['photo']
