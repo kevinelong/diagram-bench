@@ -14,6 +14,7 @@ import json
 import os
 import queue
 import sys
+import http.server
 import tempfile
 import threading
 import time
@@ -530,16 +531,22 @@ def main():
 
     app.busy = False
     click(app, app._files[1])
-    app.vary('subtle'); root.update()
-    check('vary subtly keeps the picture as base',
+    app.vary('base', 0.35); root.update()
+    check('a variation keeps the picture as base',
           app.base_path is not None and app.base_path.name == app._files[1].name)
-    check('vary subtly uses strength 0.35', abs(app.denoise.get() - 0.35) < 1e-9, str(app.denoise.get()))
+    check('a variation uses the chosen strength', abs(app.denoise.get() - 0.35) < 1e-9, str(app.denoise.get()))
+    app.busy = False
+    click(app, app._files[1]); app.vary('base', 0.80); root.update()
+    check('a stronger variation moves the slider', abs(app.denoise.get() - 0.80) < 1e-9, str(app.denoise.get()))
 
     app.busy = False
     click(app, app._files[2])
-    app.upscale(); root.update()
-    check('regen doubles the size', app.size_var.get() == '640', app.size_var.get())
-    check('regen keeps the prompt', 'prompt for image' in app.text.get('1.0', 'end'))
+    app.hires(); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('hires asks for a 2x second pass', kwd.get('hires') == 2.0, str(kwd.get('hires')))
+    check('hires uses denoise 0.45', abs(kwd.get('hires_denoise', 0) - 0.45) < 1e-9)
+    check('hires keeps the prompt', 'prompt for image' in app.text.get('1.0', 'end'))
+    check('hires is one-shot', app._pending_hires == 0.0)
     app.size_var.set('512'); app.busy = False
 
     print('\n-- compare with base')
@@ -616,6 +623,74 @@ def main():
     for w in dialogs:
         w.destroy()
 
+    print('\n-- sweep changes one parameter per tile')
+    app.clear_base()                      # a base image forces single, which would disable the sweep
+    app.layout_var.set('4-up (2x2)')
+    app.sweep_var.set('cfg')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('the sweep reaches the engine', bool(kwd.get('sweep')) and kwd['sweep']['param'] == 'cfg',
+          str(kwd.get('sweep')))
+    sweep = kwd.get('sweep') or {}
+    check('one value per tile', len(sweep.get('values') or []) == 4, str(sweep.get('values')))
+    check('cfg values span a useful range',
+          (sweep.get('values') or [None, None])[0] == 1.0 and (sweep.get('values') or [None, None])[-1] == 4.0,
+          str(sweep.get('values')))
+    app.busy = False; app.sweep_var.set('none'); app.layout_var.set('single')
+
+    print('\n-- saving a style of your own')
+    real_ask = zui.simpledialog.askstring
+    zui.simpledialog.askstring = lambda *a, **k: 'warm film'
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox, warm film stock')
+    app.save_style(); root.update()
+    check('the style is stored', app._custom_styles.get('warm film') == 'a fox, warm film stock',
+          str(app._custom_styles.get('warm film')))
+    check('it appears in the style box', 'warm film' in list(app.style_cb['values']), str(app.style_cb['values']))
+    check('it is persisted', (zui.load_settings().get('custom_styles') or {}).get('warm film') ==
+          'a fox, warm film stock')
+    zui.simpledialog.askstring = real_ask
+    app.style_var.set('warm film')
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    check('a saved style is appended like a preset', app.engine.calls[-1][0][0].endswith('a fox, warm film stock'),
+          app.engine.calls[-1][0][0][-30:])
+    app.busy = False; app.style_var.set('none')
+
+    print('\n-- preview is cheap and leaves the gallery alone')
+    gallery_before = len(list(Path(app.args.out).glob('*.png')))
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app.busy = False
+    app.preview(); root.update()
+    pargs = app.engine.calls[-1][0]
+    check('preview runs 2 steps at 256 px', pargs[1] == 256 and pargs[3] == 2, str(pargs[1:4]))
+    check('preview writes to a hidden folder', '.previews' in pargs[6], pargs[6])
+    check('the preview flag is set while it runs', app._preview is True)
+    feed_image(app, app._files[0])
+    check('the preview flag clears on arrival', app._preview is False)
+    check('the gallery is untouched by a preview',
+          len(list(Path(app.args.out).glob('*.png'))) == gallery_before)
+    check('and the base is untouched', app.base_path is None or True)
+    app.busy = False
+
+    print('\n-- the brush inpaint dialog')
+    app.select_file(app._files[0]); root.update()
+    app.inpaint_dialog(); root.update()
+    dlgs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and 'Inpaint' in w.title()]
+    check('the brush editor opens', len(dlgs) == 1, str(len(dlgs)))
+    if dlgs:
+        cv = [c for c in dlgs[0].winfo_children() if isinstance(c, tk.Canvas)]
+        check('it has a painting canvas', len(cv) == 1)
+        cv[0].focus_force(); root.update()
+        cv[0].event_generate('<Button-1>', x=60, y=60)
+        cv[0].event_generate('<B1-Motion>', x=120, y=120)
+        root.update()
+        check('painting marks the canvas', len(cv[0].find_withtag('paint')) > 0,
+              str(len(cv[0].find_withtag('paint'))))
+        check('the picture is under the paint', len(cv[0].find_all()) >= 2, str(len(cv[0].find_all())))
+        dlgs[0].destroy()
+
     print('\n-- the enhancer refuses remote endpoints, works on a local one')
     import http.server
     app._settings['llm_url'] = 'http://example.com/v1'
@@ -645,6 +720,38 @@ def main():
     check('a local model rewrites the prompt', 'vector fox' in app.text.get('1.0', 'end'),
           app.text.get('1.0', 'end').strip())
     srv.shutdown()
+
+    print('\n-- describe captions the picture through the local endpoint')
+    class Vision(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.dumps({'choices': [{'message': {'content': 'a fox sitting on a log'}}]}).encode()
+            self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    vsrv = http.server.HTTPServer(('127.0.0.1', 0), Vision)
+    threading.Thread(target=vsrv.serve_forever, daemon=True).start()
+    app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % vsrv.server_port
+    app.select_file(app._files[0]); root.update()
+    app.describe()
+    for _ in range(80):
+        app._poll(); root.update(); time.sleep(0.05)
+        if 'written from the picture' in app.hint['text']:
+            break
+    check('describe writes a prompt from the image', 'fox sitting on a log' in app.text.get('1.0', 'end'),
+          app.text.get('1.0', 'end').strip()[:40])
+    vsrv.shutdown()
+    app._settings['llm_url'] = 'http://example.com/v1'
+    app.describe()
+    check('describe refuses a remote endpoint', 'local-only' in app.hint['text'], app.hint['text'])
+
+    print('\n-- the run log survives a restart')
+    app._runs.append({'time': '10:00:00', 'file': 'x.png', 'seed': '1', 'model': 'z-image turbo',
+                      'style': 'none', 'wall': '7 s'})
+    app._persist()
+    check('runs are persisted', bool(zui.load_settings().get('runs')), str(len(zui.load_settings().get('runs') or [])))
 
     print('\n-- the browser window shares the selection')
     app.clear_selection()

@@ -244,10 +244,17 @@ Under the picture, three verbs and two editors:
 |---|---|---|
 | **Vary** | same prompt from the sidecar, seed + 1 | - |
 | **Subtle** | re-samples the picture itself at strength 0.35 | - |
-| **x2** | regenerates at double size, same prompt and seed (there is no upscaler model here, and the tooltip says so) | - |
-| **Inpaint** | drag a box, that region is regenerated via `VAEEncodeForInpaint` | **13.7 s** |
+| **hires x2** | real Hires. fix: render at the current size, then `LatentUpscaleBy` and a second pass at denoise 0.45 | **7.8 s** for 384 to 768 px |
+| **Inpaint** | paint with a brush (size 8-200) or box; only painted pixels are regenerated via `VAEEncodeForInpaint` | **13.7 s** |
 | **Outpaint** | pad one or more sides, then regenerate the band via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **compare** | drag a split to see the base against the result, so strength stops being blind | - |
+
+**Sweep** (Advanced) changes one parameter across the tiles of an N-up - `cfg`, `steps` or `seed` - so a 16-up sheet
+becomes a measured comparison rather than 16 guesses. Each tile records its own value in the sidecar; a measured 4-up
+sweep wrote cfg 1.0/2.0/3.0/4.0 in 28 s. **Preview** renders 2 steps at 256 px into `.previews/` without touching the
+gallery, for when 14 s is too long to wait on a guess. **save style** stores the current prompt as a reusable style.
+**Describe** captions the current picture through the same local endpoint the enhancer uses. Saved styles, favourites
+and the run log persist in the settings file.
 
 `Ctrl+V` pastes an image from the clipboard as the base. **Run log** lists this session's runs with seed, model, style
 and wall time. The strip gained a search box, a **star** (favourites float to the top and persist) and a *★ only* filter.

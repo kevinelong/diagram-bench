@@ -38,8 +38,8 @@ from datetime import datetime
 from pathlib import Path
 
 import tkinter as tk
-from tkinter import messagebox, ttk
-from PIL import Image, ImageTk
+from tkinter import messagebox, simpledialog, ttk
+from PIL import Image, ImageDraw, ImageTk
 
 import zimage_gen as zg
 
@@ -162,7 +162,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites')
+                 'favorites', 'custom_styles', 'runs')
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -366,7 +366,7 @@ class Engine:
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
-                 outpaint=None, style=None):
+                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -384,7 +384,9 @@ class Engine:
                         'negative': negative or None, 'style': style or None,
                         'model': (profile or zg.DEFAULT_MODEL),
                         'mask': (Path(mask_path).name if mask_path else None),
-                        'outpaint': list(outpaint) if outpaint else None}
+                        'outpaint': list(outpaint) if outpaint else None,
+                        'hires': (hires if hires > 1.0 else None),
+                        'hires_denoise': (hires_denoise if hires > 1.0 else None)}
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name = None
@@ -404,15 +406,26 @@ class Engine:
                     if self._cancel.is_set():
                         raise GenerationCancelled()
                     this_seed = seed + run_i if (sequential and not base_name) else seed
+                    run_steps, run_cfg, value = steps, cfg, None
+                    if sweep and sweep.get('values'):
+                        value = sweep['values'][run_i % len(sweep['values'])]
+                        if sweep['param'] == 'cfg':
+                            run_cfg = float(value)
+                        elif sweep['param'] == 'steps':
+                            run_steps = int(value)
+                        elif sweep['param'] == 'seed':
+                            this_seed = seed + int(value)
+                        self.events.put(('status', 'tile %d: %s=%s' % (run_i + 1, sweep['param'], value)))
                     if total > 1:
                         self.events.put(('status', 'tile %d of %d (seed %d)' % (run_i + 1, total, this_seed)))
-                    wf = zg.workflow(prompt, width, height, steps, cfg, this_seed,
+                    wf = zg.workflow(prompt, width, height, run_steps, run_cfg, this_seed,
                                      'zimage-ui-%d-%d' % (int(time.time() * 1000), run_i),
                                      base_image=base_name,
                                      denoise=(1.0 if not base_name else denoise),
                                      batch=(1 if (sequential or base_name) else total),
                                      sampler=sampler, negative=negative, profile=profile,
-                                     mask=mask_name, outpaint=outpaint)
+                                     mask=mask_name, outpaint=outpaint,
+                                     hires=hires, hires_denoise=hires_denoise)
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):
                         raw = self._download(img)
@@ -427,6 +440,8 @@ class Engine:
                         paths.append(path)
                         raws.append(raw)
                         rec = dict(meta, image=str(path), prompt=prompt, seed=this_seed, width=real_w,
+                                   steps=run_steps, cfg=run_cfg,
+                                   sweep=(('%s=%s' % (sweep['param'], value)) if sweep else None),
                                    height=real_h, created=datetime.now().isoformat(timespec='seconds'),
                                    model=(profile or zg.DEFAULT_MODEL),
                                    unet=zg.MODELS.get(profile or zg.DEFAULT_MODEL, {}).get('unet'),
@@ -538,11 +553,14 @@ class App:
         self._adv_shown = bool(self._settings.get('advanced') or False)
         self._base_img = None
         self._split = 0.5
-        self._runs = []
+        self._runs = list(self._settings.get('runs') or [])
         self._favorites = set(self._settings.get('favorites') or [])
         self.search_var = tk.StringVar(value='')
         self.starred_only = tk.BooleanVar(value=False)
         self.run_started_at = None
+        self._pending_hires = 0.0
+        self._preview = False
+        self._custom_styles = dict(self._settings.get('custom_styles') or {})
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -559,8 +577,8 @@ class App:
             root.state('zoomed')   # fill the screen: prompt left, picture right
         except Exception:
             root.geometry('1180x720')
-        # gallery + prompt column + picture: 760 was a lie, the controls clipped below about 1020
-        root.minsize(1080, 680)
+        # gallery + prompt column + picture: the controls need ~1200 before the picture column can hold its buttons
+        root.minsize(1200, 700)
         root.columnconfigure(0, weight=0, minsize=210)
         root.columnconfigure(1, weight=0, minsize=420)
         root.columnconfigure(2, weight=1)
@@ -661,6 +679,8 @@ class App:
         self.gen_btn.grid(row=0, column=0, sticky='w')
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
         self.stop_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
+        self.preview_btn = ttk.Button(row, text='Preview', command=self.preview)
+        self.preview_btn.grid(row=0, column=2, sticky='e')
         self.retry_btn = ttk.Button(row, text='Retry', command=self.retry)
         self.retry_btn.grid(row=0, column=1, sticky='w', padx=(6, 0))
         self.retry_btn.grid_remove()
@@ -701,8 +721,10 @@ class App:
         ttk.Label(stylerow, text='style').pack(side='left', padx=(0, 4))
         self.style_var = tk.StringVar(value=self._settings.get('style') or 'none')
         self.style_cb = ttk.Combobox(stylerow, textvariable=self.style_var, width=12, state='readonly',
-                                     values=list(STYLES))
+                                     values=list(STYLES) + sorted(self._custom_styles))
         self.style_cb.pack(side='left')
+        self.save_style_btn = ttk.Button(stylerow, text='save style', command=self.save_style)
+        self.save_style_btn.pack(side='left', padx=(4, 0))
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
         self.adv_btn.pack(side='left', padx=(12, 0))
 
@@ -730,6 +752,15 @@ class App:
                                      values=list(zg.MODELS))
         self.model_cb.pack(side='left', padx=(4, 10))
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
+        adv_sweep = ttk.Frame(self.advanced)
+        adv_sweep.pack(fill='x', pady=(4, 0))
+        ttk.Label(adv_sweep, text='sweep').pack(side='left')
+        self.sweep_var = tk.StringVar(value='none')
+        self.sweep_cb = ttk.Combobox(adv_sweep, textvariable=self.sweep_var, width=8, state='readonly',
+                                     values=['none', 'cfg', 'steps', 'seed'])
+        self.sweep_cb.pack(side='left', padx=(4, 4))
+        ttk.Label(adv_sweep, text='changes per tile across an N-up - the sheet becomes a comparison',
+                  foreground='#666').pack(side='left')
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
@@ -802,10 +833,13 @@ class App:
         act1.pack(fill='x')
         self.vary_btn = ttk.Button(act1, text='Vary', command=lambda: self.vary('vary'), state='disabled')
         self.vary_btn.pack(side='left')
-        self.vary_soft_btn = ttk.Button(act1, text='Subtle', state='disabled',
-                                        command=lambda: self.vary('subtle'))
+        self.vary_soft_btn = ttk.Menubutton(act1, text='Vary\u2026', state='disabled')
+        vary_menu = tk.Menu(self.vary_soft_btn, tearoff=False)
+        for label, strength in (('subtle (0.35)', 0.35), ('medium (0.60)', 0.60), ('strong (0.80)', 0.80)):
+            vary_menu.add_command(label=label, command=lambda s=strength: self.vary('base', s))
+        self.vary_soft_btn.configure(menu=vary_menu)
         self.vary_soft_btn.pack(side='left', padx=(4, 0))
-        self.upscale_btn = ttk.Button(act1, text='\u00d72', command=self.upscale, state='disabled')
+        self.upscale_btn = ttk.Button(act1, text='hires \u00d72', command=self.hires, state='disabled')
         self.upscale_btn.pack(side='left', padx=(4, 0))
         act2 = ttk.Frame(self.actions)
         act2.pack(fill='x', pady=(4, 0))
@@ -817,6 +851,8 @@ class App:
         self.compare_var = tk.BooleanVar(value=False)
         self.compare_chk = ttk.Checkbutton(act2, text='compare', variable=self.compare_var, command=self._redraw)
         self.compare_chk.pack(side='left', padx=(8, 0))
+        self.describe_btn = ttk.Button(act2, text='Describe', command=self.describe, state='disabled')
+        self.describe_btn.pack(side='left', padx=(8, 0))
 
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
@@ -970,10 +1006,85 @@ class App:
             self.advanced.grid_remove()
             self.adv_btn.configure(text='Advanced \u25b8')
 
+    def _style_suffix(self, name):
+        if name in self._custom_styles:
+            return self._custom_styles[name]
+        return STYLES.get(name, '')
+
     def _meta_of_current(self):
         return (read_meta(self._current) if self._current else None) or {}
 
-    def vary(self, mode):
+    def save_style(self):
+        """Store the current prompt as a reusable style, the way A1111 keeps styles.csv."""
+        current = self.text.get('1.0', 'end').strip()
+        if not current:
+            self.hint.configure(text='type a prompt first; the style saves the words after the subject')
+            return
+        name = simpledialog.askstring('Save style', 'Name for this style:', parent=self.root)
+        if not name:
+            return
+        name = name.strip().lower()[:24]
+        self._custom_styles[name] = current
+        self._persist()
+        self.style_cb.configure(values=list(STYLES) + sorted(self._custom_styles))
+        self.style_var.set(name)
+        self.hint.configure(text='style "%s" saved (%d bytes of prompt)' % (name, len(current)))
+
+    def describe(self):
+        """Caption the current picture with a local vision model, so the prompt can start from what is there."""
+        if self._current is None:
+            self.hint.configure(text='nothing to describe yet')
+            return
+        if not self._local_llm_url():
+            return
+        import base64
+        raw = Path(self._current).read_bytes()
+        b64 = base64.b64encode(raw).decode('ascii')
+
+        def work(url):
+            body = json.dumps({'model': 'local', 'temperature': 0.4, 'max_tokens': 160, 'messages': [
+                {'role': 'user', 'content': [
+                    {'type': 'text', 'text': 'Describe this image as a single image-generation prompt, '
+                                             'under 40 words. Reply with the prompt only.'},
+                    {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + b64}}]}]}).encode()
+            try:
+                req = urllib.request.Request(url + '/chat/completions', data=body,
+                                             headers={'Content-Type': 'application/json'})
+                data = json.loads(urllib.request.urlopen(req, timeout=90).read())
+                self.ui_events.put(('described', data['choices'][0]['message']['content'].strip()))
+            except Exception as e:
+                self.ui_events.put(('enhance_failed', '%s: %s' % (type(e).__name__, e)))
+
+        url = self._local_llm_url()
+        self.hint.configure(text='describing with %s\u2026' % url)
+        threading.Thread(target=work, args=(url,), daemon=True).start()
+
+    def _local_llm_url(self):
+        url = (self._settings.get('llm_url') or 'http://127.0.0.1:8080/v1').rstrip('/')
+        host = urllib.parse.urlparse(url).hostname or ''
+        if host not in ('127.0.0.1', 'localhost', '::1'):
+            self.hint.configure(text='this is local-only: llm_url points at %s' % host)
+            return None
+        return url
+
+    def preview(self):
+        """A cheap look before committing: 2 steps at 256 px, saved outside the gallery."""
+        prompt = self.text.get('1.0', 'end').strip()
+        if not prompt:
+            self.hint.configure(text='type a prompt first')
+            return
+        if self.busy:
+            return
+        self._preview = True
+        self.status.configure(text='preview: 2 steps at 256 px')
+        self.engine.generate(prompt, 256, 256, 2, zg.MODELS.get(self.model_var.get(), {}).get('cfg', 1.0),
+                             int(self.seed.get() or 0), str(Path(self.args.out) / '.previews'),
+                             batch=1, sequential=True, sampler=self.sampler_var.get(),
+                             negative=self.negative.get('1.0', 'end').strip(),
+                             profile=self.model_var.get(), style=self.style_var.get())
+        self.busy = True
+
+    def vary(self, mode, strength=0.35):
         """Re-run this picture's prompt. 'vary' moves the seed; 'subtle' re-samples the picture itself at 0.35."""
         meta = self._meta_of_current()
         prompt = (meta.get('prompt') or '').strip()
@@ -989,11 +1100,13 @@ class App:
             self.negative.insert('1.0', meta['negative'])
         if meta.get('seed') is not None:
             self.seed.set(str(meta['seed']))
-        if mode == 'subtle':
+        if mode == 'base':
+            # denoise-based variation: low keeps the picture, high wanders. Not A1111's latent blend, which needs a
+            # noise-blend node this ComfyUI does not have - the tooltip says which knob this actually is.
             self._set_base(self._current)
-            self.denoise.set(0.35)
-            self.hint.configure(text='subtle variation: re-sampling %s at strength 0.35'
-                                     % self._short_name(Path(self._current).name))
+            self.denoise.set(strength)
+            self.hint.configure(text='variation at strength %.2f of %s'
+                                     % (strength, self._short_name(Path(self._current).name)))
             self.generate()
         else:
             self.clear_base()
@@ -1001,26 +1114,20 @@ class App:
             self.hint.configure(text='variation: same prompt, seed %s' % self.seed.get())
             self.generate()
 
-    def upscale(self):
-        """Regenerate at double size. This is not super-resolution: there is no upscaler model here, so the picture is
-        drawn again at 2x with the same prompt and seed, which keeps the composition at the model's own resolution."""
+    def hires(self):
+        """Render at the current size, then a second pass at 2x with denoise 0.45 - A1111's Hires. fix.
+
+        This is a real enlargement: the extra pixels are sampled by the model, not interpolated.
+        """
         meta = self._meta_of_current()
-        if self._current is None or not (meta.get('prompt') or '').strip():
-            self.hint.configure(text='regen needs an image with its prompt recorded')
-            return
-        try:
-            w, h = Image.open(self._current).size
-        except Exception:
-            self.hint.configure(text='cannot read the size of %s' % Path(self._current).name)
-            return
-        target = min(1024, max(w, h) * 2)
-        self.size_var.set(str(target))
-        self.text.delete('1.0', 'end')
-        self.text.insert('1.0', meta['prompt'])
-        if meta.get('seed') is not None:
-            self.seed.set(str(meta['seed']))
-        self.clear_base()
-        self.hint.configure(text='regen at %d px from the same prompt and seed (not a super-resolution pass)' % target)
+        if self._current is not None and (meta.get('prompt') or '').strip():
+            self.text.delete('1.0', 'end')
+            self.text.insert('1.0', meta['prompt'])
+            if meta.get('seed') is not None:
+                self.seed.set(str(meta['seed']))
+        self._pending_hires = 2.0
+        self.hint.configure(text='hires: rendering at %s px, then a second pass at 2x with denoise 0.45'
+                                 % self.size_var.get())
         self.generate()
 
     def paste_base(self):
@@ -1048,55 +1155,75 @@ class App:
         self.hint.configure(text='pasted %dx%d from the clipboard as the base' % got.size)
 
     def inpaint_dialog(self):
-        """Pick a rectangle to regenerate. The rest of the picture is preserved by VAEEncodeForInpaint."""
+        """Paint the area to regenerate: brush or box, then VAEEncodeForInpaint keeps everything else."""
         if self._current is None:
             return
         src = Image.open(self._current).convert('RGB')
-        win = tk.Toplevel(self.root)
-        win.title('Inpaint - drag a box over what should change')
         side = 520
         view = src.copy()
         view.thumbnail((side, side), Image.LANCZOS)
         scale = view.width / src.width
-        photo = ImageTk.PhotoImage(view)
+        mask = Image.new('L', src.size, 0)          # painted at full resolution
+        brush = {'draw': ImageDraw.Draw(mask), 'size': 40, 'down': None}
+
+        win = tk.Toplevel(self.root)
+        win.title('Inpaint - paint what should change')
+        bar = ttk.Frame(win)
+        bar.pack(fill='x', padx=8, pady=(8, 0))
+        ttk.Label(bar, text='brush').pack(side='left')
+        size_var = tk.IntVar(value=40)
+        ttk.Spinbox(bar, from_=8, to=200, increment=8, width=6, textvariable=size_var).pack(side='left', padx=(4, 10))
+        size_var.trace_add('write', lambda *a: brush.__setitem__('size', max(4, int(size_var.get() or 40))))
+        def clear_mask():
+            brush['draw'].rectangle([0, 0, src.width, src.height], fill=0)
+            cv.delete('paint')
+
+        ttk.Button(bar, text='Clear', command=clear_mask).pack(side='left')
+
         cv = tk.Canvas(win, width=view.width, height=view.height, highlightthickness=0)
         cv.pack(padx=8, pady=8)
-        cv.create_image(0, 0, anchor='nw', image=photo)
-        cv.image = photo
-        state = {'start': None, 'rect': None}
+        base_photo = ImageTk.PhotoImage(view)
 
-        def press(e):
-            state['start'] = (e.x, e.y)
-            if state['rect']:
-                cv.delete(state['rect'])
-            state['rect'] = cv.create_rectangle(e.x, e.y, e.x, e.y, outline='#2a6df4', width=2)
+        def redraw():
+            cv.delete('all')
+            cv.create_image(0, 0, anchor='nw', image=base_photo)
 
-        def drag(e):
-            if state['start'] and state['rect']:
-                cv.coords(state['rect'], state['start'][0], state['start'][1], e.x, e.y)
+        def paint(e):
+            # the mask is authoritative; the canvas gets an item per stroke so the user sees it immediately
+            r = brush['size'] / 2.0 / scale
+            x, y = e.x / scale, e.y / scale
+            brush['draw'].ellipse([x - r, y - r, x + r, y + r], fill=255)
+            cv.create_oval(e.x - r * scale, e.y - r * scale, e.x + r * scale, e.y + r * scale,
+                           fill='#e6283c', stipple='gray50', outline='', tags='paint')
+            if brush['down']:
+                brush['draw'].line([brush['down'][0], brush['down'][1], x, y], fill=255, width=int(2 * r))
+                cv.create_line(brush['down'][2], brush['down'][3], e.x, e.y,
+                               fill='#e6283c', width=int(2 * r * scale), stipple='gray50', tags='paint')
+            brush['down'] = (x, y, e.x, e.y)
+
+        def release(_):
+            brush['down'] = None
+
+        cv.bind('<Button-1>', paint)
+        cv.bind('<B1-Motion>', paint)
+        cv.bind('<ButtonRelease-1>', release)
+        redraw()
 
         def ok():
-            if not state['start']:
-                win.destroy(); return
-            x0, y0, x1, y1 = cv.coords(state['rect'])
-            box = [int(min(x0, x1) / scale), int(min(y0, y1) / scale),
-                   int(max(x0, x1) / scale), int(max(y0, y1) / scale)]
-            if box[2] - box[0] < 8 or box[3] - box[1] < 8:
-                win.destroy(); return
-            mask = Image.new('L', src.size, 0)
-            ImageDraw.Draw(mask).rectangle(box, fill=255)
+            if not mask.getbbox():
+                self.hint.configure(text='paint something first')
+                return
             masks = Path(self.args.out) / '.masks'
             masks.mkdir(parents=True, exist_ok=True)
             out = masks / (Path(self._current).stem + '-mask.png')
             mask.save(out)
             win.destroy()
             self._set_base(self._current)
-            self.hint.configure(text='inpainting %s - the boxed area is regenerated' % self._short_name(Path(self._current).name))
+            self.hint.configure(text='inpainting %s - only the painted area is regenerated'
+                                     % self._short_name(Path(self._current).name))
             self._generate_with(mask_path=out, denoise=1.0)
 
-        cv.bind('<Button-1>', press)
-        cv.bind('<B1-Motion>', drag)
-        ttk.Button(win, text='Inpaint this area', command=ok).pack(pady=(0, 8))
+        ttk.Button(win, text='Inpaint painted area', command=ok).pack(pady=(0, 8))
 
     def outpaint_dialog(self):
         """Extend the picture in one direction by padding it, then regenerating the padded band."""
@@ -1185,6 +1312,18 @@ class App:
             tree.column(c, width=w, anchor='w')
         for r in reversed(self._runs):
             tree.insert('', 'end', values=(r['time'], r['file'], r['seed'], r['model'], r['style'], r['wall']))
+        def open_row(_=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            name = tree.item(sel[0], 'values')[1]
+            target = Path(self.args.out) / name
+            if target.exists():
+                self.select_file(target)
+            else:
+                self.hint.configure(text='%s is no longer on disk' % name)
+
+        tree.bind('<Double-1>', open_row)
         tree.pack(fill='both', expand=True, padx=8, pady=8)
         if not self._runs:
             ttk.Label(win, text='nothing generated yet this session').pack(anchor='w', padx=10)
@@ -1549,7 +1688,8 @@ class App:
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
         self.info_btn.state(['!disabled'] if self._current else ['disabled'])
-        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.inpaint_btn, self.outpaint_btn):
+        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.inpaint_btn, self.outpaint_btn,
+                  self.describe_btn):
             b.state(['!disabled' if self._current else 'disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
@@ -1758,7 +1898,9 @@ class App:
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),
                           'model': self.model_var.get(), 'advanced': self._adv_shown,
-                          'favorites': sorted(self._favorites)}
+                          'favorites': sorted(self._favorites),
+                          'custom_styles': self._custom_styles,
+                          'runs': self._runs[-50:]}
         return save_settings(self._settings)
 
     def use_starter(self, prompt):
@@ -1891,16 +2033,30 @@ class App:
         except (AttributeError, ValueError):
             steps = self.args.steps
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
-        suffix = STYLES.get(style, '')
+        suffix = self._style_suffix(style)
         full_prompt = (prompt + ', ' + suffix) if suffix else prompt
         model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
         cfg = zg.MODELS.get(model, {}).get('cfg', 1.0)
         negative = self.negative.get('1.0', 'end').strip() if hasattr(self, 'negative') else ''
+        sweep = None
+        choice = self.sweep_var.get() if hasattr(self, 'sweep_var') else 'none'
+        if choice != 'none' and batch > 1:
+            n = batch
+            if choice == 'cfg':
+                vals = [round(1.0 + 3.0 * i / max(1, n - 1), 2) for i in range(n)]
+            elif choice == 'steps':
+                vals = [max(1, int(round(2 + 10.0 * i / max(1, n - 1)))) for i in range(n)]
+            else:
+                vals = [i * 1000 for i in range(n)]
+            sweep = {'param': choice, 'values': vals}
+            self.hint.configure(text='sweeping %s across %d tiles: %s' % (choice, n, vals[:4]))
+        hires, self._pending_hires = self._pending_hires, 0.0
         self.run_started_at = time.time()
         self.engine.generate(full_prompt, size, size, steps, cfg,
                              seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
-                             sampler=self.sampler_var.get(), negative=negative, profile=model, style=style)
+                             sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,
+                             hires=hires, hires_denoise=0.45, sweep=sweep)
 
     def _poll(self):
         if not self.root.winfo_exists():     # the window is gone: stop rescheduling
@@ -1914,7 +2070,11 @@ class App:
         try:
             while True:
                 kind, payload = self.ui_events.get_nowait()
-                if kind == 'enhanced':
+                if kind == 'described':
+                    self.text.delete('1.0', 'end')
+                    self.text.insert('1.0', payload)
+                    self.hint.configure(text='prompt written from the picture by the local model')
+                elif kind == 'enhanced':
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', payload)
                     self.hint.configure(text='prompt rewritten by the local model')
@@ -1959,6 +2119,16 @@ class App:
                     self._show_tile_progress(idx, total)
                 elif kind == 'image':
                     raw, path = payload
+                    if self._preview:
+                        self._preview = False
+                        self.busy = False
+                        self.gen_btn.state(['!disabled'])
+                        self.stop_btn.state(['disabled'])
+                        self.bar.grid_remove()
+                        self.ticks.configure(text='')
+                        self._show(raw)
+                        self.status.configure(text='preview (2 steps, 256 px) - nothing saved to the gallery')
+                        return
                     self._raw = raw
                     meta = read_meta(path)
                     if meta and meta.get('tiles'):
