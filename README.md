@@ -159,6 +159,11 @@ python zimage_ui.py                 # prompt box left, picture right, progress b
 close, but leaves a server it did not start alone. Enter generates, Shift+Enter adds a newline. Step progress comes from
 ComfyUI's websocket (`/ws`) through a minimal RFC6455 client, because no websocket package is installed here.
 
+Controls: **guidance** (1.0-3.0; Z-Image Turbo is distilled for 1.0, and above ~2 shapes soften - measured), **strength**
+for img2img, **seed+1 per tile** (generate an N-up one image at a time with successive seeds, so every tile is
+individually reproducible and the VRAM peak stays that of a single image; unticked asks for one batch instead, which is
+about 8x faster: 6 s vs 50 s for 9-up at 256 px).
+
 Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3)**. An N-up run asks
 ComfyUI for one batch, saves every tile separately, and composes the tiles into a single contact sheet which is what the
 window shows and what the gallery lists (`..._sheet_9up.png`). A base image forces single, because an edit is one image.

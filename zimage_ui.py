@@ -239,38 +239,87 @@ class Engine:
         return client_id
 
     # -- generation --------------------------------------------------------
-    def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0, batch=1):
+    def _listen_progress(self):
+        client_id = 'zimage-ui-%d' % int(time.time() * 1000)
+        self._ws = WSClient(self.host, self.port, client_id, self.events, self._stop)
+        self._ws.start()
+        return client_id
+
+    def _queue_wait(self, wf):
+        """Queue a workflow and wait for its images to appear in history. Returns a list of output image dicts."""
+        pid = self._post('/prompt', {'prompt': wf})['prompt_id']
+        started = time.monotonic()
+        while time.monotonic() - started < 900:
+            h = self._get('/history/' + pid, timeout=30)
+            if pid in h:
+                entry = h[pid]
+                if entry.get('status', {}).get('status_str') == 'error':
+                    raise RuntimeError('workflow failed')
+                imgs = [i for out in (entry.get('outputs') or {}).values() for i in out.get('images', [])]
+                if imgs:
+                    return imgs
+            time.sleep(0.3)
+        raise RuntimeError('timed out waiting for the image')
+
+    def _download(self, img):
+        q = urllib.parse.urlencode({'filename': img['filename'], 'subfolder': img.get('subfolder', ''),
+                                    'type': img.get('type', 'output')})
+        return urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
+
+    def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
+                 batch=1, sequential=True):
+        """One image, or a sheet of N.
+
+        sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
+        and the VRAM peak stays that of a single image. sequential=False asks ComfyUI for one batch of N latents, which
+        is fewer round trips but whose tiles are not reproducible from individual seeds.
+        """
         def work():
             try:
-                client_id = self._listen_progress() if self.progress else None
+                out = Path(out_dir)          # not out_dir: assigning that would shadow the parameter
+                out.mkdir(parents=True, exist_ok=True)
+                meta = {'steps': steps, 'cfg': cfg, 'denoise': (denoise if base_path else 1.0),
+                        'base_image': (str(base_path) if base_path else None)}
+                (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
+                stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name = None
                 if base_path:
                     base_name = zg.upload_image('http://%s:%d' % (self.host, self.port), base_path)
                     self.events.put(('status', 'base image uploaded: %s' % base_name))
-                wf = zg.workflow(prompt, width, height, steps, cfg, seed,
-                                 'zimage-ui-%d' % int(time.time() * 1000),
-                                 base_image=base_name, denoise=(1.0 if not base_name else denoise),
-                                 batch=(1 if base_name else batch))
-                self.events.put(('status', 'queued'))
-                pid = self._post('/prompt', {'prompt': wf, 'client_id': client_id})['prompt_id']
-                self.events.put(('queued', pid))
-                started = time.monotonic()
-                while time.monotonic() - started < 900:
-                    h = self._get('/history/' + pid, timeout=30)
-                    if pid in h:
-                        entry = h[pid]
-                        images = [i for out in (entry.get('outputs') or {}).values() for i in out.get('images', [])]
-                        if entry.get('status', {}).get('status_str') == 'error':
-                            self.events.put(('error', 'workflow failed'))
-                            return
-                        if images:
-                            self._fetch(images, out_dir, prompt, seed, width, height,
-                                        meta={'steps': steps, 'cfg': cfg,
-                                              'base_image': (str(base_path) if base_path else None),
-                                              'denoise': (denoise if base_path else 1.0)})
-                            return
-                    time.sleep(0.4)
-                self.events.put(('error', 'timed out waiting for the image'))
+                client_id = self._listen_progress() if self.progress else None
+
+                total = 1 if base_name else max(1, batch)
+                runs = range(total) if (sequential or base_name) else [0]
+                paths, raws = [], []
+                for run_i in runs:
+                    this_seed = seed + run_i if (sequential and not base_name) else seed
+                    if total > 1:
+                        self.events.put(('status', 'tile %d of %d (seed %d)' % (run_i + 1, total, this_seed)))
+                    wf = zg.workflow(prompt, width, height, steps, cfg, this_seed,
+                                     'zimage-ui-%d-%d' % (int(time.time() * 1000), run_i),
+                                     base_image=base_name,
+                                     denoise=(1.0 if not base_name else denoise),
+                                     batch=(1 if (sequential or base_name) else total))
+                    outs = self._queue_wait(wf)
+                    for k, img in enumerate(outs):
+                        raw = self._download(img)
+                        suffix = '' if total == 1 else ('_%02d' % (run_i + k + 1))
+                        path = out / ('%s_%dx%d_seed%d%s.png' % (stamp, width, height, this_seed, suffix))
+                        path.write_bytes(raw)
+                        paths.append(path)
+                        raws.append(raw)
+                        rec = dict(meta, image=str(path), prompt=prompt, seed=this_seed, width=width,
+                                   height=height, created=datetime.now().isoformat(timespec='seconds'),
+                                   model=zg.UNET,
+                                   index=(run_i + k + 1) if total > 1 else None,
+                                   of=total if total > 1 else None)
+                        path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
+
+                if len(paths) == 1:
+                    self.events.put(('image', (raws[0], str(paths[0]))))
+                    return
+                sheet_path = self._compose_sheet(paths, out, stamp, prompt, seed, width, height, meta)
+                self.events.put(('image', (sheet_path.read_bytes(), str(sheet_path))))
             except urllib.error.HTTPError as e:
                 body = e.read().decode('utf-8', 'replace')
                 hint = ''
@@ -281,35 +330,8 @@ class Engine:
                 self.events.put(('error', '%s: %s' % (type(e).__name__, e)))
         threading.Thread(target=work, daemon=True).start()
 
-    def _fetch(self, items, out_dir, prompt, seed, width, height, meta=None):
-        """Save every returned image; when there is more than one, also compose a contact sheet to show."""
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        meta = dict(meta or {})
-        (out_dir / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
-
-        tiles, paths = [], []
-        for i, img in enumerate(items, start=1):
-            q = urllib.parse.urlencode({'filename': img['filename'], 'subfolder': img.get('subfolder', ''),
-                                        'type': img.get('type', 'output')})
-            raw = urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
-            suffix = '' if len(items) == 1 else '_%02d' % i
-            path = out_dir / ('%s_%dx%d_seed%d%s.png' % (stamp, width, height, seed, suffix))
-            path.write_bytes(raw)
-            paths.append(path)
-            tiles.append(Image.open(io.BytesIO(raw)).convert('RGB'))
-            rec = {'image': str(path), 'prompt': prompt, 'seed': seed, 'width': width, 'height': height,
-                   'created': datetime.now().isoformat(timespec='seconds'), 'model': zg.UNET,
-                   'index': i if len(items) > 1 else None, 'of': len(items) if len(items) > 1 else None,
-                   'steps': meta.get('steps'), 'cfg': meta.get('cfg'),
-                   'base_image': meta.get('base_image'), 'denoise': meta.get('denoise')}
-            path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
-
-        if len(items) == 1:
-            self.events.put(('image', (paths[0].read_bytes(), str(paths[0]))))
-            return
-
+    def _compose_sheet(self, paths, out_dir, stamp, prompt, seed, width, height, meta):
+        tiles = [Image.open(p).convert('RGB') for p in paths]
         cols = 2 if len(tiles) == 4 else 3 if len(tiles) == 9 else max(1, int(math.ceil(math.sqrt(len(tiles)))))
         rows = int(math.ceil(len(tiles) / cols))
         tw, th = tiles[0].size
@@ -317,19 +339,14 @@ class Engine:
         sheet = Image.new('RGB', (cols * tw + (cols - 1) * gap, rows * th + (rows - 1) * gap), 'white')
         for i, tile in enumerate(tiles):
             sheet.paste(tile, ((i % cols) * (tw + gap), (i // cols) * (th + gap)))
-        sheet_path = out_dir / ('%s_%dx%d_seed%d_sheet_%dup.png' % (stamp, width, height, seed, len(tiles)))
-        sheet.save(sheet_path, 'PNG')
-        rec = {'image': str(sheet_path), 'prompt': prompt, 'seed': seed, 'width': width, 'height': height,
-               'created': datetime.now().isoformat(timespec='seconds'), 'model': zg.UNET,
-               'batch': len(tiles), 'tiles': [str(p) for p in paths],
-               'steps': meta.get('steps'), 'cfg': meta.get('cfg'),
-               'base_image': meta.get('base_image'), 'denoise': meta.get('denoise')}
-        sheet_path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
-        self.events.put(('image', (sheet_path.read_bytes(), str(sheet_path))))
-
-
-
-# --------------------------------------------------------------------------- the window
+        path = out_dir / ('%s_%dx%d_seed%d_sheet_%dup.png' % (stamp, width, height, seed, len(tiles)))
+        sheet.save(path, 'PNG')
+        rec = dict(meta, image=str(path), prompt=prompt, seed=seed, width=width, height=height,
+                   created=datetime.now().isoformat(timespec='seconds'), model=zg.UNET,
+                   batch=len(tiles), seeds=[int(Path(p).stem.rsplit('_seed', 1)[1].split('_')[0]) for p in paths],
+                   tiles=[str(p) for p in paths])
+        path.with_suffix('.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
+        return path
 
 
 class App:
@@ -396,6 +413,9 @@ class App:
         self.layout_var = tk.StringVar(value='single')
         ttk.Combobox(row, textvariable=self.layout_var, width=9, state='readonly',
                      values=['single', '4-up (2x2)', '9-up (3x3)']).grid(row=0, column=4, sticky='w')
+        self.seq_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(row, text='seed+1 per tile', variable=self.seq_var).grid(row=1, column=0, columnspan=3,
+                                                                                sticky='w', pady=(4, 0))
         ttk.Label(row, text='seed').grid(row=0, column=5, padx=(10, 4))
         self.seed = tk.StringVar(value=str(args.seed))
         ttk.Entry(row, textvariable=self.seed, width=10).grid(row=0, column=6, sticky='w')
@@ -411,6 +431,17 @@ class App:
         self.denoise_text = ttk.Label(self.base_row, text='0.60')
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
+
+        guide_row = ttk.Frame(left)
+        guide_row.grid(row=7, column=0, sticky='ew', pady=(4, 0))
+        ttk.Label(guide_row, text='guidance').pack(side='left')
+        self.cfg = tk.DoubleVar(value=1.0)
+        ttk.Scale(guide_row, from_=1.0, to=3.0, variable=self.cfg, length=130).pack(side='left', padx=4)
+        self.cfg_text = ttk.Label(guide_row, text='1.00', width=5)
+        self.cfg_text.pack(side='left')
+        ttk.Label(guide_row, text='1.0 = turbo default  ·  above ~2 shapes soften',
+                  foreground='#777').pack(side='left', padx=(6, 0))
+        self.cfg.trace_add('write', lambda *a: self.cfg_text.configure(text='%.2f' % self.cfg.get()))
 
         # ---- middle: progress (sits under the button, above the status line)
         self.bar = ttk.Progressbar(left, mode='determinate', maximum=1.0)
@@ -598,11 +629,13 @@ class App:
             self.status.configure(text='queued… one %d px image' % size)
         else:
             cols = 2 if batch == 4 else 3
-            self.status.configure(text='queued… %d images at %d px -> %d px sheet'
-                                  % (batch, size, size * cols + (cols - 1) * 6))
-        self.engine.generate(prompt, size, size, self.args.steps, self.args.cfg,
+            self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
+                                  % (batch, size, size * cols + (cols - 1) * 6,
+                                     'seeds %d-%d one at a time' % (seed, seed + batch - 1)
+                                     if self.seq_var.get() else 'one batch of %d' % batch))
+        self.engine.generate(prompt, size, size, self.args.steps, self.cfg.get(),
                              seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
-                             denoise=self.denoise.get(), batch=batch)
+                             denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get())
 
     def _poll(self):
         try:
