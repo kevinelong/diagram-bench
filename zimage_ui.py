@@ -267,7 +267,7 @@ class Engine:
         return urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
-                 batch=1, sequential=True):
+                 batch=1, sequential=True, sampler='euler'):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -299,7 +299,8 @@ class Engine:
                                      'zimage-ui-%d-%d' % (int(time.time() * 1000), run_i),
                                      base_image=base_name,
                                      denoise=(1.0 if not base_name else denoise),
-                                     batch=(1 if (sequential or base_name) else total))
+                                     batch=(1 if (sequential or base_name) else total),
+                                     sampler=sampler)
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):
                         raw = self._download(img)
@@ -443,6 +444,10 @@ class App:
         ttk.Scale(guide_row, from_=1.0, to=3.0, variable=self.cfg, length=130).pack(side='left', padx=4)
         self.cfg_text = ttk.Label(guide_row, text='1.00', width=5)
         self.cfg_text.pack(side='left')
+        ttk.Label(guide_row, text='  sampler').pack(side='left', padx=(10, 4))
+        self.sampler_var = tk.StringVar(value='euler')
+        ttk.Combobox(guide_row, textvariable=self.sampler_var, width=15, state='readonly',
+                     values=['euler', 'euler_ancestral']).pack(side='left')
         ttk.Label(guide_row, text='1.0 = turbo default  ·  above ~2 shapes soften',
                   foreground='#777').pack(side='left', padx=(6, 0))
         self.cfg.trace_add('write', lambda *a: self.cfg_text.configure(text='%.2f' % self.cfg.get()))
@@ -582,7 +587,8 @@ class App:
         base = meta.get('base_image')
         self.status.configure(text='enlarging %s at 1024 px, seed %s' % (Path(tile_path).name, seed))
         self.engine.generate(prompt, 1024, 1024, self.args.steps, self.cfg.get(), int(seed), self.args.out,
-                             base_path=base, denoise=(meta.get('denoise') or 1.0), batch=1, sequential=True)
+                             base_path=base, denoise=(meta.get('denoise') or 1.0), batch=1, sequential=True,
+                             sampler=self.sampler_var.get())
 
     def copy_image(self):
         if not self._current:
@@ -694,7 +700,8 @@ class App:
                                      if self.seq_var.get() else 'one batch of %d' % batch))
         self.engine.generate(prompt, size, size, self.args.steps, self.cfg.get(),
                              seed, self.args.out, base_path=(str(self.base_path) if self.base_path else None),
-                             denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get())
+                             denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
+                             sampler=self.sampler_var.get())
 
     def _poll(self):
         try:

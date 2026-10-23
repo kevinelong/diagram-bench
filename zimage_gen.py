@@ -220,7 +220,8 @@ def get(path, timeout=30):
     return json.loads(urllib.request.urlopen(HOST + path, timeout=timeout).read())
 
 
-def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1):
+def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, denoise=1.0, batch=1,
+             sampler='euler', scheduler='simple'):
     """ComfyUI graph. With `base_image` (a name already uploaded to ComfyUI's input dir) the graph becomes img2img:
     LoadImage -> VAEEncode -> KSampler(denoise<1). Denoise 1.0 is text-to-image."""
     if base_image:
@@ -235,8 +236,8 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
             "11": {"class_type": "VAEEncode", "inputs": {"pixels": ["10", 0], "vae": ["3", 0]}},
             "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
                                                       "latent_image": ["11", 0], "seed": seed, "steps": steps,
-                                                      "cfg": cfg, "sampler_name": "euler", "scheduler": "simple",
-                                                      "denoise": denoise}},
+                                                      "cfg": cfg, "sampler_name": sampler,
+                                                      "scheduler": scheduler, "denoise": denoise}},
             "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
             "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}},
         }
@@ -250,7 +251,7 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
                                                              "batch_size": batch}},
         "7": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0],
                                                   "latent_image": ["6", 0], "seed": seed, "steps": steps, "cfg": cfg,
-                                                  "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+                                                  "sampler_name": sampler, "scheduler": scheduler, "denoise": 1.0}},
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
         "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": prefix}},
     }
