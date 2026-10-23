@@ -162,7 +162,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs', 'sidebar')
+                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step')
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -395,7 +395,7 @@ class Engine:
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
-                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None):
+                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -435,7 +435,9 @@ class Engine:
                 for run_i in runs:
                     if self._cancel.is_set():
                         raise GenerationCancelled()
-                    this_seed = seed + run_i if (sequential and not base_name) else seed
+                    # every tile gets its own seed: seed, seed+step, seed+2*step ... A batch request cannot do this -
+                    # one latent batch is drawn from one seed - which is why sequential is the default.
+                    this_seed = seed + run_i * max(1, int(seed_step)) if (sequential and not base_name) else seed
                     run_steps, run_cfg, value = steps, cfg, None
                     if sweep and sweep.get('values'):
                         value = sweep['values'][run_i % len(sweep['values'])]
@@ -825,6 +827,16 @@ class App:
                                      values=list(zg.MODELS))
         self.model_cb.pack(side='left', padx=(4, 10))
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
+        adv_step = ttk.Frame(self.advanced)
+        adv_step.pack(fill='x', pady=(4, 0))
+        ttk.Label(adv_step, text='seed step').pack(side='left')
+        self.seed_step_var = tk.IntVar(value=int(self._settings.get('seed_step') or 1))
+        self.seed_step = ttk.Spinbox(adv_step, from_=1, to=100000, increment=1, width=8,
+                                     textvariable=self.seed_step_var)
+        self.seed_step.pack(side='left', padx=(4, 4))
+        ttk.Label(adv_step, text='added per tile: 1 = seed, seed+1, seed+2 ...',
+                  foreground='#666').pack(side='left')
+
         adv_sweep = ttk.Frame(self.advanced)
         adv_sweep.pack(fill='x', pady=(4, 0))
         ttk.Label(adv_sweep, text='sweep').pack(side='left')
@@ -2202,6 +2214,7 @@ class App:
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),
                           'model': self.model_var.get(), 'advanced': self._adv_shown,
+                          'seed_step': self.seed_step_var.get(),
                           'favorites': sorted(self._favorites),
                           'custom_styles': self._custom_styles,
                           'sidebar': self._sidebar,
@@ -2366,6 +2379,9 @@ class App:
                 self.hint.configure(text='this shape peaked at %.1f GiB (%s) - close to the %.1f GiB on this card. '
                                          'Lower the size, or use one image at a time.'
                                          % (vram / 1024.0, src, VRAM_TOTAL_MIB / 1024.0))
+            if not self.seq_var.get():
+                self.hint.configure(text='one batch shares seed %s across all %d tiles - tick "one image at a time" '
+                                         'for a different seed per tile' % (seed, batch))
             cols = 2 if batch == 4 else 4 if batch == 16 else 3
             self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
                                   % (batch, size, size * cols + (cols - 1) * 6,
@@ -2398,7 +2414,8 @@ class App:
                              mask_path=(str(mask_path) if mask_path else None), outpaint=outpaint,
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
                              sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,
-                             hires=hires, hires_denoise=0.45, sweep=sweep)
+                             hires=hires, hires_denoise=0.45, sweep=sweep,
+                             seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1))
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()

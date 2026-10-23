@@ -278,6 +278,11 @@ replaced by the estimate, and a model with no measured peak (flux1 schnell) show
 the window actually did. **enhance** and **Describe** are disabled with a reason until a local OpenAI-compatible
 endpoint answers at `llm_url` (probed once at startup, never off-machine).
 
+**Every tile of an N-up gets its own seed** - `seed`, `seed+step`, `seed+2*step` - and **seed step** (Advanced, default
+1) widens the stride when +1 is not enough spread. A *single batch* cannot do this: one latent batch is drawn from one
+seed, so its tiles share it, and the hint says so when you untick *one image at a time*. Measured on a 4-up at 256 px,
+step 1: seeds 500/501/502/503 and pairwise mean absolute differences of 58-84, i.e. genuinely different pictures.
+
 **Sweep** (Advanced) changes one parameter across the tiles of an N-up - `cfg`, `steps` or `seed` - so a 16-up sheet
 becomes a measured comparison rather than 16 guesses; the values can be typed (`1,2,3` or `1..4x6`) instead of taking
 the default spread. Each tile records its own value in the sidecar; a measured 4-up

@@ -755,6 +755,25 @@ def main():
     check('pads clear after the run', app._pads == [0, 0, 0, 0])
     app.busy = False
 
+    print('\n-- every tile gets its own seed')
+    app.clear_base(); app.layout_var.set('4-up (2x2)'); app.seq_var.set(True)
+    app.seed_step_var.set(1)
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    kwd = app.engine.calls[-1][1]
+    check('a sequential N-up sends a seed step of 1', kwd.get('seed_step') == 1, str(kwd.get('seed_step')))
+    check('and runs one request per tile', kwd.get('sequential') is True)
+    app.busy = False; app.seed_step_var.set(3); app.engine.calls.clear()
+    app.generate(); root.update()
+    check('a wider step reaches the engine', app.engine.calls[-1][1].get('seed_step') == 3,
+          str(app.engine.calls[-1][1].get('seed_step')))
+    app.seed_step_var.set(1)
+
+    app.busy = False; app.seq_var.set(False); app.engine.calls.clear()
+    app.generate(); root.update()
+    check('one batch says plainly that the seed is shared', 'shares seed' in app.hint['text'], app.hint['text'])
+    app.busy = False; app.seq_var.set(True); app.layout_var.set('single')
+
     print('\n-- sweep changes one parameter per tile')
     app.clear_base()                      # a base image forces single, which would disable the sweep
     app.layout_var.set('4-up (2x2)')
