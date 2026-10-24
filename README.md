@@ -395,6 +395,33 @@ to `%TEMP%\variety-images` because they are large. Re-run with:
     python variety_probe.py --prompt "a red bicycle leaning against a weathered brick wall at golden sunset" \
                             --prompt "a red bicycle" --count 8 --out variety/prompt-specificity
 
+## Can an instruction change the pose without changing the character? (`pose_probe.py`)
+
+One standing character, one instruction ("now sitting on a wooden chair, same face, same green coat"), swept across four
+checkpoints and four denoise values. Two things must both hold, so each cell is judged on both: a vision model
+(deepseek-flash) is shown the original and the edit and asked whether the character is the same and whether the figure is
+seated. `S` = same character, `P` = seated, `SP` = both.
+
+| model | 0.40 | 0.55 | 0.70 | 0.85 | works | s/image |
+|---|---|---|---|---|---|---|
+| z-image turbo | S | S | . | **SP** | 1/4 | 8 |
+| flux1 schnell | S | S | S | P | 0/4 | 13 |
+| **flux2 klein** | S | S | **SP** | **SP** | **2/4** | **8** |
+| flux1 dev | S | S | **SP** | **SP** | 2/4 | 33 |
+
+The finding is a **threshold, not a ranking**: below ~0.70 every model keeps the character and leaves her standing - the
+sheet shows chairs appearing behind a figure still on her feet, because the prompt's object arrives and the pose does not.
+Above the threshold the pose changes and identity starts to go; the threshold sits at 0.85 for z-image, 0.70 for flux2
+klein and flux1 dev, and for flux1 schnell no value in the sweep both seated her and kept her (0.85 seats her, with a
+different face).
+
+**Practical answer: flux2 klein at denoise 0.70** - the same verdict as flux1 dev at a quarter of the time (8 s against
+33 s). Reproduction: `python pose_probe.py`. Caveats: one seed per cell, one instruction, one character, and a cloud judge
+- a repeat with three seeds per cell is the next step before treating 0.70 as exact.
+
+For this job properly, the right tool is an instruction-editing checkpoint (FLUX.1 Kontext [dev], Qwen-Image-Edit) or
+ControlNet/OpenPose conditioning, none of which is installed here; Kontext quantised is ~6-12 GiB against a 12 GiB card.
+
 ## Motion: animating the SVGs rather than the camera
 
 The image models here cannot make video. What we *can* do is animate the SVG documents we already generate,

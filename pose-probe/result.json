@@ -1,0 +1,233 @@
+{
+ "character": "full body studio photograph of a young woman with short red hair and freckles, wearing a green wool coat and black boots, standing upright facing the camera, plain white background",
+ "instruction": "the same young woman with short red hair and freckles, wearing the same green wool coat and black boots, now sitting on a wooden chair, legs bent, same face, plain white background",
+ "seed": 4242,
+ "judge": "deepseek-flash",
+ "created": "2026-10-24T10:14:59",
+ "rows": [
+  {
+   "profile": "z-image turbo",
+   "denoise": 0.4,
+   "seconds": 8.0,
+   "pixel_delta": 2.98,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\z-image-turbo_d0.40\\20261024-100913_512x512_seed4242.png"
+  },
+  {
+   "profile": "z-image turbo",
+   "denoise": 0.55,
+   "seconds": 7.8,
+   "pixel_delta": 4.37,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\z-image-turbo_d0.55\\20261024-100936_512x512_seed4242.png"
+  },
+  {
+   "profile": "z-image turbo",
+   "denoise": 0.7,
+   "seconds": 7.6,
+   "pixel_delta": 12.31,
+   "same_character": false,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "no",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\z-image-turbo_d0.70\\20261024-100953_512x512_seed4242.png"
+  },
+  {
+   "profile": "z-image turbo",
+   "denoise": 0.85,
+   "seconds": 8.0,
+   "pixel_delta": 50.5,
+   "same_character": true,
+   "sitting": true,
+   "works": true,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\z-image-turbo_d0.85\\20261024-101008_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 schnell",
+   "denoise": 0.4,
+   "seconds": 18.0,
+   "pixel_delta": 2.57,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux1-schnell_d0.40\\20261024-101018_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 schnell",
+   "denoise": 0.55,
+   "seconds": 12.8,
+   "pixel_delta": 3.42,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux1-schnell_d0.55\\20261024-101039_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 schnell",
+   "denoise": 0.7,
+   "seconds": 13.2,
+   "pixel_delta": 5.09,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux1-schnell_d0.70\\20261024-101054_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 schnell",
+   "denoise": 0.85,
+   "seconds": 13.2,
+   "pixel_delta": 56.32,
+   "same_character": false,
+   "sitting": true,
+   "works": false,
+   "raw": {
+    "same_character": "no",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\flux1-schnell_d0.85\\20261024-101110_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.4,
+   "seconds": 10.3,
+   "pixel_delta": 7.46,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux2-klein_d0.40\\20261024-101126_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.55,
+   "seconds": 7.3,
+   "pixel_delta": 9.43,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux2-klein_d0.55\\20261024-101138_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.7,
+   "seconds": 7.7,
+   "pixel_delta": 32.63,
+   "same_character": true,
+   "sitting": true,
+   "works": true,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\flux2-klein_d0.70\\20261024-101148_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.85,
+   "seconds": 8.1,
+   "pixel_delta": 45.54,
+   "same_character": true,
+   "sitting": true,
+   "works": true,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\flux2-klein_d0.85\\20261024-101158_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 dev",
+   "denoise": 0.4,
+   "seconds": 37.7,
+   "pixel_delta": 4.02,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux1-dev_d0.40\\20261024-101213_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 dev",
+   "denoise": 0.55,
+   "seconds": 34.0,
+   "pixel_delta": 5.27,
+   "same_character": true,
+   "sitting": false,
+   "works": false,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "no"
+   },
+   "image": "pose-probe\\flux1-dev_d0.55\\20261024-101253_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 dev",
+   "denoise": 0.7,
+   "seconds": 32.0,
+   "pixel_delta": 10.83,
+   "same_character": true,
+   "sitting": true,
+   "works": true,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\flux1-dev_d0.70\\20261024-101342_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux1 dev",
+   "denoise": 0.85,
+   "seconds": 33.5,
+   "pixel_delta": 23.51,
+   "same_character": true,
+   "sitting": true,
+   "works": true,
+   "raw": {
+    "same_character": "yes",
+    "sitting": "yes"
+   },
+   "image": "pose-probe\\flux1-dev_d0.85\\20261024-101417_512x512_seed4242.png"
+  }
+ ]
+}
