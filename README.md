@@ -263,6 +263,12 @@ touches into `.prompt-backups/`. It kept the user's edited words that had landed
 hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Four profiles, each verified
 against ComfyUI's own node list:
 
+**The defaults are the measured pose combo: flux2 klein at strength 0.70.** That pairing is the only one in the sweep
+that both seated the figure and kept her face from denoise 0.70 upward, at 7-8 s and 5.7 GiB - lighter than the
+previous default (z-image, 6.7 GiB) and quicker to edit. The trade-off is honest: for pure text-to-image z-image turbo
+is still the faster choice (5.6 s against ~8 s), so it is one click away in the model picker. Both are remembered per
+install; strength is on the slider and persisted alongside the model.
+
 | profile | weights | encoder | measured at 256 px, 4 steps |
 |---|---|---|---|
 | z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |

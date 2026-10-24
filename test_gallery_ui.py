@@ -344,7 +344,20 @@ def main():
     app.seq_var.set(True)
     app.layout_var.set('single')
 
+    print('\n-- the defaults are the measured pose-combo')
+    check('the default model is flux2 klein', zui.zg.DEFAULT_MODEL == 'flux2 klein', zui.zg.DEFAULT_MODEL)
+    check('the default strength is 0.70', abs(app.denoise.get() - 0.70) < 1e-9, str(app.denoise.get()))
+    check('and its step count comes from the profile',
+          str(zui.zg.MODELS['flux2 klein']['steps']) == app.steps_var.get(),
+          '%s vs %s' % (zui.zg.MODELS['flux2 klein']['steps'], app.steps_var.get()))
+    app.denoise.set(0.55); app._persist()
+    check('the strength is remembered', abs(zui.load_settings().get('denoise', 0) - 0.55) < 1e-9,
+          str(zui.load_settings().get('denoise')))
+    app.denoise.set(0.70)
+
     print('\n-- the VRAM estimate comes from measurements, not from a guess')
+    mib_k, src_k = zui.estimate_vram('flux2 klein', 1, 512)
+    check('the new default has a measured peak', mib_k == 5749, str(mib_k))
     mib, src = zui.estimate_vram('z-image turbo', 16, 512)
     check('a measured shape returns its peak', mib == 8927, str(mib))
     check('and says where it came from', 'measured' in (src or ''), str(src))
@@ -990,7 +1003,7 @@ def main():
           str(rp2._WORDNET_TABLE.get('forest')))
     check('hand-written entries win over generated ones',
           rp2.LOOKUP['brick'][0] in ('masonry', 'brickwork', 'terracotta block'), str(rp2.LOOKUP['brick']))
-    check('WordNet's prose senses are filtered out of colours', 'loss' not in rp2.LOOKUP.get('red', []),
+    check('WordNet prose senses are filtered out of colours', 'loss' not in rp2.LOOKUP.get('red', []),
           str(rp2.LOOKUP.get('red')))
     check('and out of physical objects', 'fool' not in rp2.LOOKUP.get('mug', []) and
           'mark' not in rp2.LOOKUP.get('mug', []), str(rp2.LOOKUP.get('mug')))

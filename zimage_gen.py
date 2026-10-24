@@ -84,7 +84,10 @@ MODELS = {
                   'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
                   'vae': 'ae.safetensors', 'steps': 20, 'cfg': 3.5},
 }
-DEFAULT_MODEL = 'z-image turbo'
+# Default comes from measurement (pose_probe.py): an edit needs to cross the pose threshold at denoise 0.70, and
+# flux2 klein is the checkpoint that does it while keeping the character, at 7-8 s and 5.7 GiB. z-image turbo is
+# faster per image on text-to-image but needs 0.85 to re-pose, and pays for it in identity.
+DEFAULT_MODEL = 'flux2 klein'
 
 
 OPEN_HELPER = Path(r'C:/Users/kevin/ai_bench/Open-Document.ps1')

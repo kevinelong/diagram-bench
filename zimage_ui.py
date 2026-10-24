@@ -163,7 +163,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step')
+                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise')
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -220,6 +220,8 @@ FILTER_CAP = 200     # while a search is active the strip is a result list, not 
 #  size and the checkpoint dominate. Every entry below actually ran - including 16-up at 512 px, which an earlier
 #  hand-written warning claimed would not fit.
 VRAM_POINTS = {
+    ('flux2 klein', 1, 512): 5749,
+    ('flux2 klein', 1, 1024): 5655,
     ('z-image turbo', 1, 512): 6708,
     ('z-image turbo', 1, 1024): 7193,
     ('z-image turbo', 16, 384): 8206,
@@ -824,7 +826,8 @@ class App:
         self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
         ttk.Label(self.base_row, text='strength').pack(side='left')
-        self.denoise = tk.DoubleVar(value=0.6)
+        # 0.70 is the measured pose threshold for flux2 klein; below it an instruction changes the props, not the pose
+        self.denoise = tk.DoubleVar(value=float(self._settings.get('denoise') or 0.70))
         self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130)
         self.strength_scale.pack(side='left', padx=4)
         self.denoise_text = ttk.Label(self.base_row, text='0.60')
@@ -2302,6 +2305,7 @@ class App:
                           'history': self._history[-20:], 'style': self.style_var.get(),
                           'model': self.model_var.get(), 'advanced': self._adv_shown,
                           'seed_step': self.seed_step_var.get(),
+                          'denoise': round(self.denoise.get(), 2),
                           'favorites': sorted(self._favorites),
                           'custom_styles': self._custom_styles,
                           'sidebar': self._sidebar,
