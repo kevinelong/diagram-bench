@@ -5,3 +5,8 @@ hard/*.png
 kicad/*.kicad_prl
 *.tmp
 kicad/*.kicad_pro
+
+# generated image folders from the probe tools
+pose-probe/*/
+pose-probe-smoke/
+variety/*/

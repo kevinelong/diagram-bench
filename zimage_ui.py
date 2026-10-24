@@ -831,10 +831,10 @@ class App:
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
-        self.clear_base_btn = ActionButton(left, text='Clear base', command=self.clear_base,
-                                           font=('Segoe UI', 13), bg='#e6e6e6', fg='#222222',
-                                           activebackground='#d6d6d6', activeforeground='#111111',
-                                           disabledforeground='#9a9a9a', relief='flat', bd=0,
+        self.clear_base_btn = ActionButton(left, text='Clear Base', command=self.clear_base,
+                                           font=('Segoe UI', 13), bg='#ff6347', fg='white',
+                                           activebackground='#e0492f', activeforeground='white',
+                                           disabledforeground='#ffe0d8', relief='flat', bd=0,
                                            height=2, cursor='hand2', takefocus=True)
         self.clear_base_btn.grid(row=10, column=0, sticky='ew', pady=(10, 4))
         self.clear_base_btn.state(['disabled'])
