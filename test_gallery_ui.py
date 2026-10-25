@@ -51,6 +51,10 @@ class StubEngine:
         self.calls.append((a, k))
         return True
 
+    def make_clip(self, *a, **k):
+        self.calls.append(('clip', a, k))
+        return True
+
     def cancel(self):
         return 'stub: nothing to cancel'
 
@@ -405,9 +409,9 @@ def main():
           str(app.model_cb['values']))
     check('Clear base sits directly above Generate', app.clear_base_btn.winfo_y() < app.gen_btn.winfo_y(),
           'clear y=%d generate y=%d' % (app.clear_base_btn.winfo_y(), app.gen_btn.winfo_y()))
-    check('and shares its width and height',
-          (app.clear_base_btn.winfo_width(), app.clear_base_btn.winfo_height()) ==
-          (app.gen_btn.winfo_width(), app.gen_btn.winfo_height()),
+    check('and shares Generate height, half its width, beside Use as Base',
+          app.clear_base_btn.winfo_height() == app.gen_btn.winfo_height()
+          and app.clear_base_btn.winfo_width() < app.gen_btn.winfo_width(),
           '%dx%d vs %dx%d' % (app.clear_base_btn.winfo_width(), app.clear_base_btn.winfo_height(),
                               app.gen_btn.winfo_width(), app.gen_btn.winfo_height()))
     app.clear_base(); root.update()
@@ -505,9 +509,13 @@ def main():
           'each new image becomes the next base' in app.chain_chk['text'].lower(), app.chain_chk['text'])
     check('and no longer claims to reuse the last image',
           'reuse last image' not in app.chain_chk['text'].lower(), app.chain_chk['text'])
-    check('Use as Base sits between the base row and Clear Base',
-          app.use_base_btn.winfo_y() < app.clear_base_btn.winfo_y(), 
-          'use y=%d clear y=%d' % (app.use_base_btn.winfo_y(), app.clear_base_btn.winfo_y()))
+    check('Use as Base sits beside Clear Base on one row',
+          app.use_base_btn.winfo_y() == app.clear_base_btn.winfo_y()
+          and app.use_base_btn.winfo_x() < app.clear_base_btn.winfo_x(),
+          'use %d,%d clear %d,%d' % (app.use_base_btn.winfo_x(), app.use_base_btn.winfo_y(),
+                                     app.clear_base_btn.winfo_x(), app.clear_base_btn.winfo_y()))
+    check('and both are directly above Generate',
+          app.use_base_btn.winfo_rooty() < app.gen_btn.winfo_rooty())
 
     print('\n-- the button names the action; the line below reports the real time')
     app._refresh_generate_label()
@@ -1180,6 +1188,22 @@ def main():
     app.search_var.set(''); app.refresh_gallery(); root.update()
     check('clearing the search returns to a recency window', len(app._tile_widgets) == zui.RECENT_N,
           str(len(app._tile_widgets)))
+
+    print('\n-- make clip: needs a picture, then hands off to the video path')
+    app._current = None
+    app.clip_btn.invoke(); root.update()
+    check('with nothing shown it asks for a picture', 'show a picture first' in app.hint['text'], app.hint['text'])
+    app.select_file(app._files[0]); root.update()
+    app.engine.calls.clear()
+    app.clip_btn.invoke(); root.update()
+    clip_calls = [c for c in app.engine.calls if c[0] == 'clip']
+    check('with a picture it calls the video path', len(clip_calls) == 1, str(app.engine.calls[-1:]))
+    if clip_calls:
+        kw = clip_calls[0][2]
+        check('and asks for 2 s at a trained grid', kw.get('frames') == 49 and kw.get('grid') in ('1:1', '16:9'),
+              str(kw))
+    check('the clip button is disabled while it works', 'disabled' in app.clip_btn.state())
+    app.busy = False; app.clip_btn.state(['!disabled']); root.update()
 
     for w in root.winfo_children():
         if isinstance(w, tk.Toplevel):

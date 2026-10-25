@@ -123,6 +123,9 @@ plumbing must exist before any profile works:
 | | uncensored encoder `flux2-klein-4b-uncensored-q4_k_m.gguf` | **2.33 GiB** | `nerualdreming/flux2-klein-4b-uncensored-text-encoder` (ungated) |
 | `flux2 klein 9b uncensored` | `flux-2-klein-9b-Q4_K_M.gguf` (diffusion_models) | **5.50 GiB** | `unsloth/FLUX.2-klein-9B-GGUF` (ungated, FLUX non-commercial) |
 | | `flux2-klein-9b-uncensored-te-q5_k_m.gguf` (text_encoders) | **5.45 GiB** | `wy8edhuh/flux2-klein-9b-uncensored-text-encoder-Q5_K_M-GGUF`, a re-quant of `ponpoke`'s Qwen3-8B |
+| **`Make clip`** (Wan 2.2 TI2V-5B) | `Wan2.2-TI2V-5B-Q4_K_M.gguf` (diffusion_models) | **3.20 GiB** | `QuantStack/Wan2.2-TI2V-5B-GGUF` (apache-2.0) |
+| | `umt5_xxl_fp8_e4m3fn_scaled.safetensors` (text_encoders) | **6.27 GiB** | `Comfy-Org/Wan_2.2_ComfyUI_Repackaged` (apache-2.0) |
+| | `wan2.2_vae.safetensors` (vae) | **1.31 GiB** | the same repo |
 | `z-image turbo` | `z_image_turbo_nvfp4.safetensors`, `qwen_3_4b_fp4_mixed.safetensors`, `ae.safetensors` | ~10 GiB | Comfy-Org z_image_turbo |
 | `flux1 schnell` / `flux1 dev` | `flux1-*-Q4_K_S.gguf`, `t5xxl_fp8_e4m3fn.safetensors`, `clip_l.safetensors`, `flux1-ae.safetensors` | ~11.4 GiB each | city96 FLUX.1 GGUF repos |
 
@@ -136,6 +139,31 @@ curl -s http://127.0.0.1:8006/object_info/UnetLoaderGGUF | python -c "import jso
 If a profile's encoder is missing from the first list, the file is in the wrong folder or the extra-paths config is
 not loaded - the graph will be rejected rather than silently falling back. `--profile` lists the wired profiles and
 `zimage_ui.py` offers the same list in its model picker.
+
+## Making a clip from a still
+
+**Make clip (2 s)** under Generate turns the picture on screen into two seconds of motion with **Wan 2.2 TI2V-5B**
+(5B, apache-2.0, GGUF Q4_K_M). Three things are enforced rather than documented:
+
+- **The image model is unloaded first.** `video.py` posts `/free {"unload_models": true, "free_memory": true}` before
+  submitting, because the encoder (6.27 GiB) and the diffusion model (3.20 GiB) are loaded one after the other and the
+  card must hold the larger of the two, not both plus a resident image model.
+- **The still is cropped to a grid the model was trained on** - 704x704, or 1280x704 for a wide picture, multiples of
+  32. A 1024x1024 still becomes 704x704: 47 % of the pixels, which is also 47 % of the compute. Stretching to fit is
+  what produces the warped-motion look.
+- **Frame count is 4k+1** (49, 81, 121 frames = 2.0, 3.4, 5.0 s at 24 fps), which is what the model's temporal
+  compression accepts. `video.py` refuses anything else instead of rounding silently.
+
+Measured on this box, from a 512 px still, 704x704, 49 frames, 30 steps at cfg 5.0, uni_pc:
+
+| run | wall | peak VRAM | result |
+|---|---|---|---|
+| first clip (weights load included) | **109.7 s** | **9,732 MiB** of 12,227 | 6.7 MiB animated WebP, 49 frames |
+
+That is ~2.2 s per frame end to end, so 5 s (121 frames) is a ~4.5 minute job, not a real-time one. Motion checked the
+only way worth checking: frame 24 differs from frame 0 by 26.6 mean absolute error with 63 % of pixels moved, and the
+bicycle stays coherent across the clip - no warping, no limb drift.
+CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt "the camera drifts left"`.
 
 ## Where the evidence lives
 

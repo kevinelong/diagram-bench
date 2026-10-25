@@ -555,6 +555,21 @@ from the previous arm, so that peak is a floor, not a measurement), edge energy 
 
 ---
 
+## `video.py` - a few seconds from a still (added 2026-10-25)
+
+**Measures.** Wan 2.2 TI2V-5B through ComfyUI's HTTP API: wall time per clip and peak VRAM sampled at 500 ms, plus the
+frame count, grid and file size. Not a metric of quality - that is what `anatomy_probe.py` is for, and no judged clip
+comparison exists.
+
+**Enforces.** Crop-to-grid before upload (704x704 or 1280x704, multiples of 32), `length` as 4k+1, and `/free` before
+the first submission so a resident image model does not share the card with a 6.27 GiB encoder.
+
+**Good.** 704x704, 49 frames, 30 steps, cfg 5.0, uni_pc: **109.7 s** wall, **9,732 MiB** peak, ~2.2 s per frame.
+**Not yet measured.** 121 frames, 1280x704, a second seed, and any clip-to-clip quality comparison - so the only claim
+this repository supports is the 2-second one above.
+
+---
+
 ## `klein_arm.py`, `flux_arm.py`, `zimage_arm.py` — the first three diffusion arms
 
 **Measures.** The same protocol as `generic_arm.py`, one file per model: per-image wall time, peak VRAM sampled at

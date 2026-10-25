@@ -363,6 +363,22 @@ class Engine:
         self._ws.start()
         return client_id
 
+    def make_clip(self, still, grid='1:1', frames=49, prompt='', seed=1234):
+        """Render a few seconds from a still, off the UI thread. Frees the image model first - video needs the VRAM."""
+        self._cancel.clear()
+
+        def work():
+            try:
+                import video
+                self.events.put(('status', 'freeing video memory for the video model...'))
+                rec = video.make_clip(still, grid=grid, frames=frames, prompt=prompt, seed=seed,
+                                      host='http://%s:%d' % (self.host, self.port))
+                self.events.put(('clip', rec))
+            except Exception as e:
+                self.events.put(('error', '%s: %s' % (type(e).__name__, e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def cancel(self):
         """Halt the running generation: interrupt the sampler, drop anything queued, and stop the worker waiting."""
         self._cancel.set()
@@ -835,22 +851,34 @@ class App:
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
-        # the deliberate gesture that arms an edit: a click in the strip only looks at an image
-        self.use_base_btn = ActionButton(left, text='Use as Base', command=self.use_as_base,
+        # the two base-image actions share one row directly above Generate: use the shown picture, or forget it.
+        # The deliberate gesture that arms an edit lives here, so a click in the strip only ever looks.
+        self.base_actions = ttk.Frame(left)
+        self.base_actions.grid(row=10, column=0, sticky='ew', pady=(10, 4))
+        self.base_actions.columnconfigure(0, weight=1)
+        self.base_actions.columnconfigure(1, weight=1)
+        self.use_base_btn = ActionButton(self.base_actions, text='Use as Base', command=self.use_as_base,
                                          font=('Segoe UI', 13), bg='#5c6b80', fg='white',
                                          activebackground='#4a5768', activeforeground='white',
                                          disabledforeground='#d5dae2', relief='flat', bd=0,
                                          height=2, cursor='hand2', takefocus=True)
-        self.use_base_btn.grid(row=9, column=0, sticky='ew', pady=(10, 0))
+        self.use_base_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
         self.use_base_btn.state(['disabled'])
 
-        self.clear_base_btn = ActionButton(left, text='Clear Base', command=self.clear_base,
+        self.clear_base_btn = ActionButton(self.base_actions, text='Clear Base', command=self.clear_base,
                                            font=('Segoe UI', 13), bg='#ff6347', fg='white',
                                            activebackground='#e0492f', activeforeground='white',
                                            disabledforeground='#ffe0d8', relief='flat', bd=0,
                                            height=2, cursor='hand2', takefocus=True)
-        self.clear_base_btn.grid(row=10, column=0, sticky='ew', pady=(10, 4))
+        self.clear_base_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
         self.clear_base_btn.state(['disabled'])
+
+        self.clip_btn = ActionButton(left, text='\u25b6 Make clip (2 s)', command=self.make_clip,
+                                     font=('Segoe UI', 11), bg='#3f4f63', fg='white',
+                                     activebackground='#33404f', activeforeground='white',
+                                     disabledforeground='#c9d2de', relief='flat', bd=0,
+                                     height=1, cursor='hand2', takefocus=True)
+        self.clip_btn.grid(row=13, column=0, sticky='ew', pady=(6, 0))
 
         self.gen_btn = ActionButton(left, text='\u26a1 Generate', command=self.generate,
                                     font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
@@ -2292,6 +2320,8 @@ class App:
         t(self.size_cb, 'Image size in pixels. Bigger is slower and uses more VRAM.')
         t(self.layout_cb, 'How many images one press makes: 1, 4, 9 or 16, saved as separate tiles on one sheet.')
         t(self.rephrase_btn, 'Rewrites the prompt using synonyms. Offline: press again for another variant.')
+        t(self.clip_btn, 'Makes a 2-second clip from the picture on screen with Wan 2.2 TI2V-5B.\n'
+                         'The image model is unloaded first, so the first clip waits for 10.8 GiB of weights.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
                          'once.')
         t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')
@@ -2466,6 +2496,35 @@ class App:
             self.canvas.itemconfigure('placeholder', width=max(90, w - 28))
         except Exception:
             pass
+
+    def make_clip(self):
+        """A few seconds of motion from the picture on screen: 704x704 or 1280x704, 2 s, 24 fps."""
+        if self.busy:
+            return
+        if self._current is None:
+            self.hint.configure(text='show a picture first - a clip starts from the picture on screen')
+            return
+        try:
+            seed = int(self.seed.get())
+        except ValueError:
+            seed = self.args.seed
+        with Image.open(self._current) as im:
+            grid = '16:9' if im.width >= im.height * 1.4 else '1:1'
+            size = im.size
+        self.busy = True
+        self.gen_btn.state(['disabled'])
+        self.clip_btn.state(['disabled'])
+        self.stop_btn.state(['disabled'])
+        self.bar.configure(mode='indeterminate')
+        self.bar.grid()
+        self.bar.start(12)
+        self.status.configure(text='making a clip from %s...' % self._short_name(Path(self._current).name))
+        clip_w, clip_h = (1280, 704) if grid == '16:9' else (704, 704)
+        self.hint.configure(text='%dx%d from a %dx%d still - the first clip of a session loads 10.8 GiB of video '
+                                 'weights, so expect minutes, not seconds'
+                            % (clip_w, clip_h, size[0], size[1]))
+        self.engine.make_clip(self._current, grid=grid, frames=49,
+                              prompt=self.text.get('1.0', 'end').strip(), seed=seed)
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
@@ -2692,12 +2751,24 @@ class App:
                     self._current = Path(path)
                     self._run_recorded(path)
                     self.copy_btn.state(['!disabled'])
+                elif kind == 'clip':
+                    self.busy = False
+                    self.gen_btn.state(['!disabled'])
+                    self.clip_btn.state(['!disabled'])
+                    self.bar.stop()
+                    self.bar.grid_remove()
+                    self.status.configure(text='wrote %s' % Path(payload['clip']).name)
+                    self.hint.configure(text='%d frames at 24 fps (%.1f s) in %ss, peak %s MiB - %s'
+                                        % (payload['frames'], payload['seconds'], payload['wall_s'],
+                                           payload['vram_peak_mib'], payload['clip']))
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
                     self.stop_btn.state(['disabled'])
                     self.bar.grid_remove()
                     self.ticks.configure(text='')
+                    self.clip_btn.state(['!disabled'])
+                    self.bar.stop()
                     self.status.configure(text='failed - nothing was saved')
                     self.hint.configure(
                         text='%s\n\nThe request went to ComfyUI on 127.0.0.1:%d. If the server is not running, '
