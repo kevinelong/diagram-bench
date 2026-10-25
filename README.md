@@ -267,7 +267,7 @@ touches into `.prompt-backups/`. It kept the user's edited words that had landed
 56 needed repair and the worst had the suffix three times mid-sentence.
 
 **model** sits in the always-visible row next to *style* - it is a first-class choice, not an Advanced secret, and the
-hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Four profiles, each verified
+hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Five profiles, each verified
 against ComfyUI's own node list:
 
 **The defaults are the measured pose combo: flux2 klein at strength 0.70.** That pairing is the only one in the sweep
@@ -281,7 +281,15 @@ install; strength is on the slider and persisted alongside the model.
 | z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |
 | flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
 | flux2 klein | `flux-2-klein-4b-Q4_K_M.gguf` (UnetLoaderGGUF) | qwen_3_4b_fp4_flux2 (flux2) | **9.8 s** at 512 px, 4 steps, cfg 1.0 |
+| flux2 klein uncensored | the same `flux-2-klein-4b-Q4_K_M.gguf` | `flux2-klein-4b-uncensored-q4_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | 7.1 s vs 13.3 s cold, 512 px, same seed |
 | flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
+
+**flux2 klein uncensored is an encoder swap, not a different diffusion model.** The diffusion GGUF, the VAE, steps and
+cfg are byte-identical to `flux2 klein`, so an A/B isolates the text encoder. The encoder is a Qwen3-4B language model
+in GGUF form (36 blocks, `blk.*` tensors, tokenizer metadata embedded - verified by reading the file, not the repo
+name), which is why a profile can name `CLIPLoaderGGUF` and nothing else in the graph changes. Source:
+`nerualdreming/flux2-klein-4b-uncensored-text-encoder` q4_k_m, 2.33 GiB, ungated; the richer gated `ponpoke` repos
+(bf16 7.49 GiB, and the 9B/Qwen3-8B variant) need the terms accepted on the account first.
 
 The negative prompt is a real node input now (node 5 was hard-coded empty), and cfg follows the profile rather than
 being pinned at 1.0. Picking a model also applies that model's step count - flux dev at the z-image default of 4 steps

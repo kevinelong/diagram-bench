@@ -79,6 +79,14 @@ MODELS = {
     'flux2 klein': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                     'clip': 'qwen_3_4b_fp4_flux2.safetensors', 'clip_node': 'CLIPLoader', 'clip_type': 'flux2',
                     'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
+    # The same klein diffusion weights with an uncensored Qwen3-4B text encoder instead of the shipped fp4 one.
+    # The encoder is a GGUF (Qwen3 arch, 36 blocks, tokenizer embedded) so it loads through CLIPLoaderGGUF with the
+    # same clip_type. Diffusion, VAE, steps and CFG are byte-identical to 'flux2 klein', so an A/B isolates the
+    # encoder. Measured effect, not assumed: see the two-arm note in PIN-20261021.md.
+    'flux2 klein uncensored': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
+                               'clip': 'flux2-klein-4b-uncensored-q4_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
+                               'clip_type': 'flux2',
+                               'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
     'flux1 dev': {'unet': 'flux1-dev-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
                   'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
                   'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
@@ -261,7 +269,9 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
                      "inputs": {"clip_name1": prof['clip'][0], "clip_name2": prof['clip'][1],
                                 "type": prof['clip_type']}}
     else:
-        clip_node = {"class_type": "CLIPLoader",
+        # CLIPLoader takes a safetensors encoder; CLIPLoaderGGUF takes a .gguf one. Same inputs, same clip_type,
+        # so a profile chooses between them by name and nothing else in the graph changes.
+        clip_node = {"class_type": prof['clip_node'],
                      "inputs": {"clip_name": prof['clip'], "type": prof['clip_type']}}
 
     unet_inputs = {"unet_name": prof['unet']}
@@ -360,6 +370,8 @@ def main(argv):
     ap.add_argument('--steps', type=int, default=4, help='turbo is 4; more does not help this model')
     ap.add_argument('--cfg', type=float, default=1.0)
     ap.add_argument('--seed', type=int, default=1234)
+    ap.add_argument('--profile', choices=sorted(MODELS), default=DEFAULT_MODEL,
+                    help='which checkpoint wiring from MODELS to use (default: %s)' % DEFAULT_MODEL)
     ap.add_argument('--out', default='zimage.png', help='PNG to write (relative to cwd)')
     ap.add_argument('--timeout', type=int, default=900)
     ap.add_argument('--with-server', action='store_true',
@@ -418,7 +430,8 @@ def main(argv):
         try:
             pid = post('/prompt', {'prompt': workflow(prompt, args.width, args.height, args.steps, args.cfg,
                                                       args.seed, prefix, base_image=base_name,
-                                                      denoise=(args.denoise if base_name else 1.0))})['prompt_id']
+                                                      denoise=(args.denoise if base_name else 1.0),
+                                                      profile=args.profile)})['prompt_id']
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', 'replace')
             print('ComfyUI rejected the workflow: %s' % body[:400])
@@ -450,8 +463,9 @@ def main(argv):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         record = {'image': str(dest.resolve()), 'prompt': prompt, 'seed': args.seed, 'width': args.width,
-                  'height': args.height, 'created': datetime.now().isoformat(timespec='seconds'), 'model': UNET,
-                  'steps': args.steps, 'cfg': args.cfg, 'base_image': args.base, 'denoise': args.denoise}
+                  'height': args.height, 'created': datetime.now().isoformat(timespec='seconds'),
+                  'model': args.profile, 'steps': args.steps, 'cfg': args.cfg,
+                  'base_image': args.base, 'denoise': args.denoise}
         dest.with_suffix('.json').write_text(json.dumps(record, indent=1), encoding='utf-8')
         print('wrote %s  (%d bytes) + %s' % (dest.resolve(), dest.stat().st_size, dest.with_suffix('.json').name))
         print('  prompt   %s' % (prompt[:70] + ('...' if len(prompt) > 70 else '')))
