@@ -35,6 +35,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import webbrowser
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -2536,16 +2537,32 @@ class App:
         self.engine.make_clip(self._current, grid=grid, frames=49,
                               prompt=self.text.get('1.0', 'end').strip(), seed=seed)
 
+    def _open_clip(self, path, video=True):
+        """Open a clip the way its container deserves: MP4 to the player, WebP to the browser.
+
+        Windows associates .webp with Photos and .mp4 with Media Player. Handing the animated WebP to the player is
+        what produces "the file is corrupt or unsupported", so a WebP is opened in the browser instead, which animates
+        it - and the hint says which happened.
+        """
+        path = Path(path)
+        if not path.exists():
+            self.hint.configure(text='%s is gone from disk' % path.name)
+            return False
+        if video and path.suffix.lower() == '.mp4':
+            zg.open_output(str(path))
+        else:
+            webbrowser.open(path.resolve().as_uri())
+        return True
+
     def open_last_clip(self):
         """Open the clip just made, again, without re-rendering it."""
         if not self._last_clip:
             self.hint.configure(text='no clip yet - press Make clip first')
             return
-        if not Path(self._last_clip).exists():
-            self.hint.configure(text='%s is gone from disk' % Path(self._last_clip).name)
-            return
-        self.hint.configure(text='opening %s' % self._last_clip)
-        zg.open_output(self._last_clip)
+        is_video = getattr(self, '_last_clip_is_video', False)
+        if self._open_clip(self._last_clip, video=is_video):
+            self.hint.configure(text='opening %s%s' % (
+                self._last_clip, '' if is_video else ' in the browser (no MP4 for this clip)'))
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
@@ -2777,7 +2794,9 @@ class App:
                     self.gen_btn.state(['!disabled'])
                     self.clip_btn.state(['!disabled'])
                     self.bar.grid_remove()
-                    self._last_clip = payload.get('mp4') or payload.get('clip')
+                    mp4 = payload.get('mp4')
+                    self._last_clip = mp4 or payload.get('clip')
+                    self._last_clip_is_video = bool(mp4)
                     self.clip_open_btn.state(['!disabled'])
                     shown = Path(self._last_clip).name if self._last_clip else 'nothing'
                     self.status.configure(text='clip done: %s' % shown)
@@ -2785,15 +2804,12 @@ class App:
                                         % (payload['frames'], payload['seconds'], payload['wall_s'],
                                            payload['vram_peak_mib'],
                                            (', mp4 in %ss' % payload['mp4_seconds'])
-                                           if payload.get('mp4_seconds') else '',
+                                           if payload.get('mp4_seconds') else ', no mp4 this time',
                                            (' - only %s MiB free, under the 0.5 GiB floor'
                                             % payload['vram_free_mib']) if payload.get('floor_breached') else '',
                                            self._last_clip))
                     if self._last_clip:
-                        try:
-                            zg.open_output(self._last_clip)
-                        except Exception:
-                            pass
+                        self._open_clip(self._last_clip, video=self._last_clip_is_video)
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])

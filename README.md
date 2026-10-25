@@ -159,6 +159,13 @@ not loaded - the graph will be rejected rather than silently falling back. `--pr
   animated file ComfyUI writes, so `video.py` decodes the frames with PIL, writes a PNG sequence and encodes H.264 from
   that. The WebP is kept beside it as the direct model output. The clip does **not** appear in the gallery, which lists
   PNG stills only.
+- **Each container is opened by an app that understands it.** Windows associates `.mp4` with Media Player and `.webp`
+  with Photos; handing the animated WebP to a media player is what produces *"the file is corrupt or unsupported"*, so an
+  MP4 goes to the player and a WebP (a clip from before the MP4 step, or a failed encode) opens in the **browser**,
+  which animates it. The hint says which happened ("no mp4 this time"). A failed encode now deletes its own output
+  rather than leaving a 0-byte file with a `.mp4` name, and anything under 10 KiB is treated as a failure.
+  Verified for the record: Windows Media Foundation reads our clip as `704x704, 2.04 s, FourCC H264, 7.8 Mbps`, the
+  same FourCC as a known-good 1080p MP4 on this machine.
 - **Frame count is 4k+1** (49, 81, 121 frames = 2.0, 3.4, 5.0 s at 24 fps), which is what the model's temporal
   compression accepts. `video.py` refuses anything else instead of rounding silently.
 

@@ -139,6 +139,10 @@ def to_mp4(webp_path, fps=24, on_event=None):
             capture_output=True, text=True, timeout=600, check=True)
     except Exception as e:
         detail = getattr(e, 'stderr', '') or str(e)
+        try:
+            dest.unlink(missing_ok=True)      # a 0-byte mp4 is what a media player calls "corrupt"
+        except OSError:
+            pass
         return None, '%s: %s' % (type(e).__name__, str(detail)[-160:])
     finally:
         for f in frames_dir.glob('*.png'):
@@ -150,6 +154,12 @@ def to_mp4(webp_path, fps=24, on_event=None):
             frames_dir.rmdir()
         except OSError:
             pass
+    if not dest.exists() or dest.stat().st_size < 10240:
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None, 'encode produced no usable file'
     return dest, round(time.monotonic() - started, 1)
 
 

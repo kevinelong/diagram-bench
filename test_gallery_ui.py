@@ -1250,6 +1250,25 @@ def main():
     check('Open clip reopens the same file', opened == [str(clip_file)], str(opened))
     zui.zg.open_output = real_open
 
+    # a WebP must go to the browser, never to the media player: that handoff is what says "corrupt or unsupported"
+    opened.clear()
+    browser_hits = []
+    real_browser = zui.webbrowser.open
+    zui.webbrowser.open = lambda uri: browser_hits.append(uri) or True
+    webp_file = tmp / '20261025-clip_00001_.webp'
+    webp_file.write_bytes(b'RIFF' + b'\x00' * 64)
+    app.engine.events.put(('clip', {'clip': str(webp_file), 'mp4': None, 'frames': 49, 'seconds': 2.04,
+                                    'wall_s': 109.7, 'vram_peak_mib': 9732, 'mp4_seconds': None,
+                                    'vram_free_mib': 2495, 'floor_breached': False}))
+    app._poll(); root.update()
+    check('with no MP4 the hint says so', 'no mp4 this time' in app.hint['text'], app.hint['text'])
+    check('and the WebP goes to the browser, not the player',
+          len(browser_hits) == 1 and opened == [], '%s / %s' % (browser_hits, opened))
+    check('the browser got a file URI', browser_hits and browser_hits[0].startswith('file://'), str(browser_hits))
+    app.clip_open_btn.invoke(); root.update()
+    check('Open clip follows the same rule', len(browser_hits) == 2 and opened == [], str(browser_hits))
+    zui.webbrowser.open = real_browser
+
     # a breached floor must be said out loud, not left in a sidecar
     app.engine.events.put(('clip', {'clip': str(tmp / 'x.webp'), 'mp4': str(clip_file), 'frames': 121,
                                     'seconds': 5.04, 'wall_s': 699.4, 'vram_peak_mib': 11913,
