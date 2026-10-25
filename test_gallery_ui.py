@@ -145,23 +145,38 @@ def main():
     check('nothing selected at start', app.selected == [])
     check('delete button disabled at start', str(app.del_btn['state']) == 'disabled')
 
-    print('\n-- plain click loads and selects one')
+    print('\n-- plain click looks and selects one, and does not arm an edit')
     click(app, newest)
     check('one selected', len(app.selected) == 1, str(len(app.selected)))
     check('it is the clicked file', app.selected[0].name == newest.name)
-    check('it became the base', app.base_path is not None and app.base_path.name == newest.name)
+    check('a click does not become the base', app.base_path is None, str(app.base_path))
     check('prompt restored from sidecar', 'prompt for image 25' in app.text.get('1.0', 'end'))
     check('seed restored', app.seed.get() == '125', app.seed.get())
     check('display loaded', app._current is not None and app._current.name == newest.name)
     check('delete button enabled', str(app.del_btn['state']) == 'normal')
     check('label reports 1 selected', app.sel_label['text'] == '1 selected', app.sel_label['text'])
+    check('Use as Base is offered once something is shown', 'disabled' not in app.use_base_btn.state())
     shot(root, '02-one-selected')
 
-    print('\n-- ctrl+click adds and removes without changing the base')
+    print('\n-- Use as Base is the gesture that arms an edit')
+    app.use_as_base(); root.update()
+    check('Use as Base sets the base', app.base_path is not None and app.base_path.name == newest.name)
+    check('base row names it', newest.name[-20:] in app.base_label['text'], app.base_label['text'])
+    check('status says the next Enter sends it', 'sends it to the model' in app.status['text'], app.status['text'])
+    app.generate(); root.update()
+    kw = app.engine.calls[-1][1]
+    check('and generate really passes it', kw.get('base_path') is not None
+          and Path(kw['base_path']).name == newest.name, str(kw.get('base_path')))
+    check('with the strength, not a text-to-image run', kw.get('denoise') == app.denoise.get())
+    app.busy = False
+    app.clear_base(); root.update()
+    check('Clear Base disarms it again', app.base_path is None)
+
+    print('\n-- ctrl+click adds and removes without touching the base')
     second = app._files[1]
     click(app, second, ctrl=True)
     check('two selected', len(app.selected) == 2, str(len(app.selected)))
-    check('base unchanged by ctrl+click', app.base_path.name == newest.name)
+    check('base still unarmed by a click', app.base_path is None, str(app.base_path))
     click(app, second, ctrl=True)
     check('ctrl+click same tile removes it', len(app.selected) == 1)
     click(app, app._files[2], ctrl=True)
@@ -239,8 +254,10 @@ def main():
 
     print('\n-- deleting the base image clears it')
     app.clear_selection()
+    click(app, app._files[5])
+    app.use_as_base(); root.update()
     base_file = app.base_path
-    click(app, base_file, ctrl=True)
+    check('a base to delete', base_file is not None)
     gone = app.delete_selected()
     check('base deleted', gone == 1)
     check('base cleared', app.base_path is None)
@@ -268,6 +285,7 @@ def main():
     check('layouts offered', app.layout_var.get() in ('single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'))
     app.text.delete('1.0', 'end')
     app.text.insert('1.0', 'a red bicycle')
+    app.engine.calls.clear()
     app.generate()
     root.update()
     check('generate reached the engine', len(app.engine.calls) == 1, str(len(app.engine.calls)))
@@ -281,7 +299,7 @@ def main():
     app.busy = False
 
     print('\n-- a generation does not become the next base')
-    check('reuse-last-image is off by default', app.chain_var.get() is False)
+    check('chain is off by default', app.chain_var.get() is False)
     app.clear_base()
     check('no base to begin with', app.base_path is None)
     fresh = app._files[0]
@@ -299,16 +317,23 @@ def main():
     feed_image(app, fresh)
     check('and again after the next one', app.seed.get() != s1, '%s -> %s' % (s1, app.seed.get()))
 
-    print('\n-- but a gallery pick keeps its own seed')
+    print('\n-- a gallery pick restores its seed, and keeps it only while it is the base')
     gal_item = app._files[2]
     want = str(json.loads(gal_item.with_suffix('.json').read_text(encoding='utf-8'))['seed'])
     click(app, gal_item)
     check('clicking restores that image seed', app.seed.get() == want, '%s (want %s)' % (app.seed.get(), want))
+    feed_image(app, fresh)
+    check('looking at an image does not pin its seed for the next run', app.seed.get() != want,
+          '%s -> %s' % (want, app.seed.get()))
+    check('so the hint reports a new seed', 'next seed' in app.hint['text'], app.hint['text'])
+    click(app, gal_item)
+    app.use_as_base(); root.update()
     seed_before = app.seed.get()
     feed_image(app, fresh)
-    check('a gallery base does not randomise the seed', app.seed.get() == seed_before,
+    check('an armed base keeps its seed through the run', app.seed.get() == seed_before,
           '%s -> %s' % (seed_before, app.seed.get()))
     check('hint says the seed was kept', 'kept from the gallery' in app.hint['text'], app.hint['text'])
+    app.clear_base()
 
     print('\n-- chaining still updates the base, and then the seed moves')
     app.chain_var.set(True)
@@ -393,7 +418,7 @@ def main():
     check('its background is tomato red', str(app.clear_base_btn['bg']).lower() == '#ff6347',
           str(app.clear_base_btn['bg']))
     check('Clear Base is disabled with nothing to clear', 'disabled' in app.clear_base_btn.state())
-    app.select_file(app._files[0]); root.update()
+    app.select_file(app._files[0]); app.use_as_base(); root.update()
     check('and enabled once a picture is the base', 'disabled' not in app.clear_base_btn.state())
     app.clear_base(); root.update()
 
@@ -410,6 +435,9 @@ def main():
           all(s in app.banner['text'] for s in ('4 steps', 'euler', '512 px')), app.banner['text'])
     first_tile = app._files[0]
     click(app, first_tile)
+    check('a click alone leaves the banner on TEXT to IMAGE', app.banner['text'].startswith('TEXT'),
+          app.banner['text'])
+    app.use_as_base(); root.update()
     check('banner switches to EDIT', app.banner['text'].startswith('EDIT'), app.banner['text'])
     check('banner names the base file (elided)', app._short_name(first_tile.name) in app.banner['text'],
           app.banner['text'])
@@ -473,8 +501,13 @@ def main():
     print('\n-- labels are plain English')
     check('the sequential box says one image at a time',
           'one image at a time' in app.seq_chk['text'].lower(), app.seq_chk['text'])
-    check('the chain box says reuse last image',
-          'reuse last image' in app.chain_chk['text'].lower(), app.chain_chk['text'])
+    check('the chain box says what it chains',
+          'each new image becomes the next base' in app.chain_chk['text'].lower(), app.chain_chk['text'])
+    check('and no longer claims to reuse the last image',
+          'reuse last image' not in app.chain_chk['text'].lower(), app.chain_chk['text'])
+    check('Use as Base sits between the base row and Clear Base',
+          app.use_base_btn.winfo_y() < app.clear_base_btn.winfo_y(), 
+          'use y=%d clear y=%d' % (app.use_base_btn.winfo_y(), app.clear_base_btn.winfo_y()))
 
     print('\n-- the button names the action; the line below reports the real time')
     app._refresh_generate_label()
@@ -525,8 +558,9 @@ def main():
     check('space adds it back', len(app.selected) == n_before)
     loaded = app.selected[-1]
     app._nav_open()
-    check('Enter loads the selected tile as the base',
-          app.base_path is not None and app.base_path.name == loaded.name)
+    check('Enter opens the selected tile',
+          app._current is not None and app._current.name == loaded.name)
+    check('and leaves the base alone', app.base_path is None, str(app.base_path))
     check('arrow keys are bound on the strip', bool(app.gal_canvas.bind('<Right>')))
 
     # arrows must never reach the gallery while the prompt box has the keyboard
@@ -648,6 +682,8 @@ def main():
 
     print('\n-- vary, vary subtly, regen')
     click(app, app._files[0])
+    app.use_as_base(); root.update()
+    check('a base to drop', app.base_path is not None)
     base_seed = int(app.seed.get())
     app.busy = False; app.engine.calls.clear()
     app.vary('vary'); root.update()
@@ -678,6 +714,7 @@ def main():
 
     print('\n-- compare with base')
     click(app, app._files[0])
+    app.use_as_base(); root.update()
     app.compare_var.set(True); app._redraw(); root.update()
     check('compare draws base, split and labels', len(app.canvas.find_withtag('compare')) >= 4,
           str(len(app.canvas.find_withtag('compare'))))
@@ -1093,7 +1130,9 @@ def main():
 
     app._load_from_browser(tiles[3])
     root.update()
-    check('double-click loads the picture', app.base_path is not None and app.base_path.name == tiles[3].name)
+    check('double-click loads the picture', app._current is not None and app._current.name == tiles[3].name,
+          str(app._current))
+    check('without arming an edit', app.base_path is None, str(app.base_path))
     check('and does not close the window', browser.winfo_exists() == 1)
     browser.destroy()
     app.refresh_gallery()

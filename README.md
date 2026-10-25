@@ -169,9 +169,10 @@ the default seed if the box holds something non-numeric.
 
 The seed **randomises itself after every generation**, so pressing Enter twice gives two different images rather than
 the same one twice; the new value is guaranteed to differ from the old so the change is always visible, and the hint
-line reports it (`next seed 813589306`). The exception is a gallery pick: click an image and the seed becomes *that*
-image's seed and stays there through the edit, so a selected image is reproducible (`seed 555 kept`). Clear the base,
-or tick *reuse last image as base*, and the randomising resumes.
+line reports it (`next seed 813589306`). The exception is an edit you armed with **Use as Base**: that picture's seed
+comes back with it and stays for the run, so an edit is reproducible (`seed 555 kept`). A plain click in the gallery
+restores the seed so you can read or reproduce the picture, but the next generation still randomises, because looking at
+an image is not editing it.
 
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **one at a time
@@ -207,14 +208,20 @@ do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one im
 time, or ≈ 11 s as one batch`), from a table of timings taken on this machine rather than a formula.
 
 Window size, steps, sampler and layout are remembered in `%LOCALAPPDATA%/zimage-ui/settings.json`, and Up/Down in the
-prompt box recalls previous prompts. The *reuse last image as base* box is deliberately **not** remembered, so a fresh
-window always starts as text to image.
+prompt box recalls previous prompts. The *chain* box is deliberately **not** remembered, so a fresh window always starts
+as text to image.
 
-**reuse last image as base** is off by default, and it changes what "Enter" means from run to run. Unticked, a
-generation is text to image: the picture that just appeared does **not** become the base, so pressing Enter again
-produces another fresh image. Ticked, each finished image becomes the base for the next run - the chaining behaviour -
-and the status line says which file is now the base. Either way, clicking an image in the gallery sets the base
-explicitly; the checkbox only controls what a *generation* does.
+**What sends an image at all** is the base, and only three gestures set one: the **Use as Base** button, the **chain**
+box after a run, and **Ctrl+V** (paste from the clipboard). A plain click in the gallery **looks** - it shows the
+picture and restores its prompt and seed, and the banner stays on `TEXT → IMAGE`. That distinction is the fix for a
+measured annoyance: the click used to set the base as a side effect, so a run could upload an image while the old
+"reuse last image as base" box was unticked, and nothing on screen tied the two together. Use as Base names the file
+in the base row, switches the banner to `EDIT <file> at 0.60`, and the hint line adds how old the picture is
+(`made 6h 51m ago`) so a base picked hours earlier cannot be sent silently. **Clear Base** puts it back to text to image.
+
+**chain: each new image becomes the next base** is off by default. Unticked, the picture that just appeared does
+**not** become the base, so pressing Enter again produces another fresh image. Ticked, each finished image becomes the
+base for the next run and the status line says which file is now the base.
 
 **Guidance (CFG) is deliberately not exposed**, because it was measured and removed: on this turbo model raising it from
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs

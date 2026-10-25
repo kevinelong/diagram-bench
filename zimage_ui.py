@@ -781,9 +781,10 @@ class App:
         self.seq_var = tk.BooleanVar(value=True)
         self.seq_chk = ttk.Checkbutton(row, text='one image at a time', variable=self.seq_var)
         self.seq_chk.grid(row=2, column=0, columnspan=3, sticky='w', pady=(4, 0))
-        # off by default: a generation is text to image unless an image was picked from the gallery
+        # off by default: a generation is text to image unless Use as Base armed an image
         self.chain_var = tk.BooleanVar(value=False)
-        self.chain_chk = ttk.Checkbutton(row, text='reuse last image as base', variable=self.chain_var)
+        self.chain_chk = ttk.Checkbutton(row, text='chain: each new image becomes the next base',
+                                         variable=self.chain_var)
         self.chain_chk.grid(row=3, column=0, columnspan=4, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
         seedbox.grid(row=2, column=3, columnspan=3, sticky='w', pady=(4, 0))
@@ -833,6 +834,15 @@ class App:
         self.denoise_text = ttk.Label(self.base_row, text='0.60')
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
+
+        # the deliberate gesture that arms an edit: a click in the strip only looks at an image
+        self.use_base_btn = ActionButton(left, text='Use as Base', command=self.use_as_base,
+                                         font=('Segoe UI', 13), bg='#5c6b80', fg='white',
+                                         activebackground='#4a5768', activeforeground='white',
+                                         disabledforeground='#d5dae2', relief='flat', bd=0,
+                                         height=2, cursor='hand2', takefocus=True)
+        self.use_base_btn.grid(row=9, column=0, sticky='ew', pady=(10, 0))
+        self.use_base_btn.state(['disabled'])
 
         self.clear_base_btn = ActionButton(left, text='Clear Base', command=self.clear_base,
                                            font=('Segoe UI', 13), bg='#ff6347', fg='white',
@@ -1071,7 +1081,7 @@ class App:
 
     def _load_from_browser(self, path):
         self.select_file(path)
-        self.status.configure(text='loaded %s - the window stays open' % self._short_name(Path(path).name))
+        self.status.configure(text='loaded %s - Use as Base to edit from it' % self._short_name(Path(path).name))
 
     def _on_search_typing(self, _event=None):
         """One filter per pause in typing: matching 780 sidecars on every keypress costs ~200 ms."""
@@ -1529,6 +1539,7 @@ class App:
              'width': got.size[0], 'height': got.size[1]}), encoding='utf-8')
         self.refresh_gallery()
         self.select_file(path)
+        self._set_base(path, from_gallery=True)
         self.hint.configure(text='pasted %dx%d from the clipboard as the base' % got.size)
 
     # -- mask and expand, on the picture itself ---------------------------------
@@ -1754,7 +1765,8 @@ class App:
         return [p for p in getattr(self, '_files', []) if p in self._tile_widgets or p in self._all_widgets]
 
     def _on_tile_click(self, event, path, browser=False):
-        """Strip: a plain click loads as base. Browser: a plain click only selects, so nothing closes under you.
+        """Strip: a plain click looks at the image and restores its prompt, without arming an edit.
+        Browser: a plain click only selects, so nothing closes under you.
 
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
@@ -1789,7 +1801,7 @@ class App:
         else:
             self.selected = [path]
             self._anchor = path
-            self.select_file(path)          # still the one-click path to "use this image"
+            self.select_file(path)          # a click looks: only Use as Base, chain, or a mask arms an edit
             return                          # select_file rebuilds the grid, which paints it
         self._paint()
 
@@ -1810,6 +1822,9 @@ class App:
             except Exception:
                 pass
         n = len(self.selected)
+        if hasattr(self, 'use_base_btn'):
+            armable = bool(self.selected) or self._current is not None
+            self.use_base_btn.state(['!disabled'] if armable else ['disabled'])
         if hasattr(self, 'del_btn'):
             self.del_btn.configure(text='Delete (%d)' % n if n else 'Delete',
                                    state='normal' if n else 'disabled')
@@ -1951,9 +1966,14 @@ class App:
         return None
 
     def select_file(self, path):
-        """One entry point for a click in the recent strip or the full browser."""
+        """One entry point for a click in the recent strip or the full browser: look at it, restore its prompt.
+
+        It deliberately does NOT set the base. Clicking a thumbnail to see it, or to get its prompt and seed
+        back, used to arm an img2img upload as a side effect, which is why a run could send an image while the
+        chain box was unticked. Ticking chain, pressing Use as Base, or painting a mask are now the only ways
+        an image is sent.
+        """
         self._display(path)
-        self._set_base(path, from_gallery=True)
         meta = read_meta(path)
         if meta:
             self.text.delete('1.0', 'end')
@@ -1971,13 +1991,25 @@ class App:
                                    if meta.get('base_image') else ''))
         else:
             self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % Path(path).name)
-        self.status.configure(text='selected %s - Enter applies it at strength %.2f'
+        self.status.configure(text='viewing %s - Use as Base to edit it at strength %.2f (Enter alone starts fresh)'
                               % (self._short_name(Path(path).name), self.denoise.get()))
         self.refresh_gallery(select=path)
 
     def use_as_base(self):
-        self.select_file(self.base_path) if self.base_path else \
-            self.hint.configure(text='click a thumbnail first')
+        """Arm the selected (or the shown) picture as the base for the next run - one deliberate click.
+
+        Its prompt and seed come back with it, so an edit starts from what produced the picture rather than
+        from whatever happens to be in the prompt box.
+        """
+        path = self.selected[-1] if self.selected else self._current
+        if path is None:
+            self.hint.configure(text='click a thumbnail first, then Use as Base')
+            return
+        self.select_file(path)
+        self._set_base(path, from_gallery=True)
+        self._paint()
+        self.status.configure(text='editing %s at strength %.2f - Enter sends it to the model'
+                              % (self._short_name(Path(path).name), self.denoise.get()))
 
     def open_all(self):
         """Every image, scrolling, with the same search and star filters as the strip."""
@@ -2111,6 +2143,7 @@ class App:
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
         self._update_banner()
+        self._paint()
 
     def _tile_at(self, x, y):
         """Which tile of the displayed sheet is at canvas (x, y)? Returns a tile path or None."""
@@ -2254,8 +2287,10 @@ class App:
         t(self.seed_rnd, 'Draw a new random seed.')
         t(self.seq_chk, 'On: each tile is its own request with its own seed - reproducible, and only one image '
                         'in VRAM at a time.\nOff: one batch, about 8x faster, much higher VRAM peak.')
-        t(self.chain_chk, 'On: the image just made becomes the base for the next run.\n'
-                          'Off: every run is text to image unless you pick an image in the gallery.')
+        t(self.chain_chk, 'On: the image just made becomes the base for the next run, so Enter keeps editing.\n'
+                          'Off: a finished image does not become the base - Use as Base is what arms an edit.')
+        t(self.use_base_btn, 'Edit the selected (or shown) picture: it becomes the base, and its own prompt and\n'
+                             'seed are restored. Until this is pressed, a click in the gallery only looks.')
         t(self.strength_scale, 'How much of the base image survives.\n0.2 loose sketch - 0.60 keeps the '
                                'composition - 0.95 replaces almost everything.')
         t(self.copy_btn, 'Copy the current image to the Windows clipboard.')
@@ -2271,6 +2306,23 @@ class App:
         """Elide a long filename from the front, keeping the tail - that is where seed and sheet size live."""
         name = str(name)
         return name if len(name) <= keep else '\u2026' + name[-(keep - 1):]
+
+    def _base_age_note(self):
+        """How long ago the picture about to be sent was made - an old base is the surprise this window had.
+
+        Returns '' when the age is unknown or under two minutes, so a fresh pick reads normally.
+        """
+        try:
+            age = time.time() - self.base_path.stat().st_mtime
+        except Exception:
+            return ''
+        if age < 120:
+            return ''
+        if age < 3600:
+            return ' (made %d min ago)' % int(age // 60)
+        if age < 86400:
+            return ' (made %dh %02dm ago)' % (int(age // 3600), int((age % 3600) // 60))
+        return ' (made %d days ago)' % int(age // 86400)
 
     def _update_banner(self):
         """Say what the next Generate will do, in one line, before it is pressed."""
@@ -2454,8 +2506,8 @@ class App:
             self.hint.configure(text='expanding %s by %s px'
                                      % (self._short_name(Path(edit_base).name), list(outpaint)))
         elif self.base_path:
-            self.hint.configure(text='starting from %s at strength %.2f%s'
-                                % (self.base_path.name, self.denoise.get(),
+            self.hint.configure(text='starting from %s%s at strength %.2f%s'
+                                % (self.base_path.name, self._base_age_note(), self.denoise.get(),
                                    '  (layout ignored: an edit is one image)' if self._batch() > 1 else ''))
         else:
             self.hint.configure(text='')
@@ -2616,7 +2668,7 @@ class App:
                         base_note = 'base unchanged (%s)' % (
                             'none - next run is text to image' if self.base_path is None
                             else 'still %s' % self.base_path.name)
-                    if self._base_from_gallery:
+                    if self._base_from_gallery and self.base_path is not None:
                         note = 'seed %s kept from the gallery image' % self.seed.get()
                     else:
                         self.random_seed()
