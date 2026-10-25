@@ -261,7 +261,10 @@ def rephrase_text(text, turn=1):
     """Return (rephrased_text, number_of_words_changed).
 
     `turn` rotates the choice for every word, so pressing the button repeatedly produces different phrasings instead of
-    the same one. Words with no entry, punctuation and spacing are preserved exactly.
+    the same one. **The original word is part of the rotation**, so a long enough press count walks all the way round
+    and returns the prompt to what it started as - the wording you typed is one of the possibilities, never excluded.
+    A word with n alternatives therefore comes back after n + 1 presses. Words with no entry, punctuation and spacing
+    are preserved exactly.
     """
     if not text:
         return text, 0
@@ -270,7 +273,9 @@ def rephrase_text(text, turn=1):
     for token in re.findall(r"[A-Za-z][A-Za-z'-]*|[^A-Za-z]+", text):
         options = LOOKUP.get(token.lower())
         if options:
-            replacement = options[(turn - 1) % len(options)]
+            # position 0 is the word as written, then the alternatives - so the cycle closes on the original
+            cycle = [token] + [o for o in options if o.lower() != token.lower()]
+            replacement = cycle[turn % len(cycle)]
             if replacement.lower() != token.lower():
                 if token[:1].isupper():
                     replacement = replacement[:1].upper() + replacement[1:]
@@ -279,3 +284,25 @@ def rephrase_text(text, turn=1):
                 continue
         out.append(token)
     return _collapse_repeats(''.join(out)), changed
+
+
+def has_synonyms(text):
+    """How many words in this text have a synonym entry. Lets a caller tell 'nothing to swap' from 'back to the start'."""
+    return sum(1 for token in re.findall(r"[A-Za-z][A-Za-z'-]*", text) if LOOKUP.get(token.lower()))
+
+
+def cycle_period(text):
+    """Presses after which the whole prompt comes back to the wording it started with, or 0 if it cannot.
+
+    Each word cycles on its own length (alternatives + the original), so a sentence returns at the lowest common
+    multiple of those lengths - 4 presses for "a red bicycle", 60 for a long one. Stated rather than discovered,
+    because "press again a few times" is not true of 60.
+    """
+    from math import lcm
+    period = 1
+    for token in re.findall(r"[A-Za-z][A-Za-z'-]*", text):
+        options = LOOKUP.get(token.lower())
+        if options:
+            length = len([o for o in options if o.lower() != token.lower()]) + 1
+            period = lcm(period, length)
+    return 0 if period == 1 else period

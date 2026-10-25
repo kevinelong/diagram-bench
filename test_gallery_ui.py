@@ -1001,6 +1001,7 @@ def main():
 
     print('\n-- rephrase swaps known words for synonyms, offline')
     import rephrase as rp2
+    LONG = 'a red bicycle leaning against a weathered brick wall at golden sunset'
     check('no synonym entry lists its own key',
           not any(o.lower() == k.lower() for k, v in rp2.SYNONYMS.items() for o in v))
     out, n = rp2.rephrase_text('a red bicycle', 1)
@@ -1013,18 +1014,30 @@ def main():
           rp2.rephrase_text('leaning against a wall', 2)[0])
     variants = {rp2.rephrase_text('a red bicycle', n)[0] for n in (1, 2, 3, 4)}
     check('different turns give different phrasings', len(variants) >= 3, str(sorted(variants)))
+    check('the original word is one of the possibilities, not excluded',
+          rp2.rephrase_text('a red bicycle', 4)[0] == 'a red bicycle',
+          rp2.rephrase_text('a red bicycle', 4)[0])
+    check('a single word rolls all the way round to itself',
+          [rp2.rephrase_text('bicycle', n)[0] for n in (1, 2, 3, 4)]
+          == ['bike', 'cycle', 'pushbike', 'bicycle'],
+          str([rp2.rephrase_text('bicycle', n)[0] for n in (1, 2, 3, 4)]))
+    check('the whole prompt returns at the stated period',
+          rp2.rephrase_text(LONG, rp2.cycle_period(LONG))[0] == LONG,
+          rp2.rephrase_text(LONG, rp2.cycle_period(LONG))[0])
+    check('the period is named, not guessed', rp2.cycle_period('a red bicycle') == 4, str(rp2.cycle_period('a red bicycle')))
+    check('and it is the lcm of the per-word cycles', rp2.cycle_period(LONG) == 60, str(rp2.cycle_period(LONG)))
 
     app.text.delete('1.0', 'end')
-    app.text.insert('1.0', 'a red bicycle leaning against a weathered brick wall at golden sunset')
+    app.text.insert('1.0', LONG)
     root.update()
     check('the rephrase button sits under the prompt box',
           app.rephrase_btn.winfo_rooty() >= app.text.winfo_rooty() + app.text.winfo_height() - 4,
           'button y=%d, prompt bottom=%d' % (app.rephrase_btn.winfo_rooty(),
                                              app.text.winfo_rooty() + app.text.winfo_height()))
     app.rephrase(); first = app.text.get('1.0', 'end').strip(); root.update()
-    check('pressing it rewrites the prompt', first != 'a red bicycle leaning against a weathered brick wall at golden sunset',
-          first)
+    check('pressing it rewrites the prompt', first != LONG, first)
     check('and says how many words moved', 'rephrased' in app.hint['text'], app.hint['text'])
+    check('and how many presses until the wording comes back', 'returns in' in app.hint['text'], app.hint['text'])
     app.rephrase(); second = app.text.get('1.0', 'end').strip()
     app.rephrase(); third = app.text.get('1.0', 'end').strip()
     check('each press is a different variant', len({first, second, third}) == 3, ' | '.join([first, second, third]))
@@ -1032,6 +1045,22 @@ def main():
     app.rephrase()
     check('an unknown prompt is reported, not silently kept',
           'no known synonyms' in app.hint['text'], app.hint['text'])
+
+    # walk the button round the whole cycle: 4 presses on a 4-long cycle must put the typed words back
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a red bicycle')
+    app._rephrase_base = None                     # a fresh cycle, as if the prompt had just been typed
+    seen = []
+    for _ in range(4):
+        app.rephrase(); seen.append(app.text.get('1.0', 'end').strip()); root.update()
+    check('four presses walk the cycle and stop on the original wording',
+          seen == ['a crimson bike', 'a scarlet cycle', 'a tomato red pushbike', 'a red bicycle'], ' | '.join(seen))
+    check('the button says it came back to the original', 'back to the original' in app.hint['text'],
+          app.hint['text'])
+    check('and says how many words still have synonyms', '2 words have synonyms' in app.hint['text'],
+          app.hint['text'])
+    app.rephrase()
+    check('pressing again starts the cycle over', app.text.get('1.0', 'end').strip() == 'a crimson bike',
+          app.text.get('1.0', 'end').strip())
     app.text.delete('1.0', 'end')
 
     print('\n-- the dictionary is generated from WordNet, scoped to visual words')

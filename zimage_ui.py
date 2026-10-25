@@ -42,7 +42,7 @@ from tkinter import messagebox, simpledialog, ttk
 from PIL import Image, ImageDraw, ImageTk
 
 import zimage_gen as zg
-from rephrase import rephrase_text
+from rephrase import cycle_period, has_synonyms, rephrase_text
 
 
 # --------------------------------------------------------------------------- websocket (text frames only)
@@ -1367,15 +1367,30 @@ class App:
         self._rephrase_turn = getattr(self, '_rephrase_turn', 0) + 1
         new, changed = rephrase_text(base, self._rephrase_turn)
         if not changed:
+            known = has_synonyms(base)
+            if known:
+                # the cycle has come all the way round: the original wording is one of the options, so write it back.
+                # The turn is deliberately NOT rewound - the next press continues past the wrap into the cycle again.
+                self.text.delete('1.0', 'end')
+                self.text.insert('1.0', base)
+                self._rephrase_last = base
+                self.hint.configure(text='back to the original wording - %d word%s have synonyms; press again to walk '
+                                         'the cycle from the start'
+                                    % (known, '' if known == 1 else 's'))
+                return
+            self._rephrase_turn -= 1
             self.hint.configure(text='no known synonyms in that prompt - try different words, or enhance with a '
                                      'local model')
-            self._rephrase_turn -= 1
             return
         self._rephrase_last = new
         self.text.delete('1.0', 'end')
         self.text.insert('1.0', new)
-        self.hint.configure(text='rephrased %d word%s - press again for another variant'
-                                 % (changed, '' if changed == 1 else 's'))
+        period = cycle_period(base)
+        left = (period - self._rephrase_turn % period) if period else 0
+        self.hint.configure(text='rephrased %d word%s - press again for another variant%s'
+                                 % (changed, '' if changed == 1 else 's',
+                                    '; your own wording returns in %d press%s' % (left, '' if left == 1 else 'es')
+                                    if period and left else ''))
 
     def save_style(self):
         """Store the current prompt as a reusable style, the way A1111 keeps styles.csv."""

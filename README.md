@@ -232,7 +232,11 @@ those senses without hand-checking thousands of entries. Where WordNet has nothi
     python build_synonyms.py --senses 4        # downloads WordNet once, writes data/synonyms.json (~25 KB)
 
 WordNet 3.0 data is Princeton's; the licence travels with the output in `data/WORDNET-LICENSE.txt`. Each press re-derives from the *original* wording and walks the next variant, so
-three presses give three different phrasings rather than converging; editing the text starts the cycle again. Whole
+three presses give three different phrasings rather than converging; editing the text starts the cycle again. **Your
+own wording is part of that cycle, not excluded from it**: a word with *n* alternatives comes back round to itself
+after *n + 1* presses, so "bicycle" walks bike, cycle, pushbike and then returns "bicycle". A whole sentence returns at
+the lowest common multiple of its words' cycles - 4 presses for "a red bicycle", 60 for a long one - and the hint line
+names that number instead of leaving you to discover it ("your own wording returns in 12 presses"). Whole
 words only, capitalisation carried over, and repeated words collapsed, so "leaning against a wall" cannot become
 "propped against against". It reports how many words moved ("rephrased 7 words"), and says so plainly when a prompt has
 no known synonyms instead of pretending it did something.
