@@ -1,0 +1,24 @@
+{
+ "profile": "klein",
+ "size": 704,
+ "seeds": [
+  1234
+ ],
+ "idle_vram_mib": 790,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "seed": 1234,
+   "size": 704,
+   "profile": "klein",
+   "steps": 4,
+   "cfg": 1.0,
+   "ok": true,
+   "wall_s": 12.1,
+   "vram_peak_mib": 4671,
+   "error": null,
+   "file": "flow-1-s1234.png"
+  }
+ ]
+}

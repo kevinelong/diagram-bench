@@ -782,7 +782,7 @@ class App:
         ttk.Label(row, text='size').grid(row=1, column=2, padx=(12, 4))
         self.size_var = tk.StringVar(value=str(self._settings.get('size') or args.size))
         self.size_cb = ttk.Combobox(row, textvariable=self.size_var, width=6, state='readonly',
-                                    values=['256', '320', '384', '448', '512', '640', '768', '1024'])
+                                    values=['256', '320', '384', '448', '512', '640', '704', '768', '1024'])
         self.size_cb.grid(row=1, column=3, sticky='w')
         ttk.Label(row, text='layout').grid(row=1, column=4, padx=(10, 4))
         self.layout_var = tk.StringVar(value=self._settings.get('layout') or 'single')

@@ -288,6 +288,9 @@ def main():
     app.random_seed()
     check('random seed is numeric', app.seed.get().isdigit())
     check('layouts offered', app.layout_var.get() in ('single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'))
+    check('sizes offered include 704, the clip grid, so a still can need no resample',
+          list(app.size_cb['values']) == ['256', '320', '384', '448', '512', '640', '704', '768', '1024'],
+          str(list(app.size_cb['values'])))
     app.text.delete('1.0', 'end')
     app.text.insert('1.0', 'a red bicycle')
     app.engine.calls.clear()

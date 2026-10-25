@@ -308,7 +308,13 @@ base for the next run and the status line says which file is now the base.
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs
 crispness. CFG stays at the model's distilled 1.0.
 
-Size and layout are chosen in the toolbar: sizes 256-1024, and **single / 4-up (2x2) / 9-up (3x3) / 16-up (4x4)**.
+Size and layout are chosen in the toolbar: **256, 320, 384, 448, 512, 640, 704, 768, 1024**, and
+**single / 4-up (2x2) / 9-up (3x3) / 16-up (4x4)**. **704 is there for video**: it is the clip model's 1:1 grid, so a
+still rendered at 704x704 goes into `prepare_still` and comes out **pixel-identical** (measured: max channel difference
+0), with no resample between what the image model drew and what the video model reads. Measured cost of that still:
+**12.1 s** and **4,671 MiB** peak with `flux2 klein` - against 1024 px, which is the reference for the diagram metrics.
+A 16:9 clip still resamples even from a 704 still: the window renders squares only, so filling 1280 wide means
+upscaling whatever it is given.
 One at a time is the default; a single batch is the opt-in. Measured sequential 4-up at 256 px: 26.6 s (6.65 s per
 tile), peak 5,508 MiB - a single-image peak, and four separately named tiles. Measured as one batch, 16-up at 384 px:
 11.3 s total (0.71 s per image), peak 11,661 MiB of 12,227, so 16-up in one batch is usable at 256-448 and not above
