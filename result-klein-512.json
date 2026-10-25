@@ -4,7 +4,7 @@
  "seeds": [
   1234
  ],
- "idle_vram_mib": 11070,
+ "idle_vram_mib": 4741,
  "rows": [
   {
    "id": "flow-1",
@@ -15,8 +15,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 13.2,
-   "vram_peak_mib": 10970,
+   "wall_s": 14.3,
+   "vram_peak_mib": 6949,
    "error": null,
    "file": "flow-1-s1234.png"
   },
@@ -29,8 +29,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 3.0,
-   "vram_peak_mib": 8637,
+   "wall_s": 18.2,
+   "vram_peak_mib": 6949,
    "error": null,
    "file": "floor-1-s1234.png"
   },
@@ -43,8 +43,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 3.0,
-   "vram_peak_mib": 8579,
+   "wall_s": 7.2,
+   "vram_peak_mib": 5733,
    "error": null,
    "file": "bar-1-s1234.png"
   },
@@ -57,8 +57,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 3.0,
-   "vram_peak_mib": 8621,
+   "wall_s": 7.1,
+   "vram_peak_mib": 5733,
    "error": null,
    "file": "org-1-s1234.png"
   },
@@ -71,8 +71,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 3.0,
-   "vram_peak_mib": 8621,
+   "wall_s": 19.3,
+   "vram_peak_mib": 6949,
    "error": null,
    "file": "circuit-1-s1234.png"
   },
@@ -85,8 +85,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 2.0,
-   "vram_peak_mib": 8458,
+   "wall_s": 7.1,
+   "vram_peak_mib": 5733,
    "error": null,
    "file": "blueprint-1-s1234.png"
   },
@@ -99,8 +99,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 2.0,
-   "vram_peak_mib": 8416,
+   "wall_s": 18.7,
+   "vram_peak_mib": 6949,
    "error": null,
    "file": "tree-1-s1234.png"
   },
@@ -113,8 +113,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 2.0,
-   "vram_peak_mib": 8480,
+   "wall_s": 7.2,
+   "vram_peak_mib": 5733,
    "error": null,
    "file": "timeline-1-s1234.png"
   },
@@ -127,8 +127,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 2.0,
-   "vram_peak_mib": 8384,
+   "wall_s": 7.3,
+   "vram_peak_mib": 5733,
    "error": null,
    "file": "network-1-s1234.png"
   },
@@ -141,8 +141,8 @@
    "steps": 4,
    "cfg": 1.0,
    "ok": true,
-   "wall_s": 2.2,
-   "vram_peak_mib": 8480,
+   "wall_s": 18.5,
+   "vram_peak_mib": 6949,
    "error": null,
    "file": "process-1-s1234.png"
   }

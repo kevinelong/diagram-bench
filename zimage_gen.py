@@ -87,6 +87,13 @@ MODELS = {
                                'clip': 'flux2-klein-4b-uncensored-q4_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
                                'clip_type': 'flux2',
                                'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
+    # The 9B diffusion with the 9B uncensored encoder (Qwen3-8B, Q5_K_M). Measured on the frozen corpus at 512 px:
+    # OCR exact 0.732 against the 4B's 0.613, 4/10 prompts fully legible against 1/10, at 32.5 s median and an 8.8 GiB
+    # peak. Same 4-step distilled settings as klein, so nothing but model size and encoder differs.
+    'flux2 klein 9b uncensored': {'unet': 'flux-2-klein-9b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
+                                  'clip': 'flux2-klein-9b-uncensored-te-q5_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
+                                  'clip_type': 'flux2',
+                                  'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
     'flux1 dev': {'unet': 'flux1-dev-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
                   'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
                   'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',

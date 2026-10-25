@@ -267,7 +267,7 @@ touches into `.prompt-backups/`. It kept the user's edited words that had landed
 56 needed repair and the worst had the suffix three times mid-sentence.
 
 **model** sits in the always-visible row next to *style* - it is a first-class choice, not an Advanced secret, and the
-hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Five profiles, each verified
+hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Six profiles, each verified
 against ComfyUI's own node list:
 
 **The defaults are the measured pose combo: flux2 klein at strength 0.70.** That pairing is the only one in the sweep
@@ -282,6 +282,7 @@ install; strength is on the slider and persisted alongside the model.
 | flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
 | flux2 klein | `flux-2-klein-4b-Q4_K_M.gguf` (UnetLoaderGGUF) | qwen_3_4b_fp4_flux2 (flux2) | **9.8 s** at 512 px, 4 steps, cfg 1.0 |
 | flux2 klein uncensored | the same `flux-2-klein-4b-Q4_K_M.gguf` | `flux2-klein-4b-uncensored-q4_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | 7.1 s vs 13.3 s cold, 512 px, same seed |
+| flux2 klein 9b uncensored | `flux-2-klein-9b-Q4_K_M.gguf` (UnetLoaderGGUF) | `flux2-klein-9b-uncensored-te-q5_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | **32.5 s** median, 8.8 GiB peak |
 | flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
 
 **flux2 klein uncensored is an encoder swap, not a different diffusion model.** The diffusion GGUF, the VAE, steps and

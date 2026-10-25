@@ -48,6 +48,24 @@ PROFILES = {
                     "1": {"class_type": "CheckpointLoaderSimple",
                           "inputs": {"ckpt_name": "flux1-dev-fp8.safetensors"}},
                     "clip": ["1", 1], "vae": ["1", 2], "model": ["1", 0]}),
+    # same diffusion weights as 'klein', encoder swapped for the uncensored Qwen3-4B GGUF (2.33 GiB)
+    'klein_unc': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein-unc',
+                      nodes={
+                          "1": {"class_type": "UnetLoaderGGUF",
+                                "inputs": {"unet_name": "flux-2-klein-4b-Q4_K_M.gguf"}},
+                          "2": {"class_type": "CLIPLoaderGGUF",
+                                "inputs": {"clip_name": "flux2-klein-4b-uncensored-q4_k_m.gguf", "type": "flux2"}},
+                          "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+                          "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
+    # the 9B diffusion, also with an uncensored encoder (Qwen3-8B, Q5_K_M)
+    'klein9_unc': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein9-unc',
+                       nodes={
+                           "1": {"class_type": "UnetLoaderGGUF",
+                                 "inputs": {"unet_name": "flux-2-klein-9b-Q4_K_M.gguf"}},
+                           "2": {"class_type": "CLIPLoaderGGUF",
+                                 "inputs": {"clip_name": "flux2-klein-9b-uncensored-te-q5_k_m.gguf", "type": "flux2"}},
+                           "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+                           "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
 }
 
 
@@ -92,12 +110,17 @@ def build(profile, prompt, size, seed):
 
 
 def main():
+    global HOST
     ap = argparse.ArgumentParser()
     ap.add_argument('--profile', required=True, choices=sorted(PROFILES))
     ap.add_argument('--size', type=int, default=1024)
     ap.add_argument('--seeds', default='1234')
     ap.add_argument('--only', default=None)
+    ap.add_argument('--host', default=HOST,
+                    help='ComfyUI base URL (default %s); the window may be serving on another port' % HOST)
     args = ap.parse_args()
+
+    HOST = args.host.rstrip('/')
 
     corpus = json.loads((ROOT / 'prompts-diagrams.json').read_text(encoding='utf-8'))
     prompts = [p for p in corpus['prompts'] if not args.only or p['id'] == args.only]
