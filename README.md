@@ -102,6 +102,41 @@ Ollama; `klein_arm.py`, `flux_arm.py`, `zimage_arm.py` and `generic_arm.py` need
 `cad_arm.py` needs KiCad 10's own Python; `vlm_score.py` needs `DEEPSEEK_API_KEY`. Those were run once, serially,
 on 2026-10-20/21 and their output is what the RESULT files record.
 
+## Deploying the weights (what a fresh machine needs)
+
+Nothing here packs weights; every file below is fetched from its own repo under its own licence. Three pieces of
+plumbing must exist before any profile works:
+
+1. **ComfyUI** (the desktop build here is 0.8.27) with the **ComfyUI-GGUF** custom node. Both `UnetLoaderGGUF` and
+   `CLIPLoaderGGUF` come from that node, and the GGUF text encoders are only visible to it (it registers a
+   `clip_gguf` folder over `text_encoders`).
+2. **`extra_models_config.yaml`** (in `%APPDATA%/ComfyUI/`) pointing at the weights volume - here
+   `D:\models\comfyui` with `diffusion_models`, `text_encoders`, `vae`, `loras`, `checkpoints`. Without it the server
+   starts and answers `/system_stats` but every loader rejects its own files with `value_not_in_list ... not in []`.
+3. **The server launched with those flags**: `--base-directory C:\Users\kevin\Documents\ComfyUI
+   --extra-model-paths-config %APPDATA%\ComfyUI\extra_models_config.yaml`. `start-comfy.ps1` does this.
+
+| profile | files (folder) | size | source |
+|---|---|---|---|
+| `flux2 klein`, `flux2 klein uncensored` | `flux-2-klein-4b-Q4_K_M.gguf` (diffusion_models), `flux2-vae.safetensors` (vae) | 2.6 + 0.31 GiB | unsloth FLUX.2-klein-4B-GGUF, Comfy-Org Flux-2-Klein-4B |
+| | shipped encoder `qwen_3_4b_fp4_flux2.safetensors` | 3.58 GiB | Comfy-Org Flux-2-Klein-4B |
+| | uncensored encoder `flux2-klein-4b-uncensored-q4_k_m.gguf` | **2.33 GiB** | `nerualdreming/flux2-klein-4b-uncensored-text-encoder` (ungated) |
+| `flux2 klein 9b uncensored` | `flux-2-klein-9b-Q4_K_M.gguf` (diffusion_models) | **5.50 GiB** | `unsloth/FLUX.2-klein-9B-GGUF` (ungated, FLUX non-commercial) |
+| | `flux2-klein-9b-uncensored-te-q5_k_m.gguf` (text_encoders) | **5.45 GiB** | `wy8edhuh/flux2-klein-9b-uncensored-text-encoder-Q5_K_M-GGUF`, a re-quant of `ponpoke`'s Qwen3-8B |
+| `z-image turbo` | `z_image_turbo_nvfp4.safetensors`, `qwen_3_4b_fp4_mixed.safetensors`, `ae.safetensors` | ~10 GiB | Comfy-Org z_image_turbo |
+| `flux1 schnell` / `flux1 dev` | `flux1-*-Q4_K_S.gguf`, `t5xxl_fp8_e4m3fn.safetensors`, `clip_l.safetensors`, `flux1-ae.safetensors` | ~11.4 GiB each | city96 FLUX.1 GGUF repos |
+
+Verify a deployment in two calls, before blaming a prompt:
+
+```bash
+curl -s http://127.0.0.1:8006/object_info/CLIPLoaderGGUF | python -c "import json,sys; print(json.load(sys.stdin)['CLIPLoaderGGUF']['input']['required']['clip_name'][0])"
+curl -s http://127.0.0.1:8006/object_info/UnetLoaderGGUF | python -c "import json,sys; print(json.load(sys.stdin)['UnetLoaderGGUF']['input']['required']['unet_name'][0])"
+```
+
+If a profile's encoder is missing from the first list, the file is in the wrong folder or the extra-paths config is
+not loaded - the graph will be rejected rather than silently falling back. `--profile` lists the wired profiles and
+`zimage_ui.py` offers the same list in its model picker.
+
 ## Where the evidence lives
 
 - **`RESULTS-*.md`** — one per experiment: the table, the predictions, the corrections, and what the run does *not*

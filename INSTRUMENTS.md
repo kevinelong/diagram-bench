@@ -502,9 +502,21 @@ on the render axis 100 % / OCR 4/4. `circuit-1`: 54 paths, 2 text, 3.9 KB. `blue
 
 ## `generic_arm.py` — any diffusion arm, any resolution, one code path
 
-**Measures.** Drives ComfyUI's HTTP API with one of four frozen profiles (`klein`, `zimage`, `schnell`, `dev` —
-each a pinned workflow graph and step/CFG set), at `--size` 1024 or 512, recording wall time per image and peak
-VRAM sampled every 250 ms, plus the output path per image.
+**Measures.** Drives ComfyUI's HTTP API with one of six frozen profiles (`klein`, `klein_unc`, `klein9_unc`,
+`zimage`, `schnell`, `dev` — each a pinned workflow graph and step/CFG set), at `--size` 1024 or 512, recording wall
+time per image and peak VRAM sampled every 250 ms, plus the output path per image. `--host` picks the server, because
+the ComfyUI serving this box listens on **8006**, not the 8188 the module defaults to.
+
+The two uncensored arms are encoder swaps, not new diffusion weights: `klein_unc` is the 4B checkpoint with a Qwen3-4B
+GGUF encoder, `klein9_unc` is the 9B checkpoint with a Qwen3-8B one, both through `CLIPLoaderGGUF` with `type: flux2`.
+Measured 2026-10-25 at 512 px, seed 1234, on the frozen corpus: OCR exact **0.613** (`klein`), **0.649**
+(`klein_unc`), **0.732** (`klein9_unc`), with **1, 2 and 4** of ten prompts fully legible and peaks of 6,949, 6,949
+and 8,837 MiB. So the 9B buys labels at 2.3x the wall time, and the uncensored encoder also helps the 4B on neutral
+prompts. Recorded in [PIN-20261021.md](PIN-20261021.md).
+
+**Writes.** `result-<profile>-<size>.json`, and it **refuses to overwrite** one that exists unless `--force`: these
+files are another session's evidence (`--out-name` writes a dated one instead). That guard exists because this runner
+did clobber the 2026-10-21 klein baseline on 2026-10-25; it was restored from git.
 
 **Unit.** Seconds; MiB used (and MiB free); image counts.
 
