@@ -31,6 +31,8 @@ import json
 import os
 import shutil
 import subprocess
+
+from winproc import popen, run
 import sys
 import time
 import urllib.error
@@ -116,7 +118,7 @@ def open_output(path):
     target = str(Path(path).resolve())
     if OPEN_HELPER.exists():
         try:
-            r = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(OPEN_HELPER),
+            r = run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(OPEN_HELPER),
                                 '-FilePath', target], capture_output=True, text=True, timeout=90)
             if r.returncode == 0:
                 return 'Open-Document.ps1'
@@ -200,8 +202,9 @@ def start_server(port, timeout=300, cache_none=True):
     """Start ComfyUI and wait until it answers. Returns (proc, log_path); raises on failure."""
     log_path = Path(os.environ.get('TEMP', '.')) / ('comfy-autostart-%d.log' % port)
     log = open(log_path, 'w', encoding='utf-8', errors='replace')
-    proc = subprocess.Popen(server_argv(port, cache_none), stdout=log, stderr=subprocess.STDOUT,
-                            cwd=os.path.dirname(COMFY_BASE))
+    # winproc.popen keeps the server's console window off the screen; without it ComfyUI flashes a black window
+    proc = popen(server_argv(port, cache_none), stdout=log, stderr=subprocess.STDOUT,
+                 cwd=os.path.dirname(COMFY_BASE))
     _assign_kill_on_close(proc.pid)
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
@@ -226,7 +229,7 @@ def stop_server(port):
           "Select-Object -ExpandProperty OwningProcess -Unique; "
           "foreach ($x in $p) { taskkill /PID $x /T /F 2>&1 | Out-Null; 'stopped pid ' + $x }" % port)
     try:
-        out = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=120)
+        out = run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=120)
         return out.stdout.strip() or 'nothing was listening'
     except Exception as e:
         return 'stop failed: %s' % type(e).__name__

@@ -10,3 +10,5 @@ kicad/*.kicad_pro
 pose-probe/*/
 pose-probe-smoke/
 variety/*/
+
+logs/

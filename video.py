@@ -18,6 +18,8 @@ Usage (cmd.exe):
 import argparse
 import json
 import subprocess
+
+from winproc import popen, run
 import threading
 import time
 import urllib.parse
@@ -46,6 +48,7 @@ WAN = {
 }
 
 GRIDS = {'1:1': (704, 704), '16:9': (1280, 704), '4:3': (1024, 704)}
+VRAM_FLOOR_MIB = 512          # the lab's rule: never leave less than half a gigabyte free on the card
 DEFAULT_NEGATIVE = ('blurry, low quality, distorted, deformed, extra limbs, watermark, text, static, '
                     'jitter, warping, morphing')
 
@@ -60,9 +63,18 @@ def get(path, host=None, timeout=60):
     return json.load(urllib.request.urlopen((host or HOST) + path, timeout=timeout))
 
 
+def vram_total():
+    try:
+        out = run(['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader'],
+                  capture_output=True, text=True, timeout=10).stdout.strip()
+        return int(out.split()[0])
+    except Exception:
+        return None
+
+
 def vram():
     try:
-        return int(subprocess.run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader'],
+        return int(run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader'],
                                   capture_output=True, text=True, timeout=10).stdout.strip().split()[0])
     except Exception:
         return None
@@ -92,6 +104,55 @@ def prepare_still(src, width, height, out=None):
     return dest
 
 
+
+def _wsl_path(path):
+    """C:\\Users\\kevin\\x -> /mnt/c/Users/kevin/x, for the ffmpeg that lives in WSL."""
+    p = Path(path).resolve()
+    return '/mnt/' + p.drive.rstrip(':').lower() + p.as_posix()[2:]
+
+
+def to_mp4(webp_path, fps=24, on_event=None):
+    """Re-encode the animated WebP as H.264 MP4, through the ffmpeg that lives in WSL.
+
+    The WebP is decoded by PIL and written out as a PNG sequence first: ffmpeg's own WebP decoder rejects the animated
+    file ComfyUI writes ("Invalid data found when processing input"), while PIL reads all of its frames correctly. The
+    extra step costs a couple of seconds and removes the one dependency that did not work. The WebP stays beside the
+    MP4 as the direct model output.
+    """
+    from PIL import Image, ImageSequence
+    say = on_event or (lambda msg: None)
+    src = Path(webp_path)
+    dest = src.with_suffix('.mp4')
+    started = time.monotonic()
+    frames_dir = src.with_name(src.stem + '-frames')
+    try:
+        frames = [f.convert('RGB') for f in ImageSequence.Iterator(Image.open(src))]
+        frames_dir.mkdir(exist_ok=True)
+        for i, frame in enumerate(frames):
+            frame.save(frames_dir / ('f%05d.png' % i))
+        say('encoding %d frames to mp4' % len(frames))
+        # winproc.run, so the WSL console does not flash on screen while the clip is encoded
+        run(['wsl', '-e', 'ffmpeg', '-y', '-loglevel', 'error',
+             '-framerate', str(fps), '-i', _wsl_path(frames_dir / 'f%05d.png'),
+             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20',
+             '-movflags', '+faststart', _wsl_path(dest)],
+            capture_output=True, text=True, timeout=600, check=True)
+    except Exception as e:
+        detail = getattr(e, 'stderr', '') or str(e)
+        return None, '%s: %s' % (type(e).__name__, str(detail)[-160:])
+    finally:
+        for f in frames_dir.glob('*.png'):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        try:
+            frames_dir.rmdir()
+        except OSError:
+            pass
+    return dest, round(time.monotonic() - started, 1)
+
+
 def graph(image_name, width, height, frames, prompt, negative, seed, steps, cfg, shift, sampler, scheduler, prefix):
     return {
         "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": WAN['unet']}},
@@ -116,7 +177,7 @@ def graph(image_name, width, height, frames, prompt, negative, seed, steps, cfg,
 
 
 def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE, seed=1234,
-              steps=None, cfg=None, host=None, out_dir=None, free_first=True, frames_out=None):
+              steps=None, cfg=None, host=None, out_dir=None, free_first=True, on_event=None):
     """Render a clip from `still`. Returns a record; the file lands beside the still unless out_dir says otherwise."""
     host = host or HOST
     width, height = GRIDS[grid]
@@ -127,12 +188,15 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
     cfg = float(cfg if cfg is not None else WAN['cfg'])
     still = Path(still)
 
+    say = on_event or (lambda msg: None)
     if free_first:
+        say('freeing video memory for the video model')
         unload(host)
 
     prepared = prepare_still(still, width, height,
                              out=(Path(out_dir) / ('%s-%s-%dx%d.png' % (still.stem, grid.replace(':', 'x'), width, height))
                                   if out_dir else None))
+    say('still prepared at %dx%d: %s' % (width, height, prepared.name))
     uploaded = zg.upload_image(host, prepared)
 
     peak = {'v': 0}
@@ -178,7 +242,15 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
 
-    record = {'clip': str(dest.resolve()), 'still': str(still.resolve()), 'grid': grid,
+    mp4, mp4_secs = to_mp4(dest, on_event=say)
+    if mp4 is None:
+        say('mp4 conversion failed (%s) - the animated WebP is still there' % mp4_secs)
+
+    total = vram_total()
+    free = (total - peak['v']) if (total and peak['v']) else None
+    record = {'vram_free_mib': free, 'floor_breached': (free is not None and free < VRAM_FLOOR_MIB),
+              'clip': str(dest.resolve()), 'mp4': (str(mp4.resolve()) if mp4 else None),
+              'mp4_seconds': (mp4_secs if mp4 else None), 'still': str(still.resolve()), 'grid': grid,
               'width': width, 'height': height, 'frames': frames, 'fps': 24,
               'seconds': round(frames / 24.0, 2), 'steps': steps, 'cfg': cfg, 'seed': seed,
               'wall_s': wall, 'vram_peak_mib': peak['v'] or None,
@@ -207,8 +279,11 @@ def main(argv=None):
     print('wrote %s' % rec['clip'])
     print('  %dx%d, %d frames, %.1f s at 24 fps, %d steps, cfg %s, seed %d'
           % (rec['width'], rec['height'], rec['frames'], rec['seconds'], rec['steps'], rec['cfg'], rec['seed']))
-    print('  wall %ss, peak VRAM %s MiB, %.1f MiB file'
-          % (rec['wall_s'], rec['vram_peak_mib'], rec['bytes'] / 2**20))
+    print('  wall %ss, peak VRAM %s MiB (%s MiB free), %.1f MiB file'
+          % (rec['wall_s'], rec['vram_peak_mib'], rec['vram_free_mib'], rec['bytes'] / 2**20))
+    if rec.get('floor_breached'):
+        print('  WARNING: %s MiB free is under the %s MiB floor - use a smaller grid or fewer frames'
+              % (rec['vram_free_mib'], VRAM_FLOOR_MIB))
     return 0
 
 

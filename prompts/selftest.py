@@ -26,7 +26,6 @@ What is asserted, and why:
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -34,6 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from winproc import run  # noqa: E402  (needs ROOT on sys.path first)
 
 from prompts import suite  # noqa: E402
 
@@ -134,7 +135,7 @@ def write_fixture(root, name, payload):
 
 
 def run_cli(*args, cwd=ROOT):
-    return subprocess.run(
+    return run(
         [PY, str(CLI), *map(str, args)],
         cwd=str(cwd),
         capture_output=True,

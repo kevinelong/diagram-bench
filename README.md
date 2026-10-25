@@ -151,18 +151,32 @@ not loaded - the graph will be rejected rather than silently falling back. `--pr
 - **The still is cropped to a grid the model was trained on** - 704x704, or 1280x704 for a wide picture, multiples of
   32. A 1024x1024 still becomes 704x704: 47 % of the pixels, which is also 47 % of the compute. Stretching to fit is
   what produces the warped-motion look.
+- **You know it is done when the status line changes.** The bar is determinate and the websocket reports
+  `step x of 30` while the sampler runs, so it is not a spinner; at the end the status reads `clip done: <file>`, the
+  hint gives frames, seconds, wall time, peak VRAM and where the file is, and the clip **opens by itself** in the
+  default player. **Open clip** reopens the last one without rendering again.
+- **The deliverable is an MP4**, not the WebP: ffmpeg on this box lives in WSL and its own WebP decoder rejects the
+  animated file ComfyUI writes, so `video.py` decodes the frames with PIL, writes a PNG sequence and encodes H.264 from
+  that. The WebP is kept beside it as the direct model output. The clip does **not** appear in the gallery, which lists
+  PNG stills only.
 - **Frame count is 4k+1** (49, 81, 121 frames = 2.0, 3.4, 5.0 s at 24 fps), which is what the model's temporal
   compression accepts. `video.py` refuses anything else instead of rounding silently.
 
-Measured on this box, from a 512 px still, 704x704, 49 frames, 30 steps at cfg 5.0, uni_pc:
+Measured on this box, from a 512 px still, 30 steps at cfg 5.0, uni_pc, 24 fps:
 
-| run | wall | peak VRAM | result |
-|---|---|---|---|
-| first clip (weights load included) | **109.7 s** | **9,732 MiB** of 12,227 | 6.7 MiB animated WebP, 49 frames |
+| run | wall | per frame | peak VRAM | free | MP4 encode | result |
+|---|---|---|---|---|---|---|
+| 49 frames, 704x704 (2.0 s) | **109.7 s** | 2.2 s | 9,732 MiB | 2,495 | **2.8 s** | 6.7 MiB WebP + 1.0 MiB MP4 |
+| 121 frames, 1280x704 (5.0 s) | **699.4 s** | 5.8 s | **11,913 MiB** | **314** | **17.5 s** | 18.7 MiB WebP + 2.8 MiB MP4 |
 
-That is ~2.2 s per frame end to end, so 5 s (121 frames) is a ~4.5 minute job, not a real-time one. Motion checked the
-only way worth checking: frame 24 differs from frame 0 by 26.6 mean absolute error with 63 % of pixels moved, and the
-bicycle stays coherent across the clip - no warping, no limb drift.
+Two things that table says plainly. **The 2-second clip fits; the 5-second 16:9 one does not fit comfortably** - 314 MiB
+free is under this lab's 0.5 GiB floor, so 704x704 (or 1024x704) is the honest grid here and 1280x704 at 121 frames is
+a floor breach recorded rather than hidden. And **combining the frames is not the slow part**: MP4 encoding is 2.8 s of
+109.7 s and 17.5 s of 699.4 s, about 2.5 % either way. The waiting is the sampler.
+
+Motion checked the only way worth checking: frame 24 differs from frame 0 by 26.6 mean absolute error with 63 % of
+pixels moved, the bicycle stays coherent across the clip - no warping, no limb drift. MP4s verified with ffprobe:
+704x704 / 24 fps / 49 frames / 2.04 s, and 1280x704 / 121 frames / 5.04 s.
 CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt "the camera drifts left"`.
 
 ## Where the evidence lives

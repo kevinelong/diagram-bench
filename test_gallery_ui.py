@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import sys
 import http.server
 import tempfile
@@ -1189,6 +1190,24 @@ def main():
     check('clearing the search returns to a recency window', len(app._tile_widgets) == zui.RECENT_N,
           str(len(app._tile_widgets)))
 
+    print('\n-- no child process may open a console window')
+    import winproc
+    check('the helper uses CREATE_NO_WINDOW', winproc.CREATE_NO_WINDOW == 0x08000000)
+    kw = winproc.hidden()
+    check('hidden() supplies the flag and a SW_HIDE startupinfo',
+          kw.get('creationflags') == 0x08000000 and 'startupinfo' in kw, str(list(kw)))
+    offenders = []
+    here = Path(__file__).resolve().parent
+    for f in sorted(list(here.glob('*.py')) + list((here / 'prompts').glob('*.py'))):
+        if f.name == 'winproc.py':
+            continue
+        src = f.read_text(encoding='utf-8')
+        for m in re.finditer(r'subprocess\.(?:run|Popen|check_output|call)\(', src):
+            offenders.append('%s:%d' % (f.name, src[:m.start()].count(chr(10)) + 1))
+    check('every subprocess call goes through winproc', not offenders, ', '.join(offenders))
+    check('the server launcher hides its window', '-WindowStyle Hidden' in
+          (here / 'start-comfy.ps1').read_text(encoding='utf-8'))
+
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
     app.clip_btn.invoke(); root.update()
@@ -1203,7 +1222,39 @@ def main():
         check('and asks for 2 s at a trained grid', kw.get('frames') == 49 and kw.get('grid') in ('1:1', '16:9'),
               str(kw))
     check('the clip button is disabled while it works', 'disabled' in app.clip_btn.state())
-    app.busy = False; app.clip_btn.state(['!disabled']); root.update()
+    check('the progress bar is determinate, so the step counter can drive it',
+          str(app.bar['mode']) == 'determinate', str(app.bar['mode']))
+    check('Open clip is disabled until there is one', 'disabled' in app.clip_open_btn.state())
+
+    # completion: the event the engine sends when the file exists
+    clip_file = tmp / '20261025-clip_00001_.mp4'
+    clip_file.write_bytes(b'\x00' * 64)
+    opened = []
+    real_open = zui.zg.open_output
+    zui.zg.open_output = lambda p: opened.append(str(p)) or True
+    app.engine.events.put(('clip', {'clip': str(tmp / '2026-clip.webp'), 'mp4': str(clip_file),
+                                    'frames': 49, 'seconds': 2.04, 'wall_s': 109.7,
+                                    'vram_peak_mib': 9732, 'mp4_seconds': 1.4,
+                                    'vram_free_mib': 2495, 'floor_breached': False}))
+    app._poll(); root.update()
+    check('a finished clip says so', 'clip done' in app.status['text'], app.status['text'])
+    check('and names the file it opened', clip_file.name in app.hint['text'], app.hint['text'])
+    check('the MP4 is what gets opened', opened == [str(clip_file)], str(opened))
+    check('Open clip becomes available', 'disabled' not in app.clip_open_btn.state())
+    check('the button is released again', 'disabled' not in app.clip_btn.state())
+    opened.clear()
+    app.clip_open_btn.invoke(); root.update()
+    check('Open clip reopens the same file', opened == [str(clip_file)], str(opened))
+    zui.zg.open_output = real_open
+
+    # a breached floor must be said out loud, not left in a sidecar
+    app.engine.events.put(('clip', {'clip': str(tmp / 'x.webp'), 'mp4': str(clip_file), 'frames': 121,
+                                    'seconds': 5.04, 'wall_s': 699.4, 'vram_peak_mib': 11913,
+                                    'mp4_seconds': 17.5, 'vram_free_mib': 314, 'floor_breached': True}))
+    app._poll(); root.update()
+    check('a floor breach is reported in the window', 'under the 0.5 GiB floor' in app.hint['text'],
+          app.hint['text'])
+    root.update()
 
     for w in root.winfo_children():
         if isinstance(w, tk.Toplevel):

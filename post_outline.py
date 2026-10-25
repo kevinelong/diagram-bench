@@ -30,6 +30,8 @@ import json
 import math
 import re
 import subprocess
+
+from winproc import popen, run
 import sys
 import uuid
 from pathlib import Path
@@ -221,7 +223,7 @@ def export_svg(pcb_path, svg_path, layers='F.SilkS', mode_single=True):
         cmd += ['--mode-single']
     cmd += ['--layers', layers, '--exclude-drawing-sheet',
             '--page-size-mode', '2', '-o', str(svg_path), str(pcb_path)]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+    p = run(cmd, capture_output=True, text=True, timeout=240)
     return p.returncode, (p.stderr or '')[-300:]
 
 

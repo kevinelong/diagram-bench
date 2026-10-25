@@ -41,6 +41,8 @@ import argparse
 import json
 import re
 import subprocess
+
+from winproc import popen, run
 import sys
 import time
 import urllib.request
@@ -129,7 +131,7 @@ def code_of(reply):
 def run_script(script_path):
     t0 = time.monotonic()
     try:
-        p = subprocess.run([KICAD_PY, str(script_path)], capture_output=True, text=True, timeout=240)
+        p = run([KICAD_PY, str(script_path)], capture_output=True, text=True, timeout=240)
         return p.returncode, (p.stdout or '')[-400:], (p.stderr or '')[-800:], round(time.monotonic() - t0, 1)
     except subprocess.TimeoutExpired:
         return 124, '', 'timeout', round(time.monotonic() - t0, 1)

@@ -29,6 +29,8 @@ import random
 import socket
 import struct
 import subprocess
+
+from winproc import popen, run
 import sys
 import threading
 import time
@@ -155,7 +157,7 @@ def copy_png_to_clipboard(path):
           "[System.Windows.Forms.Clipboard]::SetImage($i); $i.Dispose(); Write-Output 'ok'"
           % str(path).replace("'", "''"))
     try:
-        r = subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', ps],
+        r = run(['powershell', '-NoProfile', '-STA', '-Command', ps],
                            capture_output=True, text=True, timeout=90)
         return (r.returncode == 0 and 'ok' in r.stdout), (r.stdout + r.stderr).strip()[:180]
     except Exception as e:
@@ -357,22 +359,18 @@ class Engine:
         return client_id
 
     # -- generation --------------------------------------------------------
-    def _listen_progress(self):
-        client_id = 'zimage-ui-%d' % int(time.time() * 1000)
-        self._ws = WSClient(self.host, self.port, client_id, self.events, self._stop)
-        self._ws.start()
-        return client_id
-
     def make_clip(self, still, grid='1:1', frames=49, prompt='', seed=1234):
         """Render a few seconds from a still, off the UI thread. Frees the image model first - video needs the VRAM."""
         self._cancel.clear()
+        if self.progress:
+            self._listen_progress()          # same websocket the image path uses, so the step counter works
 
         def work():
             try:
                 import video
-                self.events.put(('status', 'freeing video memory for the video model...'))
                 rec = video.make_clip(still, grid=grid, frames=frames, prompt=prompt, seed=seed,
-                                      host='http://%s:%d' % (self.host, self.port))
+                                      host='http://%s:%d' % (self.host, self.port),
+                                      on_event=lambda msg: self.events.put(('status', msg)))
                 self.events.put(('clip', rec))
             except Exception as e:
                 self.events.put(('error', '%s: %s' % (type(e).__name__, e)))
@@ -873,12 +871,24 @@ class App:
         self.clear_base_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
         self.clear_base_btn.state(['disabled'])
 
-        self.clip_btn = ActionButton(left, text='\u25b6 Make clip (2 s)', command=self.make_clip,
+        self.clip_row = ttk.Frame(left)
+        self.clip_row.grid(row=13, column=0, sticky='ew', pady=(6, 0))
+        self.clip_row.columnconfigure(0, weight=3)
+        self.clip_row.columnconfigure(1, weight=2)
+        self.clip_btn = ActionButton(self.clip_row, text='\u25b6 Make clip (2 s)', command=self.make_clip,
                                      font=('Segoe UI', 11), bg='#3f4f63', fg='white',
                                      activebackground='#33404f', activeforeground='white',
                                      disabledforeground='#c9d2de', relief='flat', bd=0,
                                      height=1, cursor='hand2', takefocus=True)
-        self.clip_btn.grid(row=13, column=0, sticky='ew', pady=(6, 0))
+        self.clip_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
+        self.clip_open_btn = ActionButton(self.clip_row, text='Open clip', command=self.open_last_clip,
+                                          font=('Segoe UI', 11), bg='#7a8699', fg='white',
+                                          activebackground='#68748a', activeforeground='white',
+                                          disabledforeground='#d5dae2', relief='flat', bd=0,
+                                          height=1, cursor='hand2', takefocus=True)
+        self.clip_open_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
+        self.clip_open_btn.state(['disabled'])
+        self._last_clip = None
 
         self.gen_btn = ActionButton(left, text='\u26a1 Generate', command=self.generate,
                                     font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
@@ -2322,6 +2332,7 @@ class App:
         t(self.rephrase_btn, 'Rewrites the prompt using synonyms. Offline: press again for another variant.')
         t(self.clip_btn, 'Makes a 2-second clip from the picture on screen with Wan 2.2 TI2V-5B.\n'
                          'The image model is unloaded first, so the first clip waits for 10.8 GiB of weights.')
+        t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
                          'once.')
         t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')
@@ -2515,16 +2526,26 @@ class App:
         self.gen_btn.state(['disabled'])
         self.clip_btn.state(['disabled'])
         self.stop_btn.state(['disabled'])
-        self.bar.configure(mode='indeterminate')
+        self.bar.configure(mode='determinate', value=0, maximum=30)
         self.bar.grid()
-        self.bar.start(12)
-        self.status.configure(text='making a clip from %s...' % self._short_name(Path(self._current).name))
+        self.status.configure(text='preparing the clip from %s...' % self._short_name(Path(self._current).name))
         clip_w, clip_h = (1280, 704) if grid == '16:9' else (704, 704)
         self.hint.configure(text='%dx%d from a %dx%d still - the first clip of a session loads 10.8 GiB of video '
                                  'weights, so expect minutes, not seconds'
                             % (clip_w, clip_h, size[0], size[1]))
         self.engine.make_clip(self._current, grid=grid, frames=49,
                               prompt=self.text.get('1.0', 'end').strip(), seed=seed)
+
+    def open_last_clip(self):
+        """Open the clip just made, again, without re-rendering it."""
+        if not self._last_clip:
+            self.hint.configure(text='no clip yet - press Make clip first')
+            return
+        if not Path(self._last_clip).exists():
+            self.hint.configure(text='%s is gone from disk' % Path(self._last_clip).name)
+            return
+        self.hint.configure(text='opening %s' % self._last_clip)
+        zg.open_output(self._last_clip)
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
@@ -2755,12 +2776,24 @@ class App:
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
                     self.clip_btn.state(['!disabled'])
-                    self.bar.stop()
                     self.bar.grid_remove()
-                    self.status.configure(text='wrote %s' % Path(payload['clip']).name)
-                    self.hint.configure(text='%d frames at 24 fps (%.1f s) in %ss, peak %s MiB - %s'
+                    self._last_clip = payload.get('mp4') or payload.get('clip')
+                    self.clip_open_btn.state(['!disabled'])
+                    shown = Path(self._last_clip).name if self._last_clip else 'nothing'
+                    self.status.configure(text='clip done: %s' % shown)
+                    self.hint.configure(text='%d frames at 24 fps (%.1f s) in %ss, peak %s MiB%s%s - opening %s'
                                         % (payload['frames'], payload['seconds'], payload['wall_s'],
-                                           payload['vram_peak_mib'], payload['clip']))
+                                           payload['vram_peak_mib'],
+                                           (', mp4 in %ss' % payload['mp4_seconds'])
+                                           if payload.get('mp4_seconds') else '',
+                                           (' - only %s MiB free, under the 0.5 GiB floor'
+                                            % payload['vram_free_mib']) if payload.get('floor_breached') else '',
+                                           self._last_clip))
+                    if self._last_clip:
+                        try:
+                            zg.open_output(self._last_clip)
+                        except Exception:
+                            pass
                 elif kind == 'error':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])

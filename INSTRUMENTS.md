@@ -564,9 +564,12 @@ comparison exists.
 **Enforces.** Crop-to-grid before upload (704x704 or 1280x704, multiples of 32), `length` as 4k+1, and `/free` before
 the first submission so a resident image model does not share the card with a 6.27 GiB encoder.
 
-**Good.** 704x704, 49 frames, 30 steps, cfg 5.0, uni_pc: **109.7 s** wall, **9,732 MiB** peak, ~2.2 s per frame.
-**Not yet measured.** 121 frames, 1280x704, a second seed, and any clip-to-clip quality comparison - so the only claim
-this repository supports is the 2-second one above.
+**Good.** 704x704, 49 frames, 30 steps, cfg 5.0, uni_pc: **109.7 s** wall, **9,732 MiB** peak, **2.2 s** per frame,
+**2.8 s** to encode the MP4 - 2.5 % of the run.
+**Bad.** 1280x704, 121 frames: **699.4 s**, **11,913 MiB** peak, leaving **314 MiB** free - a breach of the 0.5 GiB
+floor, recorded in the sidecar as `floor_breached` and printed at the end of a CLI run.
+**Not yet measured.** A second seed, 1024x704 at 81 frames, and any clip-to-clip quality comparison - so nothing here
+establishes which clip is better, only what each costs.
 
 ---
 

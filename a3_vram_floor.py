@@ -8,6 +8,8 @@ runs one fixed image through the Z-Image arm, reads the arm's sampled peak, and 
 import json
 import re
 import subprocess
+
+from winproc import popen, run
 import sys
 import time
 import urllib.request
@@ -49,7 +51,7 @@ def ready(timeout=180):
 
 
 def free_now():
-    out = subprocess.run(['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,noheader'],
+    out = run(['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,noheader'],
                          capture_output=True, text=True, timeout=10).stdout.strip()
     used, total = [int(x.split()[0]) for x in out.split(',')]
     return total - used, total
@@ -59,13 +61,13 @@ def run_variant(name, extra):
     log = REPO / 'render' / ('a3-%s.log' % name)
     log.parent.mkdir(exist_ok=True)
     with open(log, 'w', encoding='utf-8', errors='replace') as fh:
-        proc = subprocess.Popen(server_args(extra), stdout=fh, stderr=subprocess.STDOUT, cwd=r'C:\Users\kevin\Documents\ComfyUI')
+        proc = popen(server_args(extra), stdout=fh, stderr=subprocess.STDOUT, cwd=r'C:\Users\kevin\Documents\ComfyUI')
         try:
             if not ready():
                 return {'variant': name, 'flags': extra, 'status': 'server did not become ready'}
             free_before, total = free_now()
             started = time.monotonic()
-            run = subprocess.run([PY, str(REPO / 'zimage_arm.py'), '--prompts', 'prompts-density.json',
+            run = run([PY, str(REPO / 'zimage_arm.py'), '--prompts', 'prompts-density.json',
                                   '--tag', 'a3-%s' % name, '--only', 'net-1-words',
                                   '--seeds', '1234', '--steps', '4'],
                                  capture_output=True, text=True, timeout=1800,

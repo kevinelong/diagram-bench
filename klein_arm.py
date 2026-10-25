@@ -12,6 +12,8 @@ import hashlib
 import json
 import shutil
 import subprocess
+
+from winproc import popen, run
 import sys
 import threading
 import time
@@ -36,7 +38,7 @@ def get(path):
 
 def vram():
     try:
-        return int(subprocess.run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader'],
+        return int(run(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader'],
                                   capture_output=True, text=True, timeout=10).stdout.strip().split()[0])
     except Exception:
         return None
