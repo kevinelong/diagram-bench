@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -118,9 +119,20 @@ def main():
     ap.add_argument('--only', default=None)
     ap.add_argument('--host', default=HOST,
                     help='ComfyUI base URL (default %s); the window may be serving on another port' % HOST)
+    ap.add_argument('--force', action='store_true',
+                    help='overwrite an existing result-<profile>-<size>.json (default: refuse, because that file is '
+                         'evidence from a previous session - copy it to a dated name instead)')
+    ap.add_argument('--out-name', default=None,
+                    help='write this result file instead (e.g. result-klein-512-20261025.json)')
     args = ap.parse_args()
 
     HOST = args.host.rstrip('/')
+    existing = ROOT / ('result-%s-%d.json' % (args.profile, args.size))
+    if existing.exists() and not args.force:
+        print('%s already exists and holds an earlier session\'s measurement.\n'
+              'Move it aside (e.g. %s) or pass --force. Naming is how this lab keeps its evidence.'
+              % (existing.name, existing.with_name(existing.stem + '-%s.json' % datetime.now().strftime('%Y%m%d')).name))
+        return 2
 
     corpus = json.loads((ROOT / 'prompts-diagrams.json').read_text(encoding='utf-8'))
     prompts = [p for p in corpus['prompts'] if not args.only or p['id'] == args.only]
@@ -183,7 +195,7 @@ def main():
             print('  %-13s s%-5d %-4s %5.1fs vram %s' % (p['id'], seed, 'OK' if ok else 'FAIL', wall,
                                                          row['vram_peak_mib']), flush=True)
 
-    out = ROOT / ('result-%s-%d.json' % (args.profile, args.size))
+    out = ROOT / (args.out_name or ('result-%s-%d.json' % (args.profile, args.size)))
     out.write_text(json.dumps({'profile': args.profile, 'size': args.size, 'seeds': seeds,
                                'idle_vram_mib': idle, 'rows': rows}, indent=1), encoding='utf-8')
     walls = sorted(r['wall_s'] for r in rows if r['ok'])
