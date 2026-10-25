@@ -532,6 +532,29 @@ compliance must name the resolution (Z-Image passes at 512 and is marginal at 10
 
 ---
 
+## `anatomy_probe.py` - is the body physically possible? (added 2026-10-25)
+
+**Measures.** Four frozen life-drawing poses (standing contrapposto, seated, reclining, two-figure pair) at any
+resolution, through whatever profile `MODELS` offers, with wall time and peak VRAM sampled at 250 ms plus a Laplacian
+edge-energy reading per image. With `--judge cloud` it adds eight yes/no anatomy checks per image from the same vision
+model the diagram arms use: limb counts, five digits per visible hand, toes that read as feet, joint direction,
+head-to-body proportion, one head and torso per figure, and hands and feet inside the frame.
+
+**Why it exists.** OCR and geometry cannot see anatomy: a figure with three arms passes every diagram check. The
+prompt set is deliberately clinical - life-drawing studies, no sexual or intimate framing - because the measurement
+is anatomy and nothing else, and that is the scope the file states at the top.
+
+**Scope warning.** With `--judge none` the images are generated and **unjudged**: the numbers are the model's own
+behaviour (time, VRAM, edge energy) and say nothing about correctness. Anatomy claims require a judge, and `cloud`
+sends each render to the DeepSeek vision API, so whether that is acceptable for figure studies is a decision, not a
+default.
+
+**Good.** `flux2 klein 9b uncensored` at 1024, `standing`: **30.9 s**, peak **9,567 MiB** (the model was still resident
+from the previous arm, so that peak is a floor, not a measurement), edge energy **190**.
+**Calibration not yet earned.** No judged run exists yet, so no anatomy number in this repository is a measurement.
+
+---
+
 ## `klein_arm.py`, `flux_arm.py`, `zimage_arm.py` — the first three diffusion arms
 
 **Measures.** The same protocol as `generic_arm.py`, one file per model: per-image wall time, peak VRAM sampled at

@@ -1,0 +1,29 @@
+{
+ "summary": {
+  "profile": "flux2 klein 9b uncensored",
+  "size": 1024,
+  "steps": 4,
+  "cfg": 1.0,
+  "judge": "none",
+  "idle_vram_mib": 9567,
+  "n": 1,
+  "ok": 1,
+  "wall_median_s": 30.9,
+  "peak_mib": 9567,
+  "edge_energy_median": 190.2
+ },
+ "rows": [
+  {
+   "id": "standing",
+   "figures": 1,
+   "seed": 1234,
+   "size": 1024,
+   "ok": true,
+   "wall_s": 30.9,
+   "vram_peak_mib": 9567,
+   "error": null,
+   "file": "standing-s1234.png",
+   "edge_energy": 190.2
+  }
+ ]
+}
