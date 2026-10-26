@@ -38,21 +38,16 @@ PROFILES = {
                                                                     "type": "lumina2"}},
                        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
                        "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
-    'klein': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein',
-                  nodes={
-                      "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "flux-2-klein-4b-Q4_K_M.gguf"}},
-                      "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b_fp4_flux2.safetensors",
-                                                                   "type": "flux2"}},
-                      "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
-                      "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
-    'zimage': dict(steps=9, cfg=1.0, guidance=None, prefix='g-zimage',
-                   nodes={
-                       "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_nvfp4.safetensors",
-                                                                    "weight_dtype": "default"}},
-                       "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b_fp4_mixed.safetensors",
-                                                                    "type": "lumina2"}},
-                       "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
-                       "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
+    # the same z-image checkpoint quantised the other way: int8 convrot instead of nvfp4. Never measured until now.
+    'zimage_convrot': dict(steps=9, cfg=1.0, guidance=None, prefix='g-zimage-convrot',
+                           nodes={
+                               "1": {"class_type": "UNETLoader",
+                                     "inputs": {"unet_name": "z_image_turbo_int8_convrot.safetensors",
+                                                "weight_dtype": "default"}},
+                               "2": {"class_type": "CLIPLoader",
+                                     "inputs": {"clip_name": "qwen_3_4b_fp4_mixed.safetensors", "type": "lumina2"}},
+                               "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+                               "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
     # same diffusion weights as 'klein', encoder swapped for the uncensored Qwen3-4B GGUF (2.33 GiB)
     'klein_unc': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein-unc',
                       nodes={
@@ -92,12 +87,13 @@ def vram():
         return None
 
 
-def build(profile, prompt, size, seed):
+def build(profile, prompt, size, seed, cfg=None, sampler=None, scheduler=None, negative=''):
     p = PROFILES[profile]
     wf = dict(p['nodes'])
     wf = {k: (v if isinstance(v, dict) else v) for k, v in wf.items() if isinstance(v, dict)}
     wf["4"] = {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": PROFILES[profile]['nodes']['clip']}}
-    wf["5"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": PROFILES[profile]['nodes']['clip']}}
+    wf["5"] = {"class_type": "CLIPTextEncode", "inputs": {"text": negative or "",
+                                                          "clip": PROFILES[profile]['nodes']['clip']}}
     if p['guidance'] is not None:
         wf["4g"] = {"class_type": "FluxGuidance", "inputs": {"conditioning": ["4", 0], "guidance": p['guidance']}}
         positive = ["4g", 0]
@@ -107,8 +103,10 @@ def build(profile, prompt, size, seed):
     wf["7"] = {"class_type": "KSampler", "inputs": {"model": PROFILES[profile]['nodes']['model'],
                                                     "positive": positive, "negative": ["5", 0],
                                                     "latent_image": ["6", 0], "seed": seed,
-                                                    "steps": p['steps'], "cfg": p['cfg'],
-                                                    "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}}
+                                                    "steps": p['steps'],
+                                                    "cfg": p['cfg'] if cfg is None else cfg,
+                                                    "sampler_name": sampler or "euler",
+                                                    "scheduler": scheduler or "simple", "denoise": 1.0}}
     wf["8"] = {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": PROFILES[profile]['nodes']['vae']}}
     wf["9"] = {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": p['prefix']}}
     return wf
@@ -123,6 +121,11 @@ def main():
     ap.add_argument('--only', default=None)
     ap.add_argument('--host', default=HOST,
                     help='ComfyUI base URL (default %s); the window may be serving on another port' % HOST)
+    ap.add_argument('--cfg', type=float, default=None, help="override the profile's cfg")
+    ap.add_argument('--sampler', default=None, help="override the sampler (euler, uni_pc, dpmpp_2m, res_multistep)")
+    ap.add_argument('--scheduler', default=None, help="override the scheduler (simple, karras, normal, beta)")
+    ap.add_argument('--negative', default=None, help='negative prompt; the default is empty, as every past arm used')
+    ap.add_argument('--tag', default=None, help='suffix for the render folder and result file')
     ap.add_argument('--force', action='store_true',
                     help='overwrite an existing result-<profile>-<size>.json (default: refuse, because that file is '
                          'evidence from a previous session - copy it to a dated name instead)')
@@ -131,7 +134,8 @@ def main():
     args = ap.parse_args()
 
     HOST = args.host.rstrip('/')
-    existing = ROOT / ('result-%s-%d.json' % (args.profile, args.size))
+    arm_name = args.profile + (('-' + args.tag) if args.tag else '')
+    existing = ROOT / (args.out_name or ('result-%s-%d.json' % (arm_name, args.size)))
     if existing.exists() and not args.force:
         print('%s already exists and holds an earlier session\'s measurement.\n'
               'Move it aside (e.g. %s) or pass --force. Naming is how this lab keeps its evidence.'
@@ -142,7 +146,7 @@ def main():
     prompts = [p for p in corpus['prompts'] if not args.only or p['id'] == args.only]
     suffix = corpus['params']['style_suffix']
     seeds = [int(s) for s in args.seeds.split(',')]
-    outdir = ROOT / 'render' / ('%s-%d' % (args.profile, args.size))
+    outdir = ROOT / 'render' / ('%s-%d' % (arm_name, args.size))
     outdir.mkdir(parents=True, exist_ok=True)
     idle = vram()
 
@@ -164,7 +168,10 @@ def main():
             started = time.monotonic()
             ok, images, err = False, [], None
             try:
-                r = post('/prompt', {"prompt": build(args.profile, p['prompt'] + suffix, args.size, seed)})
+                r = post('/prompt', {"prompt": build(args.profile, p['prompt'] + suffix, args.size, seed,
+                                                     cfg=args.cfg, sampler=args.sampler,
+                                                     scheduler=args.scheduler,
+                                                     negative=args.negative or '')})
                 pid = r['prompt_id']
                 while True:
                     h = get('/history/' + pid)
@@ -173,7 +180,16 @@ def main():
                         images = [i for o in e.get('outputs', {}).values() for i in o.get('images', [])]
                         ok = bool(images) and e.get('status', {}).get('status_str') == 'success'
                         if not ok:
-                            err = str(e.get('status', {}).get('messages', ''))[:200]
+                            msgs = e.get('status', {}).get('messages', [])
+                            detail = ''
+                            for m in msgs:
+                                if isinstance(m, (list, tuple)) and m and m[0] == 'execution_error':
+                                    d = m[1] if len(m) > 1 else {}
+                                    detail = '%s at node %s %s: %s' % (d.get('exception_type'),
+                                                                       d.get('node_id'), d.get('node_type'),
+                                                                       str(d.get('exception_message'))[:160])
+                                    break
+                            err = detail or str(msgs)[:200]
                         break
                     time.sleep(1)
                     if time.monotonic() - started > 1800:
@@ -186,8 +202,11 @@ def main():
                 t.join(timeout=2)
 
             wall = round(time.monotonic() - started, 1)
-            row = {'id': p['id'], 'kind': p['kind'], 'seed': seed, 'size': args.size, 'profile': args.profile,
-                   'steps': PROFILES[args.profile]['steps'], 'cfg': PROFILES[args.profile]['cfg'],
+            row = {'id': p['id'], 'kind': p['kind'], 'seed': seed, 'size': args.size, 'profile': arm_name,
+                   'steps': PROFILES[args.profile]['steps'],
+                   'cfg': PROFILES[args.profile]['cfg'] if args.cfg is None else args.cfg,
+                   'sampler': args.sampler or 'euler', 'scheduler': args.scheduler or 'simple',
+                   'negative': (args.negative or '')[:60],
                    'ok': ok, 'wall_s': wall, 'vram_peak_mib': peak['v'] or None, 'error': err}
             if ok:
                 src = OUTPUT / images[0]['filename']
@@ -199,7 +218,7 @@ def main():
             print('  %-13s s%-5d %-4s %5.1fs vram %s' % (p['id'], seed, 'OK' if ok else 'FAIL', wall,
                                                          row['vram_peak_mib']), flush=True)
 
-    out = ROOT / (args.out_name or ('result-%s-%d.json' % (args.profile, args.size)))
+    out = ROOT / (args.out_name or ('result-%s-%d.json' % (arm_name, args.size)))
     out.write_text(json.dumps({'profile': args.profile, 'size': args.size, 'seeds': seeds,
                                'idle_vram_mib': idle, 'rows': rows}, indent=1), encoding='utf-8')
     walls = sorted(r['wall_s'] for r in rows if r['ok'])

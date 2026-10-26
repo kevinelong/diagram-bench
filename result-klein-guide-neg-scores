@@ -1,0 +1,44 @@
+{
+ "n": 1,
+ "paths_median": 40,
+ "nodes_median": 931,
+ "axis_median": 100.0,
+ "colours_median": 2,
+ "ocr_exact_mean": 0.75,
+ "ocr_full_match": 0,
+ "segments_median": 32,
+ "edge_sparse_median": 90.1,
+ "low_contrast_rows": 0,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "sample": "flow-1-s1234",
+   "paths": 40,
+   "nodes": 931,
+   "traced_svg_kb": 55.0,
+   "axis_pct": 100.0,
+   "colours_major": 2,
+   "ink_pct": 7.8,
+   "ocr_found": [
+    "START",
+    "VAILDATE",
+    "STORE",
+    "DONE"
+   ],
+   "required": [
+    "START",
+    "VALIDATE",
+    "STORE",
+    "DONE"
+   ],
+   "ocr_hits": 3,
+   "ocr_exact": 0.75,
+   "width": 512,
+   "height": 512,
+   "segments": 32,
+   "edge_sparse_pct": 90.1,
+   "low_contrast_normalised": false
+  }
+ ]
+}

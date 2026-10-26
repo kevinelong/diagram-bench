@@ -1,0 +1,27 @@
+{
+ "profile": "klein",
+ "size": 512,
+ "seeds": [
+  1234
+ ],
+ "idle_vram_mib": 1871,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "seed": 1234,
+   "size": 512,
+   "profile": "klein-dpmpp",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler": "dpmpp_2m",
+   "scheduler": "karras",
+   "negative": "",
+   "ok": true,
+   "wall_s": 8.2,
+   "vram_peak_mib": 5552,
+   "error": null,
+   "file": "flow-1-s1234.png"
+  }
+ ]
+}

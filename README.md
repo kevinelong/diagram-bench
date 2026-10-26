@@ -317,9 +317,32 @@ in the base row, switches the banner to `EDIT <file> at 0.60`, and the hint line
 **not** become the base, so pressing Enter again produces another fresh image. Ticked, each finished image becomes the
 base for the next run and the status line says which file is now the base.
 
-**Guidance (CFG) is deliberately not exposed**, because it was measured and removed: on this turbo model raising it from
+**Guidance (CFG) is deliberately not exposed**, because it was measured and removed: on the turbo models raising it from
 1.0 to 1.5 halves edge energy (3.91 -> 1.92) while OCR still reads the same 4/4 labels, so it buys no adherence and costs
 crispness. CFG stays at the model's distilled 1.0.
+
+**What that means for the negative prompt, measured 2026-10-26** (klein 4B, 512 px, seed 1234, frozen flow-1 prompt,
+same weights, one variable at a time):
+
+| change | mean pixel difference vs baseline | OCR exact | wall | peak |
+|---|---|---|---|---|
+| baseline (cfg 1.0, euler/simple, empty negative) | - | 0.75 | 7.2 s | 5,925 MiB |
+| **real negative prompt** (`blurry, low quality, watermark, text`) | **0.00 - byte-identical** | 0.75 | 8.1 s | 5,743 |
+| cfg 2.0 | 5.87 | 0.75 | 112.4 s (outlier) | 9,791 |
+| cfg 4.0 | 8.16 | 0.75 | 8.1 s | 5,839 |
+| **sampler `dpmpp_2m` / `karras`** | 14.90 | **0.25** | 8.2 s | 5,552 |
+
+So **the negative box does nothing on these profiles**, and the box now says so: at cfg 1.0 there is no unconditional
+pass, so there is nothing for a negative to steer. Guidance above 1 does change the picture (5-6 % of pixels) without
+changing the labels, and the **sampler is not a free choice**: switching from `euler`/`simple` to `dpmpp_2m`/`karras`
+left fewer than a third of the labels readable on the same seed. `euler`/`simple` stays the default for that reason,
+not for taste.
+
+**One quantisation experiment is blocked, and this is why:** `z_image_turbo_int8_convrot.safetensors` (6.20 GiB, on disk)
+cannot be loaded by this ComfyUI build at all - `UNETLoader` raises `KeyError: 'int8_tensorwise'` because
+`comfy/quant_ops.py` registers only `float8_e4m3fn`, `float8_e5m2`, `nvfp4` and (when available) `mxfp8`. The convrot
+*kernels* are present in `comfy_kitchen`; the loader's format table is not. An nvfp4-vs-convrot comparison needs a
+ComfyUI upgrade, which is a declared change affecting every image row, so it is deferred rather than fudged.
 
 Size and layout are chosen in the toolbar: **256, 320, 384, 448, 512, 640, 704, 768, 1024**, and
 **single / 4-up (2x2) / 9-up (3x3) / 16-up (4x4)**. **704 is there for video**: it is the clip model's 1:1 grid, so a

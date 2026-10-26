@@ -2454,6 +2454,8 @@ class App:
         t(self.clip_btn, 'Makes a 2-second clip from the picture on screen with Wan 2.2 TI2V-5B.\n'
                          'The image model is unloaded first, so the first clip waits for 10.8 GiB of weights.')
         t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
+        t(self.negative, 'Ignored by every flux2 profile while cfg is 1.0 - measured 2026-10-26: a real negative\n'
+                         'prompt produced a byte-identical image. It only bites when guidance is above 1.')
         t(self.crop_chk, 'Drag a rectangle on the picture and that rectangle becomes the base for the next run,\n'
                          'so Enter edits just that region at the current strength. The size selector rescales it.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
