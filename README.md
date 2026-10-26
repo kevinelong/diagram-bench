@@ -379,19 +379,22 @@ install; strength is on the slider and persisted alongside the model.
 | profile | weights | encoder | measured at 256 px, 4 steps |
 |---|---|---|---|
 | z-image turbo | `z_image_turbo_nvfp4` (UNETLoader) | qwen_3_4b (lumina2) | **7.4 s** |
-| flux1 schnell | `flux1-schnell-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **18.8 s** |
 | flux2 klein | `flux-2-klein-4b-Q4_K_M.gguf` (UnetLoaderGGUF) | qwen_3_4b_fp4_flux2 (flux2) | **9.8 s** at 512 px, 4 steps, cfg 1.0 |
 | flux2 klein uncensored | the same `flux-2-klein-4b-Q4_K_M.gguf` | `flux2-klein-4b-uncensored-q4_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | 7.1 s vs 13.3 s cold, 512 px, same seed |
 | flux2 klein 9b uncensored | `flux-2-klein-9b-Q4_K_M.gguf` (UnetLoaderGGUF) | `flux2-klein-9b-uncensored-te-q5_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | **32.5 s** median, 8.8 GiB peak |
-| flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
 
-**Four of the six profiles are in the picker; two are deliberately out.** Measured at 512 px on the frozen corpus,
-one seed: `flux1 schnell` is slower than z-image (**6.1 s vs 2.0 s**), uses more VRAM (**10,502 vs 9,269 MiB**) and scores
-lower on labels (**0.749 vs 0.786**), and `flux1 dev` costs **11.2 s** with a **11,803 MiB** peak - a floor breach - for
-**0.704**. Both remain in `MODELS` because the 2026-10-20/21 arms cite them and `flux1 dev` is the only cfg>1 path and
-the only non-commercial licence, so they can be reproduced or brought back with one flag (`'in_picker': True`). The two
-klein arms stay because they are not substitutes: `flux2 klein` is the control that makes the uncensored row mean
-something, and `flux2 klein uncensored` is the cheap unfiltered arm at half the 9B's time and VRAM.
+**Two profiles were deleted on 2026-10-26, with their weights.** `flux1 schnell` and `flux1 dev` were dominated on
+every axis measured at 512 px on the frozen corpus, one seed: schnell was slower than z-image (**6.1 s vs 2.0 s**), heavier
+(**10,502 vs 9,269 MiB**) and worse on labels (**0.749 vs 0.786**); dev cost **11.2 s** with an **11,803 MiB** peak - a
+breach of the 0.5 GiB floor - for **0.704**. Removing them freed **41 GiB** on `D:` (86 -> 44 GiB of weights): both
+diffusion GGUFs, the unused dev Q5_K_S, the 16 GiB dev fp8 checkpoint, and the T5/clip_l/flux-VAE that only they used.
+**The 2026-10-20/21 arms that cite them are no longer reproducible** and are kept as records; reinstating either is a
+~12 GiB re-download and one `MODELS` entry. What remains: z-image turbo, flux2 klein, flux2 klein uncensored,
+flux2 klein 9b uncensored - plus the Wan 2.2 video stack.
+
+The two klein arms are not substitutes for each other: `flux2 klein` is the control that makes the uncensored row mean
+something (same diffusion weights, shipped fp4 encoder), and `flux2 klein uncensored` is the cheap unfiltered arm at half
+the 9B's time and VRAM.
 
 **flux2 klein uncensored is an encoder swap, not a different diffusion model.** The diffusion GGUF, the VAE, steps and
 cfg are byte-identical to `flux2 klein`, so an A/B isolates the text encoder. The encoder is a Qwen3-4B language model

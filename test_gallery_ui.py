@@ -412,7 +412,7 @@ def main():
     mib, src = zui.estimate_vram('z-image turbo', 16, 512)
     check('a measured shape returns its peak', mib == 8927, str(mib))
     check('and says where it came from', 'measured' in (src or ''), str(src))
-    check('an unmeasured model invents nothing', zui.estimate_vram('flux1 schnell', 1, 256)[0] is None)
+    check('an unmeasured model invents nothing', zui.estimate_vram('nosuch model', 1, 256)[0] is None)
     app.model_var.set('z-image turbo'); app.size_var.set('512'); app.layout_var.set('16-up (4x4)')
     app.busy = False; root.update()
     check('the banner shows headroom', 'VRAM' in app.banner['text'], app.banner['text'])
@@ -573,7 +573,9 @@ def main():
     check('the estimate compares sequential and batch', 'batch' in app.hint['text'], app.hint['text'])
 
     print('\n-- changing the model sets that model\'s step ceiling')
-    for prof_name, want in (('flux1 dev', '50'), ('flux2 klein', '4'), ('z-image turbo', '9'),
+    check('the deleted profiles are gone from MODELS',
+          'flux1 schnell' not in zui.zg.MODELS and 'flux1 dev' not in zui.zg.MODELS, str(list(zui.zg.MODELS)))
+    for prof_name, want in (('z-image turbo', '9'), ('flux2 klein', '4'),
                             ('flux2 klein 9b uncensored', '4')):
         app.model_var.set(prof_name)
         app._on_model_change()
@@ -689,21 +691,22 @@ def main():
     check('toggling shows it', app.advanced.winfo_ismapped())
     app.negative.delete('1.0', 'end'); app.negative.insert('1.0', 'blurry, watermark')
     app.style_var.set('icon')
-    app.model_var.set('flux1 dev')
+    app.model_var.set('flux2 klein 9b uncensored')
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
     app.busy = False; app.engine.calls.clear()
     app.generate(); root.update()
     args_, kwd = app.engine.calls[-1]
     check('the style suffix reaches the prompt', args_[0].endswith(zui.STYLES['icon']), args_[0][-40:])
     check('the negative prompt is sent', kwd.get('negative') == 'blurry, watermark', str(kwd.get('negative')))
-    check('the model profile is sent', kwd.get('profile') == 'flux1 dev', str(kwd.get('profile')))
-    check('cfg comes from the profile', args_[4] == 3.5, str(args_[4]))
+    check('the model profile is sent', kwd.get('profile') == 'flux2 klein 9b uncensored', str(kwd.get('profile')))
+    check('cfg comes from the profile', args_[4] == 1.0, str(args_[4]))
     check('the style is recorded', kwd.get('style') == 'icon')
-    check('the banner names the model and style', 'flux1 dev' in app.banner['text'] and 'style icon' in app.banner['text'],
+    check('the banner names the model and style',
+          'flux2 klein 9b uncensored' in app.banner['text'] and 'style icon' in app.banner['text'],
           app.banner['text'])
-    app.model_var.set('flux1 dev'); app._on_model_change(); root.update()
-    check('picking a model applies its step ceiling', app.steps_var.get() == '50', app.steps_var.get())
-    check('and says it is the maximum', 'maximum' in app.hint['text'] and 'cfg 3.5' in app.hint['text'],
+    app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change(); root.update()
+    check('picking a model applies its step ceiling', app.steps_var.get() == '4', app.steps_var.get())
+    check('and says it is the maximum', 'maximum' in app.hint['text'] and 'cfg 1.0' in app.hint['text'],
           app.hint['text'])
     app.model_var.set('z-image turbo'); app._on_model_change()
     check('switching back applies the other ceiling', app.steps_var.get() == '9', app.steps_var.get())

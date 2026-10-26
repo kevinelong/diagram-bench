@@ -77,13 +77,6 @@ MODELS = {
     'z-image turbo': {'unet': UNET, 'unet_node': 'UNETLoader',
                       'clip': CLIP, 'clip_node': 'CLIPLoader', 'clip_type': 'lumina2',
                       'vae': VAE, 'steps': 4, 'max_steps': 9, 'cfg': 1.0},
-    'flux1 schnell': {'unet': 'flux1-schnell-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
-                      'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
-                      'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
-                      'vae': 'ae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0,
-                      # dominated: slower than z-image (6.1 s vs 2.0 s), more VRAM (10.5 vs 9.3 GiB) and a lower label
-                      # score (0.749 vs 0.786) for the same 4-step class - kept for reproducing the 2026-10-20/21 arms
-                      'in_picker': False},
     'flux2 klein': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                     'clip': 'qwen_3_4b_fp4_flux2.safetensors', 'clip_node': 'CLIPLoader', 'clip_type': 'flux2',
                     'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
@@ -102,13 +95,7 @@ MODELS = {
                                   'clip': 'flux2-klein-9b-uncensored-te-q5_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
                                   'clip_type': 'flux2',
                                   'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
-    'flux1 dev': {'unet': 'flux1-dev-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
-                  'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
-                  'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
-                  'vae': 'ae.safetensors', 'steps': 20, 'max_steps': 50, 'cfg': 3.5,
-                  # dominated as an image arm: 11.2 s, 11,803 MiB (a floor breach) and 0.704 labels against z-image's
-                  # 0.786. Kept for the cfg>1 path and the open licence question, not as a default choice
-                  'in_picker': False},
+
 }
 # Default comes from measurement (pose_probe.py): an edit needs to cross the pose threshold at denoise 0.70, and
 # flux2 klein is the checkpoint that does it while keeping the character, at 7-8 s and 5.7 GiB. z-image turbo is

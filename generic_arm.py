@@ -38,19 +38,21 @@ PROFILES = {
                                                                     "type": "lumina2"}},
                        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
                        "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
-    'schnell': dict(steps=4, cfg=1.0, guidance=None, prefix='g-schnell',
-                    nodes={
-                        "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "flux1-schnell-Q4_K_S.gguf"}},
-                        "2": {"class_type": "DualCLIPLoader", "inputs": {
-                            "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
-                            "clip_name2": "clip_l.safetensors", "type": "flux"}},
-                        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux1-ae.safetensors"}},
-                        "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
-    'dev': dict(steps=20, cfg=1.0, guidance=3.5, prefix='g-dev',
-                nodes={
-                    "1": {"class_type": "CheckpointLoaderSimple",
-                          "inputs": {"ckpt_name": "flux1-dev-fp8.safetensors"}},
-                    "clip": ["1", 1], "vae": ["1", 2], "model": ["1", 0]}),
+    'klein': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein',
+                  nodes={
+                      "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "flux-2-klein-4b-Q4_K_M.gguf"}},
+                      "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b_fp4_flux2.safetensors",
+                                                                   "type": "flux2"}},
+                      "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+                      "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
+    'zimage': dict(steps=9, cfg=1.0, guidance=None, prefix='g-zimage',
+                   nodes={
+                       "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_nvfp4.safetensors",
+                                                                    "weight_dtype": "default"}},
+                       "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b_fp4_mixed.safetensors",
+                                                                    "type": "lumina2"}},
+                       "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+                       "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
     # same diffusion weights as 'klein', encoder swapped for the uncensored Qwen3-4B GGUF (2.33 GiB)
     'klein_unc': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein-unc',
                       nodes={
