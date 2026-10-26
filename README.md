@@ -214,6 +214,18 @@ CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt 
   rack; the eleventh check names it. The render is still looked at, not just the score.
 - **Most instruments in this folder were wrong before a model was.** Seventeen times, all recorded in
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+- **The sampler is load-bearing for text, not a taste.** Same weights, seed and prompt: `euler`/`simple` reads
+  **0.75** OCR exact, `dpmpp_2m`/`karras` reads **0.25** (measured 2026-10-26, klein 4B at 512 px).
+- **The negative prompt is inert on every flux2 profile.** A real negative prompt returned a **byte-identical** image
+  at cfg 1.0, because a distilled model at guidance 1.0 runs no unconditional pass. Guidance above 1 does move the
+  image (5-6 % of pixels at cfg 2.0 and 4.0) without changing a label.
+- **Two profile families were deleted, with their weights** - `flux1 schnell` and `flux1 dev` were dominated on time,
+  VRAM and labels by the profiles that remain; deleting them freed **41 GiB**. The four that remain are z-image turbo
+  and the three klein arms, and the klein pair is not a subset relationship: one is the control, the other the cheap
+  unfiltered arm.
+- **A quantisation we hold cannot be loaded.** `z_image_turbo_int8_convrot.safetensors` raises
+  `KeyError: 'int8_tensorwise'` in this ComfyUI, whose loader registers only fp8-e4m3/e5m2, nvfp4 and mxfp8, so
+  nvfp4-versus-convrot is **gated on a ComfyUI upgrade** rather than measured.
 
 ## What has not been established
 
@@ -228,6 +240,13 @@ CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt 
   ([RESULTS-DEV-BLOCKED.md](RESULTS-DEV-BLOCKED.md)).
 - **The VRAM floor** is a distribution, not a number: Z-Image-Turbo was marginal at 1024 and passes at 512, so any
   floor claim here names its resolution ([RESULTS-512-VARIANT.md](RESULTS-512-VARIANT.md)).
+- **Anatomy is unmeasured.** `anatomy_probe.py` exists with four frozen life-drawing poses and eight yes/no checks,
+  but **no judged run has happened** - nothing vision-capable is installed locally, and sending figure studies to the
+  cloud judge is a decision, not a default.
+- **Label binding inside a diagram is unsolved**, and it is a content failure rather than a prompt-wording failure: a
+  tree's leaves carry the prompt's own numbers instead of 1..7 at every density. A LoRA trained on our own corpus is
+  the untried lever.
+- **The 9B has never been pose-profed**, so the 0.70 denoise threshold is a 4B/dev/z-image result applied by analogy.
 - **Blender (method D) was never run**, and no animated asset has been scored.
 - **Two dimensions the prompts ask for are recorded as unmeasurable**, not passed: dimension arrows on blueprints,
   and lane semantics (a connector proves it spans the divider, not that it means what the diagram claims).
