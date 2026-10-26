@@ -76,7 +76,10 @@ MODELS = {
     # (measured in 2026-10-20/21 arms: z-image and klein were unchanged from 4 upward), so their ceiling is 9 and 4.
     'z-image turbo': {'unet': UNET, 'unet_node': 'UNETLoader',
                       'clip': CLIP, 'clip_node': 'CLIPLoader', 'clip_type': 'lumina2',
-                      'vae': VAE, 'steps': 4, 'max_steps': 9, 'cfg': 1.0},
+                      # 9, not 4: measured 2026-10-26 on the frozen corpus at 512 px, 4 steps holds the same
+                      # labels (0.732 vs 0.736 OCR exact) but traces into 106 paths against 32, so the geometry
+                      # is visibly messier for the same text. The distilled-4 claim was inherited, not measured.
+                      'vae': VAE, 'steps': 9, 'max_steps': 9, 'cfg': 1.0},
     'flux2 klein': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                     'clip': 'qwen_3_4b_fp4_flux2.safetensors', 'clip_node': 'CLIPLoader', 'clip_type': 'flux2',
                     'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},

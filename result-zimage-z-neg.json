@@ -1,0 +1,27 @@
+{
+ "profile": "zimage",
+ "size": 512,
+ "seeds": [
+  1234
+ ],
+ "idle_vram_mib": 2443,
+ "rows": [
+  {
+   "id": "flow-1",
+   "kind": "flowchart",
+   "seed": 1234,
+   "size": 512,
+   "profile": "zimage-neg",
+   "steps": 9,
+   "cfg": 1.0,
+   "sampler": "euler",
+   "scheduler": "simple",
+   "negative": "blurry, low quality, watermark, text",
+   "ok": true,
+   "wall_s": 8.1,
+   "vram_peak_mib": 6923,
+   "error": null,
+   "file": "flow-1-s1234.png"
+  }
+ ]
+}

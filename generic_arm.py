@@ -87,7 +87,7 @@ def vram():
         return None
 
 
-def build(profile, prompt, size, seed, cfg=None, sampler=None, scheduler=None, negative=''):
+def build(profile, prompt, size, seed, cfg=None, sampler=None, scheduler=None, negative='', steps=None):
     p = PROFILES[profile]
     wf = dict(p['nodes'])
     wf = {k: (v if isinstance(v, dict) else v) for k, v in wf.items() if isinstance(v, dict)}
@@ -103,7 +103,7 @@ def build(profile, prompt, size, seed, cfg=None, sampler=None, scheduler=None, n
     wf["7"] = {"class_type": "KSampler", "inputs": {"model": PROFILES[profile]['nodes']['model'],
                                                     "positive": positive, "negative": ["5", 0],
                                                     "latent_image": ["6", 0], "seed": seed,
-                                                    "steps": p['steps'],
+                                                    "steps": p['steps'] if steps is None else steps,
                                                     "cfg": p['cfg'] if cfg is None else cfg,
                                                     "sampler_name": sampler or "euler",
                                                     "scheduler": scheduler or "simple", "denoise": 1.0}}
@@ -121,6 +121,7 @@ def main():
     ap.add_argument('--only', default=None)
     ap.add_argument('--host', default=HOST,
                     help='ComfyUI base URL (default %s); the window may be serving on another port' % HOST)
+    ap.add_argument('--steps', type=int, default=None, help="override the profile's step count")
     ap.add_argument('--cfg', type=float, default=None, help="override the profile's cfg")
     ap.add_argument('--sampler', default=None, help="override the sampler (euler, uni_pc, dpmpp_2m, res_multistep)")
     ap.add_argument('--scheduler', default=None, help="override the scheduler (simple, karras, normal, beta)")
@@ -171,7 +172,7 @@ def main():
                 r = post('/prompt', {"prompt": build(args.profile, p['prompt'] + suffix, args.size, seed,
                                                      cfg=args.cfg, sampler=args.sampler,
                                                      scheduler=args.scheduler,
-                                                     negative=args.negative or '')})
+                                                     negative=args.negative or '', steps=args.steps)})
                 pid = r['prompt_id']
                 while True:
                     h = get('/history/' + pid)
@@ -203,7 +204,7 @@ def main():
 
             wall = round(time.monotonic() - started, 1)
             row = {'id': p['id'], 'kind': p['kind'], 'seed': seed, 'size': args.size, 'profile': arm_name,
-                   'steps': PROFILES[args.profile]['steps'],
+                   'steps': PROFILES[args.profile]['steps'] if args.steps is None else args.steps,
                    'cfg': PROFILES[args.profile]['cfg'] if args.cfg is None else args.cfg,
                    'sampler': args.sampler or 'euler', 'scheduler': args.scheduler or 'simple',
                    'negative': (args.negative or '')[:60],

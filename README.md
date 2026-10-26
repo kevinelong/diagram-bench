@@ -214,11 +214,18 @@ CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt 
   rack; the eleventh check names it. The render is still looked at, not just the score.
 - **Most instruments in this folder were wrong before a model was.** Seventeen times, all recorded in
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-- **The sampler is load-bearing for text, not a taste.** Same weights, seed and prompt: `euler`/`simple` reads
-  **0.75** OCR exact, `dpmpp_2m`/`karras` reads **0.25** (measured 2026-10-26, klein 4B at 512 px).
-- **The negative prompt is inert on every flux2 profile.** A real negative prompt returned a **byte-identical** image
-  at cfg 1.0, because a distilled model at guidance 1.0 runs no unconditional pass. Guidance above 1 does move the
-  image (5-6 % of pixels at cfg 2.0 and 4.0) without changing a label.
+- **The sampler is load-bearing for text, and it generalises across profiles.** On klein 4B a single prompt went
+  from **0.75** OCR exact with `euler`/`simple` to **0.25** with `dpmpp_2m`/`karras`; on z-image over the whole
+  ten-prompt corpus it goes **0.736 -> 0.325**, full matches **5/10 -> 2/10**, and traced paths **32 -> 538** - the
+  sampler that looks like a free quality knob draws noisier geometry for the same words. Measured 2026-10-26 at 512 px.
+- **The negative prompt is inert on every profile measured, twice.** A real negative prompt returned a
+  **byte-identical** image at cfg 1.0 on klein 4B *and* on z-image (mean pixel difference 0.00), because a distilled
+  model at guidance 1.0 runs no unconditional pass. Guidance above 1 does move the image (5-6 % of pixels at cfg 2.0
+  and 4.0) without changing a label.
+- **For z-image, steps are a geometry knob, not a text knob.** 4 steps against 9 on the same corpus: OCR **0.732 vs
+  0.736** and 5/10 full matches both, but traced paths **106 vs 32** - the same words drawn twice as messily. So the
+  profile now runs **9 steps**, which is what the picker already applied and what the published row used; the "distilled
+  for 4" line was inherited from the klein arms rather than measured on this model.
 - **Two profile families were deleted, with their weights** - `flux1 schnell` and `flux1 dev` were dominated on time,
   VRAM and labels by the profiles that remain; deleting them freed **41 GiB**. The four that remain are z-image turbo
   and the three klein arms, and the klein pair is not a subset relationship: one is the control, the other the cheap
