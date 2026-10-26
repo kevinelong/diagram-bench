@@ -775,6 +775,14 @@ class App:
         rephrase_row.grid(row=0, column=0, columnspan=6, sticky='w', pady=(2, 2))
         self.rephrase_btn = ttk.Button(rephrase_row, text='\u21bb rephrase', command=self.rephrase)
         self.rephrase_btn.pack(side='left')
+        # intensity: how many of the matched words move on one press. matching: how forgiving the lookup is.
+        self.rephrase_intensity = tk.StringVar(value=self._settings.get('rephrase_intensity') or 'normal')
+        ttk.Combobox(rephrase_row, textvariable=self.rephrase_intensity, width=7, state='readonly',
+                     values=['light', 'normal', 'strong']).pack(side='left', padx=(8, 0))
+        ttk.Label(rephrase_row, text='matching').pack(side='left', padx=(10, 4))
+        self.rephrase_matching = tk.StringVar(value=self._settings.get('rephrase_matching') or 'strict')
+        ttk.Combobox(rephrase_row, textvariable=self.rephrase_matching, width=6, state='readonly',
+                     values=['off', 'strict', 'loose']).pack(side='left')
 
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
         self.stop_btn.grid(row=1, column=0, sticky='w')
@@ -1415,9 +1423,11 @@ class App:
             self._rephrase_base = base
             self._rephrase_turn = 0
         self._rephrase_turn = getattr(self, '_rephrase_turn', 0) + 1
-        new, changed = rephrase_text(base, self._rephrase_turn)
+        new, changed, detail = rephrase_text(base, self._rephrase_turn,
+                                             intensity=self.rephrase_intensity.get(),
+                                             fuzziness=self.rephrase_matching.get())
         if not changed:
-            known = has_synonyms(base)
+            known = has_synonyms(base, fuzziness=self.rephrase_matching.get())
             if known:
                 # the cycle has come all the way round: the original wording is one of the options, so write it back.
                 # The turn is deliberately NOT rewound - the next press continues past the wrap into the cycle again.
@@ -1439,9 +1449,10 @@ class App:
         left = (period - self._rephrase_turn % period) if period else 0
         # say the denominator: a long prompt has only a handful of words the dictionary knows, and a press that lands
         # back on the originals for some of them looks like a failure unless the total is on screen
-        known = has_synonyms(base)
-        self.hint.configure(text='rephrased %d of %d word%s that have synonyms - press again for another variant%s'
-                                 % (changed, known, '' if known == 1 else 's',
+        known = has_synonyms(base, fuzziness=self.rephrase_matching.get())
+        how = ', '.join('%d %s' % (v, k) for k, v in (detail.get('matched') or {}).items() if v) or 'exact'
+        self.hint.configure(text='rephrased %d of %d word%s that have synonyms (%s) - press again for another variant%s'
+                                 % (changed, known, '' if known == 1 else 's', how,
                                     '; your own wording returns in %d press%s' % (left, '' if left == 1 else 'es')
                                     if period and left else ''))
 
@@ -2344,7 +2355,8 @@ class App:
         t(self.stop_btn, 'Interrupt this run. Tiles already written are kept.')
         t(self.size_cb, 'Image size in pixels. Bigger is slower and uses more VRAM.')
         t(self.layout_cb, 'How many images one press makes: 1, 4, 9 or 16, saved as separate tiles on one sheet.')
-        t(self.rephrase_btn, 'Rewrites the prompt using synonyms. Offline: press again for another variant.')
+        t(self.rephrase_btn, 'Rewrites the prompt using synonyms. Offline: press again for another variant.\n'
+                             'The two boxes beside it decide how many words move and how forgiving the match is.')
         t(self.clip_btn, 'Makes a 2-second clip from the picture on screen with Wan 2.2 TI2V-5B.\n'
                          'The image model is unloaded first, so the first clip waits for 10.8 GiB of weights.')
         t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
@@ -2432,6 +2444,8 @@ class App:
         self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),
+                          'rephrase_intensity': self.rephrase_intensity.get(),
+                          'rephrase_matching': self.rephrase_matching.get(),
                           'model': self.model_var.get(), 'advanced': self._adv_shown,
                           'seed_step': self.seed_step_var.get(),
                           'denoise': round(self.denoise.get(), 2),

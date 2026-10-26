@@ -272,30 +272,22 @@ individually reproducible and the VRAM peak stays that of a single image. Untick
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
 **rephrase** sits directly under the prompt box and rewrites it with synonyms - no model, no server, so it always works.
-The dictionary is **947 words**, from two layers:
+Two boxes beside it decide what it does:
 
-| layer | words | where it comes from |
+| control | values | what it means |
 |---|---|---|
-| generated | 866 | `build_synonyms.py` parses WordNet 3.0 synsets, restricted to visual vocabulary |
-| hand-written | 181 | `VISUAL_EXTRA` + `SYNONYMS` in `rephrase.py`, and these win on conflict |
+| **intensity** | `light` / `normal` / `strong` | how many matched words move on one press. `light` takes every third one, rotating so none is starved; `normal` takes all; `strong` takes all and prefers the farthest synonym in each list |
+| **matching** | `off` / `strict` / `loose` | how forgiving the lookup is. `off` = the word itself or an inflected form of a dictionary word; `strict` also fixes a listed typo and accepts **one** edit on a word of six letters or more sharing two opening letters; `loose` accepts **two** edits and one shared letter |
 
-WordNet alone is not usable here: its noun senses are prose-shaped, so it pairs *red* with **loss** (in the red), *mug*
-with **fool** (a gullible person) and *dog* with **track, tag**. The builder therefore keeps only replacements from a
-visual allow-list (`COMMON` in the builder - colours, materials, light, weather, subjects, poses, textures), which drops
-those senses without hand-checking thousands of entries. Where WordNet has nothing at all - *brick*, *kitchen*, *window*,
-*red* - the hand-written layer covers it. Regenerate with:
+A word is matched in four ways, in this order: **exact**, **stem** (a plural, past or gerund form: "columns" finds
+"column", and the replacement is re-inflected so "two columns" becomes "two towers", not "two tower"), **spelling**
+(en-GB/en-US pairs such as *colour/color*, *grey/gray*), then **fuzzy** - and a hyphenated compound is matched part by
+part, so *silk-towel-covered* keeps its first two words and swaps the third. Listed typos are their own table
+(`weathred` -> `weathered`) and apply even with matching off, because those are entries, not guesses.
 
-    python build_synonyms.py --senses 4        # downloads WordNet once, writes data/synonyms.json (~25 KB)
-
-WordNet 3.0 data is Princeton's; the licence travels with the output in `data/WORDNET-LICENSE.txt`. Each press re-derives from the *original* wording and walks the next variant, so
-three presses give three different phrasings rather than converging; editing the text starts the cycle again. **Your
-own wording is part of that cycle, not excluded from it**: a word with *n* alternatives comes back round to itself
-after *n + 1* presses, so "bicycle" walks bike, cycle, pushbike and then returns "bicycle". A whole sentence returns at
-the lowest common multiple of its words' cycles - 4 presses for "a red bicycle", 60 for a long one - and the hint line
-names that number instead of leaving you to discover it ("your own wording returns in 12 presses"). Whole
-words only, capitalisation carried over, and repeated words collapsed, so "leaning against a wall" cannot become
-"propped against against". It reports how many words moved ("rephrased 7 words"), and says so plainly when a prompt has
-no known synonyms instead of pretending it did something.
+Fuzzy is deliberately tight. A loose similarity rule matched **"three" to "tree"** and **"steam" to "stem"**, silently
+changing what the picture is about, so numbers and function words are excluded outright and the minimum word length is
+six in both modes. A miss costs a word; a wrong word costs the image.
 
 Every control carries a one-line tooltip, and a **banner** above the progress bar states what the next Generate will
 do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one image · seed 1234`, switching to

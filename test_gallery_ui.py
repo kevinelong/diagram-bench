@@ -1064,10 +1064,10 @@ def main():
     LONG = 'a red bicycle leaning against a weathered brick wall at golden sunset'
     check('no synonym entry lists its own key',
           not any(o.lower() == k.lower() for k, v in rp2.SYNONYMS.items() for o in v))
-    out, n = rp2.rephrase_text('a red bicycle', 1)
+    out, n, detail = rp2.rephrase_text('a red bicycle', 1)
     check('known words are swapped', n == 2 and out == 'a crimson bike', out)
     check('capitalisation is carried over', rp2.rephrase_text('A Red Bicycle', 1)[0] == 'A Crimson Bike')
-    check('unknown words are untouched', rp2.rephrase_text('a zorblax', 1) == ('a zorblax', 0))
+    check('unknown words are untouched', rp2.rephrase_text('a zorblax', 1)[:2] == ('a zorblax', 0))
     check('punctuation survives', rp2.rephrase_text('red, blue; green.', 1)[0] == 'crimson, cobalt; emerald.')
     check('two-word swaps do not double an adjacent word',
           'against against' not in rp2.rephrase_text('leaning against a wall', 2)[0],
@@ -1085,6 +1085,43 @@ def main():
           rp2.rephrase_text(LONG, rp2.cycle_period(LONG))[0] == LONG,
           rp2.rephrase_text(LONG, rp2.cycle_period(LONG))[0])
     check('the period is named, not guessed', rp2.cycle_period('a red bicycle') == 4, str(rp2.cycle_period('a red bicycle')))
+
+    print('\n-- intensity decides how many matched words move; matching decides what may match')
+    base = 'the weathered brick columns are leaning in golden light'
+    _, n_light, d_light = rp2.rephrase_text(base, 1, intensity='light')
+    _, n_norm, d_norm = rp2.rephrase_text(base, 1, intensity='normal')
+    _, n_strong, d_strong = rp2.rephrase_text(base, 1, intensity='strong')
+    check('light changes fewer words than normal', n_light < n_norm, '%d vs %d' % (n_light, n_norm))
+    check('strong changes as many as normal', n_strong == n_norm, '%d vs %d' % (n_strong, n_norm))
+    check('strong takes the farthest synonym', rp2.rephrase_text(base, 1, intensity='strong')[0] !=
+          rp2.rephrase_text(base, 1)[0])
+    check('every level still says which words it matched', d_norm['matched'] and d_light['matched'])
+
+    check('an inflected word is found through its base form',
+          rp2.rephrase_text('columns', 1)[2]['matched'].get('stem') == 1,
+          str(rp2.rephrase_text('columns', 1)[2]))
+    check('and the synonym agrees in number',
+          rp2.rephrase_text('two windows', 1)[0].split()[-1].endswith('s'),
+          rp2.rephrase_text('two windows', 1)[0])
+    check('a listed typo is fixed even with matching off',
+          'weathered' not in rp2.rephrase_text('weathred brick', 1, fuzziness='off')[0],
+          rp2.rephrase_text('weathred brick', 1, fuzziness='off')[0])
+    check('a transposed typo matches only when matching is loose',
+          rp2.rephrase_text('brickwrok', 1, fuzziness='off')[2]['matched'].get('fuzzy', 0) == 0
+          and rp2.rephrase_text('brickwrok', 1, fuzziness='loose')[2]['matched'].get('fuzzy', 0) == 1,
+          'off=%s loose=%s' % (rp2.rephrase_text('brickwrok', 1, fuzziness='off')[2]['matched'],
+                               rp2.rephrase_text('brickwrok', 1, fuzziness='loose')[2]['matched']))
+    check('numbers and short words are never fuzzy-matched',
+          rp2.rephrase_text('three trees', 1, fuzziness='loose')[0].startswith('three'),
+          rp2.rephrase_text('three trees', 1, fuzziness='loose')[0])
+    check('the dictionary grew past 1000 entries', len(rp2.LOOKUP) > 1000, str(len(rp2.LOOKUP)))
+    check('a hyphenated compound is swapped part by part',
+          rp2.rephrase_text('silk-towel-covered benches', 1)[0] == 'silk-towel-blanketed benches',
+          rp2.rephrase_text('silk-towel-covered benches', 1)[0])
+    check('and the part that matched is counted',
+          sum(rp2.rephrase_text('silk-towel-covered benches', 1)[2]['matched'].values()) >= 1,
+          str(rp2.rephrase_text('silk-towel-covered benches', 1)[2]))
+    check('the curated layer is loaded', 'masonry' in rp2.LOOKUP and 'silhouette' in rp2.LOOKUP)
     check('and it is the lcm of the per-word cycles', rp2.cycle_period(LONG) == 60, str(rp2.cycle_period(LONG)))
 
     app.text.delete('1.0', 'end')
