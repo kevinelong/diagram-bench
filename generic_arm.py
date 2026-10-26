@@ -38,16 +38,6 @@ PROFILES = {
                                                                     "type": "lumina2"}},
                        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
                        "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
-    # the same z-image checkpoint quantised the other way: int8 convrot instead of nvfp4. Never measured until now.
-    'zimage_convrot': dict(steps=9, cfg=1.0, guidance=None, prefix='g-zimage-convrot',
-                           nodes={
-                               "1": {"class_type": "UNETLoader",
-                                     "inputs": {"unet_name": "z_image_turbo_int8_convrot.safetensors",
-                                                "weight_dtype": "default"}},
-                               "2": {"class_type": "CLIPLoader",
-                                     "inputs": {"clip_name": "qwen_3_4b_fp4_mixed.safetensors", "type": "lumina2"}},
-                               "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
-                               "clip": ["2", 0], "vae": ["3", 0], "model": ["1", 0]}),
     # same diffusion weights as 'klein', encoder swapped for the uncensored Qwen3-4B GGUF (2.33 GiB)
     'klein_unc': dict(steps=4, cfg=1.0, guidance=None, prefix='g-klein-unc',
                       nodes={

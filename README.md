@@ -247,9 +247,15 @@ CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt 
   ([RESULTS-DEV-BLOCKED.md](RESULTS-DEV-BLOCKED.md)).
 - **The VRAM floor** is a distribution, not a number: Z-Image-Turbo was marginal at 1024 and passes at 512, so any
   floor claim here names its resolution ([RESULTS-512-VARIANT.md](RESULTS-512-VARIANT.md)).
-- **Anatomy is unmeasured.** `anatomy_probe.py` exists with four frozen life-drawing poses and eight yes/no checks,
-  but **no judged run has happened** - nothing vision-capable is installed locally, and sending figure studies to the
-  cloud judge is a decision, not a default.
+- **Anatomy has a first judged run, and it is coarse only.** `qwen3-vl:4b` is now installed locally (3.3 GiB) and
+  judges on-box, so no figure study leaves the machine. It was calibrated before use: **10/10** on pose discrimination
+  across four poses including two negative controls, **4/4** on nonsense controls (no bicycle, no car), and it read a
+  render's `VAILDATE` as `VAIDDATE` - one letter off, which is why label scoring stays with deterministic OCR.
+  The run (9B, 704 px, 4 poses) gives **coarse 19/19, fine 9/9**, and the *fine* tier - five fingers, toes, head-to-body
+  proportion - is **not yet validated**: a judge that answers yes to every digit question at 704 px has not been shown
+  to count. Broken out in the result file as `coarse_*` and `fine_*` rather than averaged into one number.
+  Peak with judge and image model both resident: **11,725 MiB**, so `local_vlm.unload()` first (measured 1,314 MiB
+  idle afterwards).
 - **Label binding inside a diagram is unsolved**, and it is a content failure rather than a prompt-wording failure: a
   tree's leaves carry the prompt's own numbers instead of 1..7 at every density. A LoRA trained on our own corpus is
   the untried lever.

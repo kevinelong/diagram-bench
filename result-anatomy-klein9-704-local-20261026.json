@@ -1,0 +1,159 @@
+{
+ "summary": {
+  "profile": "flux2 klein 9b uncensored",
+  "size": 704,
+  "steps": 4,
+  "cfg": 1.0,
+  "judge": "local",
+  "idle_vram_mib": 11664,
+  "n": 4,
+  "ok": 4,
+  "wall_median_s": 22.9,
+  "peak_mib": 11784,
+  "edge_energy_median": 147.35,
+  "checks_passed": 28,
+  "checks_answered": 28
+ },
+ "rows": [
+  {
+   "id": "standing",
+   "figures": 1,
+   "seed": 1234,
+   "size": 704,
+   "ok": true,
+   "wall_s": 48.6,
+   "vram_peak_mib": 11784,
+   "error": null,
+   "file": "standing-s1234.png",
+   "edge_energy": 105.7,
+   "checks": {
+    "limbs": true,
+    "hands": true,
+    "feet": true,
+    "joints": true,
+    "proportion": null,
+    "torso": true,
+    "hands_in_frame": true,
+    "feet_in_frame": true
+   },
+   "judge": "local",
+   "judge_seconds": [
+    1.7,
+    0.9,
+    0.5,
+    0.8,
+    1.4,
+    0.5,
+    0.5,
+    0.4
+   ],
+   "passed": 7,
+   "answered": 7
+  },
+  {
+   "id": "seated",
+   "figures": 1,
+   "seed": 1234,
+   "size": 704,
+   "ok": true,
+   "wall_s": 23.1,
+   "vram_peak_mib": 11711,
+   "error": null,
+   "file": "seated-s1234.png",
+   "edge_energy": 189.0,
+   "checks": {
+    "limbs": true,
+    "hands": true,
+    "feet": true,
+    "joints": true,
+    "proportion": null,
+    "torso": true,
+    "hands_in_frame": true,
+    "feet_in_frame": true
+   },
+   "judge": "local",
+   "judge_seconds": [
+    1.3,
+    1.1,
+    0.8,
+    0.6,
+    1.5,
+    0.5,
+    0.4,
+    0.4
+   ],
+   "passed": 7,
+   "answered": 7
+  },
+  {
+   "id": "reclining",
+   "figures": 1,
+   "seed": 1234,
+   "size": 704,
+   "ok": true,
+   "wall_s": 22.1,
+   "vram_peak_mib": 11622,
+   "error": null,
+   "file": "reclining-s1234.png",
+   "edge_energy": 1721.0,
+   "checks": {
+    "limbs": true,
+    "hands": true,
+    "feet": true,
+    "joints": true,
+    "proportion": true,
+    "torso": true,
+    "hands_in_frame": true,
+    "feet_in_frame": null
+   },
+   "judge": "local",
+   "judge_seconds": [
+    3.1,
+    1.5,
+    0.6,
+    0.6,
+    1.0,
+    0.4,
+    0.6,
+    1.5
+   ],
+   "passed": 7,
+   "answered": 7
+  },
+  {
+   "id": "pair",
+   "figures": 2,
+   "seed": 1234,
+   "size": 704,
+   "ok": true,
+   "wall_s": 22.7,
+   "vram_peak_mib": 11630,
+   "error": null,
+   "file": "pair-s1234.png",
+   "edge_energy": 97.3,
+   "checks": {
+    "limbs": true,
+    "hands": null,
+    "feet": true,
+    "joints": true,
+    "proportion": true,
+    "torso": true,
+    "hands_in_frame": true,
+    "feet_in_frame": true
+   },
+   "judge": "local",
+   "judge_seconds": [
+    1.5,
+    1.5,
+    0.5,
+    1.4,
+    1.4,
+    0.5,
+    0.6,
+    1.1
+   ],
+   "passed": 7,
+   "answered": 7
+  }
+ ]
+}

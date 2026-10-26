@@ -52,16 +52,22 @@ POSES = [
 ]
 
 # one question per line, answered yes/no; they are the anatomy a life-drawing tutor would check
+# Each check carries the tier of judgement it needs. Measured 2026-10-26 with the local 4B judge
+# (`qwen3-vl:4b`): pose and presence questions were **10/10** correct across four poses, including two negative
+# controls, but the same model cannot be trusted to count fingers - it read a render's `VAILDATE` as `VAIDDATE`, one
+# letter off, so anything that needs digit-level reading is 'fine' and is reported separately rather than mixed in.
 CHECKS = [
-    ('limbs', 'Does every figure have exactly two arms and two legs, with no extra, missing or fused limbs?'),
-    ('hands', 'Does every visible hand have exactly five separate fingers, none merged into a paddle?'),
-    ('feet', 'Does every visible foot have toes that read as feet rather than stumps or extra digits?'),
-    ('joints', 'Do the elbows and knees bend the way human joints bend, with no backwards or broken joints?'),
-    ('proportion', 'Is the head about one seventh to one eighth of the total body height?'),
-    ('torso', 'Is there exactly one head and one torso per figure, with no duplicated or overlapping bodies?'),
-    ('hands_in_frame', 'Are the hands fully inside the image, not cropped off at the edge?'),
-    ('feet_in_frame', 'Are the feet fully inside the image, not cropped off at the edge?'),
+    ('limbs', 'coarse', 'Does every figure have exactly two arms and two legs, with no extra, missing or fused limbs?'),
+    ('hands', 'fine', 'Does every visible hand have exactly five separate fingers, none merged into a paddle?'),
+    ('feet', 'fine', 'Does every visible foot have toes that read as feet rather than stumps or extra digits?'),
+    ('joints', 'coarse', 'Do the elbows and knees bend the way human joints bend, with no backwards or broken joints?'),
+    ('proportion', 'fine', 'Is the head about one seventh to one eighth of the total body height?'),
+    ('torso', 'coarse', 'Is there exactly one head and one torso per figure, with no duplicated or overlapping bodies?'),
+    ('hands_in_frame', 'coarse', 'Are the hands fully inside the image, not cropped off at the edge?'),
+    ('feet_in_frame', 'coarse', 'Are the feet fully inside the image, not cropped off at the edge?'),
 ]
+COARSE = [k for k, tier, _ in CHECKS if tier == 'coarse']
+FINE = [k for k, tier, _ in CHECKS if tier == 'fine']
 
 
 def post(path, obj):
@@ -132,20 +138,33 @@ def run_one(profile, pose, size, seed, steps, cfg, outdir, judge):
         dest.write_bytes(image.read_bytes())
         row['file'] = dest.name
         row['edge_energy'] = edge_energy(dest)
-        if judge == 'cloud':
-            import vlm_score
-            b64 = __import__('base64').b64encode(dest.read_bytes()).decode()
-            verdicts = {}
-            for key, question in CHECKS:
+        if judge in ('cloud', 'local'):
+            verdicts, timings = {}, []
+            if judge == 'cloud':
+                import vlm_score
+                b64 = __import__('base64').b64encode(dest.read_bytes()).decode()
+            else:
+                import local_vlm
+            for key, _tier, question in CHECKS:
                 try:
-                    verdicts[key] = 'yes' in str(vlm_score.ask(b64, question)).lower()
+                    if judge == 'cloud':
+                        verdicts[key] = 'yes' in str(vlm_score.ask(b64, question)).lower()
+                    else:
+                        ok, secs, _raw = local_vlm.yes_no(dest, question)
+                        verdicts[key] = ok
+                        timings.append(secs)
                 except Exception as ex:
                     verdicts[key] = None
                     row.setdefault('judge_errors', []).append('%s: %s' % (key, type(ex).__name__))
             row['checks'] = verdicts
+            row['judge'] = judge
+            if timings:
+                row['judge_seconds'] = timings
             answered = [v for v in verdicts.values() if v is not None]
             row['passed'] = sum(1 for v in answered if v)
             row['answered'] = len(answered)
+            row['coarse'] = {k: verdicts.get(k) for k in COARSE}
+            row['fine'] = {k: verdicts.get(k) for k in FINE}
     return row
 
 
@@ -158,8 +177,9 @@ def main():
     ap.add_argument('--steps', type=int, default=None, help='default: the profile\'s own step count')
     ap.add_argument('--cfg', type=float, default=None, help='default: the profile\'s own cfg')
     ap.add_argument('--only', default=None, help='one pose id from the frozen four')
-    ap.add_argument('--judge', choices=['none', 'cloud'], default='none',
-                    help="'cloud' sends each render to the DeepSeek vision API for the anatomy rubric; "
+    ap.add_argument('--judge', choices=['none', 'cloud', 'local'], default='none',
+                    help="'local' judges with a vision model on this box (nothing leaves the machine), "
+                         "'cloud' sends each render to the DeepSeek API (better at small text), "
                          "'none' records only the measured numbers and leaves the images unjudged")
     ap.add_argument('--host', default=HOST)
     ap.add_argument('--out-name', default=None)
@@ -208,6 +228,12 @@ def main():
     if any('passed' in r for r in rows):
         summary['checks_passed'] = sum(r.get('passed', 0) for r in rows)
         summary['checks_answered'] = sum(r.get('answered', 0) for r in rows)
+        # reported apart on purpose: coarse is what the local judge was calibrated for, fine is not
+        for tier, keys in (('coarse', COARSE), ('fine', FINE)):
+            ans = [r['checks'][k] for r in rows if r.get('checks') for k in keys
+                   if r['checks'].get(k) is not None]
+            summary['%s_passed' % tier] = sum(1 for v in ans if v)
+            summary['%s_answered' % tier] = len(ans)
     out.write_text(json.dumps({'summary': summary, 'rows': rows}, indent=1), encoding='utf-8')
     print('\n%d/%d ok; median %ss; peak %s MiB; -> %s'
           % (len(ok), len(rows), summary['wall_median_s'], summary['peak_mib'], out.name))
