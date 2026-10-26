@@ -754,14 +754,17 @@ class App:
         left.columnconfigure(0, weight=1)
         left.rowconfigure(1, weight=1)
 
-        ttk.Label(left, text='Prompt  (Enter generates · Shift+Enter adds a line)').grid(row=0, column=0, sticky='w')
+        ttk.Label(left, text='Prompt  (Enter generates · Shift+Enter adds a line · Ctrl+\u2191/\u2193 recalls)'
+                  ).grid(row=0, column=0, sticky='w')
         # a tall minimum height here pushes the rows below it off the bottom of the window once Advanced opens
         self.text = tk.Text(left, wrap='word', width=48, height=7, undo=True, font=('Segoe UI', 10))
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
-        self.text.bind('<Up>', self._on_hist_up)
-        self.text.bind('<Down>', self._on_hist_down)
+        # Ctrl+arrow, not plain arrows: in a multi-line prompt box Up/Down have to move the caret, which is what
+        # every text editor does and what a five-line prompt needs
+        self.text.bind('<Control-Up>', self._on_hist_up)
+        self.text.bind('<Control-Down>', self._on_hist_down)
         self.text.focus_set()
 
         row = ttk.Frame(left)
@@ -2443,8 +2446,8 @@ class App:
         self.text.mark_set('insert', 'end-1c')
 
     def _on_hist_up(self, event=None):
-        """Up recalls the previous prompt, but only from the first line, so normal editing still works."""
-        if not self._history or self.text.index('insert').split('.')[0] != '1':
+        """Ctrl+Up recalls the previous prompt. Plain Up is left to the textbox, so the caret still moves by line."""
+        if not self._history:
             return None
         if self._hist_pos is None:
             self._hist_pos = len(self._history) - 1

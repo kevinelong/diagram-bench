@@ -300,8 +300,9 @@ do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one im
 `EDIT img.png at 0.60` when a base is set. Choosing a layout prints its measured cost (`16 tiles · ≈ 3 m 39 s one at a
 time, or ≈ 11 s as one batch`), from a table of timings taken on this machine rather than a formula.
 
-Window size, steps, sampler and layout are remembered in `%LOCALAPPDATA%/zimage-ui/settings.json`, and Up/Down in the
-prompt box recalls previous prompts. The *chain* box is deliberately **not** remembered, so a fresh window always starts
+Window size, steps, sampler and layout are remembered in `%LOCALAPPDATA%/zimage-ui/settings.json`, and **Ctrl+Up /
+Ctrl+Down** in the prompt box recalls previous prompts - plain Up/Down are left to the textbox, because a five-line prompt
+needs the caret to move by line before any shortcut gets to hijack the key. The *chain* box is deliberately **not** remembered, so a fresh window always starts
 as text to image.
 
 **What sends an image at all** is the base, and only three gestures set one: the **Use as Base** button, the **chain**

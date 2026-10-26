@@ -609,20 +609,38 @@ def main():
     app.text.delete('1.0', 'end')
     app.clear_base()
 
-    print('\n-- prompt history')
+    print('\n-- prompt history is on Ctrl+arrow, and plain arrows move the caret')
     app._history = ['first prompt', 'second prompt']
     app._hist_pos = None
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'draft')
     app.text.mark_set('insert', '1.0')
     app._on_hist_up()
-    check('Up recalls the newest prompt', app.text.get('1.0', 'end').strip() == 'second prompt',
+    check('Ctrl+Up recalls the newest prompt', app.text.get('1.0', 'end').strip() == 'second prompt',
           app.text.get('1.0', 'end').strip())
     app._on_hist_up()
-    check('Up again goes further back', app.text.get('1.0', 'end').strip() == 'first prompt')
+    check('Ctrl+Up again goes further back', app.text.get('1.0', 'end').strip() == 'first prompt')
     app._on_hist_down()
-    check('Down comes forward again', app.text.get('1.0', 'end').strip() == 'second prompt')
+    check('Ctrl+Down comes forward again', app.text.get('1.0', 'end').strip() == 'second prompt')
     app._on_hist_down()
-    check('Down past the end clears the box', app.text.get('1.0', 'end').strip() == '')
+    check('Ctrl+Down past the end clears the box', app.text.get('1.0', 'end').strip() == '')
+
+    check('the textbox binds history to Ctrl+arrow only',
+          bool(app.text.bind('<Control-Up>')) and bool(app.text.bind('<Control-Down>'))
+          and not app.text.bind('<Up>') and not app.text.bind('<Down>'),
+          'up=%r ctrl-up=%r' % (app.text.bind('<Up>'), app.text.bind('<Control-Up>')))
+    # a three-line prompt: plain Up must walk to the line above and leave the words alone
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'line one\nline two\nline three')
+    app.text.mark_set('insert', '3.4')
+    app.text.focus_force(); root.update()
+    before_text = app.text.get('1.0', 'end')
+    root.event_generate('<Up>'); root.update()
+    after_line = app.text.index('insert').split('.')[0]
+    check('plain Up moves the caret up a line', after_line == '2', 'line %s' % after_line)
+    check('and does not touch the prompt', app.text.get('1.0', 'end') == before_text)
+    root.event_generate('<Down>'); root.update()
+    check('plain Down moves back down', app.text.index('insert').split('.')[0] == '3',
+          app.text.index('insert'))
 
     print('\n-- a failure offers Retry instead of a stack trace')
     app.engine.events.put(('error', 'connection refused'))
