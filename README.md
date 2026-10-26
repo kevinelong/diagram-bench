@@ -402,6 +402,12 @@ Under the picture, three verbs and two editors:
 |---|---|---|
 | **Vary** | same prompt from the sidecar, seed + 1 | - |
 | **Subtle** | re-samples the picture itself at strength 0.35 | - |
+**Crop to base** closes the loop the other features open: masking repaints inside one picture, expanding grows its
+frame, and cropping lifts a region *out* to be the subject of the next pass. The crop is taken from the full-resolution
+image behind the canvas, not from the scaled copy on screen, so a small framing does not start from a soft 260 px
+version of itself; the size selector then decides what resolution the next run works at. The crop keeps the source's
+prompt and seed in its sidecar (with `crop` and `source_image` added), so the chain is readable afterwards.
+
 Editing honours the size selector: an img2img or inpaint request **resizes the base to the chosen size** (centre
 crop, so the aspect is kept) instead of inheriting the base's dimensions. Measured: a 256 px base asked for 512
 returned 512x512 in 7.0 s, asked for 384 returned 384x384 in 6.7 s, and an inpaint with a 256 base and 256 mask at
@@ -412,6 +418,8 @@ so it still lines up.
 | **paint mask -> Fill selection** | the brush lives on the picture: paint, and the Generate button becomes *Fill selection*; only painted pixels pass through `VAEEncodeForInpaint` | **8.9 s** on a 1040 px base |
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
+| **\u2702 crop** | arm it, drag a rectangle on the picture; that region is saved as a PNG, recorded in its sidecar with the source path and the box, and becomes the base - so the next Enter edits only what you framed. Mutually exclusive with painting a mask, because both start with a drag | measured 352x352 crop from a 704 px render used as a 512 px base: one 4-step klein run in **7.2 s** |
+
 
 Generate is one large green button across the bottom of the prompt column, with **Clear base** immediately above it at
 the same width and height (grey, disabled until a picture is the base), so the commit key is where the eye ends up after

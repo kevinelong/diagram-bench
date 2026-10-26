@@ -1303,6 +1303,44 @@ def main():
     check('the server launcher hides its window', '-WindowStyle Hidden' in
           (here / 'start-comfy.ps1').read_text(encoding='utf-8'))
 
+    print('\n-- crop a region and use it as the base for the next run')
+    app.clear_base()
+    src = app._files[0]
+    app.select_file(src)
+    app._redraw(); root.update()
+    x0, y0, w, h = app._draw
+    check('the picture is laid out on the canvas', w > 20 and h > 20, str(app._draw))
+    app.crop_var.set(True); app.toggle_crop_mode(True); root.update()
+    check('crop mode arms a rectangle and says so', 'drag a rectangle' in app.hint['text'], app.hint['text'])
+    ax, ay = x0 + int(w * 0.25), y0 + int(h * 0.25)
+    bx, by = x0 + int(w * 0.75), y0 + int(h * 0.75)
+    app._on_canvas_click(NS(x=ax, y=ay))
+    app._on_crop_drag(NS(x=bx, y=by))
+    app._on_crop_release(NS(x=bx, y=by))
+    root.update()
+    check('a crop file was written beside the output', app.base_path is not None
+          and '-crop-' in app.base_path.name, str(app.base_path))
+    if app.base_path is not None:
+        with Image.open(app.base_path) as crop, Image.open(src) as full:
+            check('the crop is half the source in each direction',
+                  abs(crop.width - full.width // 2) <= 2 and abs(crop.height - full.height // 2) <= 2,
+                  '%dx%d from %dx%d' % (crop.width, crop.height, full.width, full.height))
+            # the crop must be the pixels that were under the rectangle, not a resize of the whole image
+            left, top, right, bottom = json.loads(app.base_path.with_suffix('.json').read_text(encoding='utf-8'))['crop']
+            check('the crop is the region that was dragged',
+                  crop.convert('RGB').getpixel((crop.width // 2, crop.height // 2))
+                  == full.convert('RGB').getpixel(((left + right) // 2, (top + bottom) // 2)))
+        check('the sidecar records where it came from',
+              'source_image' in json.loads(app.base_path.with_suffix('.json').read_text(encoding='utf-8')))
+        check('and crop mode switched itself off', app.crop_var.get() is False)
+        check('the status names the new base', 'new base' in app.status['text'], app.status['text'])
+    check('crop mode and mask painting are exclusive',
+          app.mask_var.set(True) or app.toggle_mask_mode(True) or True)
+    app.toggle_crop_mode(True); root.update()
+    check('arming crop turns mask painting off', app.mask_var.get() is False)
+    app.toggle_crop_mode(False); root.update()
+    app.select_file(src); app._set_base(src); root.update()
+
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
     app.clip_btn.invoke(); root.update()

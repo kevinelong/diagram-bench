@@ -1000,6 +1000,8 @@ class App:
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
+        self.canvas.bind('<B1-Motion>', self._on_crop_drag, add='+')
+        self.canvas.bind('<ButtonRelease-1>', self._on_crop_release)
         tools = ttk.Frame(right)
         tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
@@ -1039,6 +1041,13 @@ class App:
                     command=self._read_brush).pack(side='left')
         self.clear_mask_btn = ttk.Button(act2, text='clear', command=self.clear_mask, state='disabled')
         self.clear_mask_btn.pack(side='left', padx=(4, 0))
+        # crop: drag a rectangle on the picture and that rectangle becomes the base for the next run
+        self.crop_var = tk.BooleanVar(value=False)
+        self.crop_chk = ttk.Checkbutton(act2, text='\u2702 crop', variable=self.crop_var,
+                                        command=self.toggle_crop_mode)
+        self.crop_chk.pack(side='left', padx=(6, 0))
+        self._crop_start = None
+        self._crop_item = None
 
         act3 = ttk.Frame(self.actions)
         act3.pack(fill='x', pady=(4, 0))
@@ -2238,7 +2247,91 @@ class App:
         tiles = self._sheet['tiles']
         return tiles[idx] if idx < len(tiles) else None
 
+    def toggle_crop_mode(self, on=None):
+        """Arm the crop rectangle. Painting a mask and cropping are mutually exclusive: both start with a drag."""
+        want = bool(self.crop_var.get()) if on is None else bool(on)
+        self.crop_var.set(want)
+        if want and getattr(self, 'mask_var', None) is not None and self.mask_var.get():
+            self.mask_var.set(False)
+            self.toggle_mask_mode(False)
+        self.canvas.configure(cursor='crosshair' if want else '')
+        self._crop_start = None
+        if self._crop_item is not None:
+            self.canvas.delete(self._crop_item)
+            self._crop_item = None
+        self.hint.configure(text='drag a rectangle on the picture - it becomes the base for the next run'
+                            if want else '')
+
+    def _on_crop_drag(self, event):
+        if not self.crop_var.get() or self._crop_start is None or self._mask_painting:
+            return None
+        x0, y0 = self._crop_start
+        if self._crop_item is None:
+            self._crop_item = self.canvas.create_rectangle(x0, y0, event.x, event.y, outline='#2a6df4',
+                                                           width=2, dash=(4, 3))
+        else:
+            self.canvas.coords(self._crop_item, x0, y0, event.x, event.y)
+        return 'break'
+
+    def _on_crop_release(self, event):
+        """Turn the dragged rectangle into a PNG and make it the base, so the next Enter edits just that region."""
+        if not self.crop_var.get() or self._crop_start is None or self._current is None or not self._draw:
+            return None
+        x0, y0 = self._crop_start
+        self._crop_start = None
+        if self._crop_item is not None:
+            self.canvas.delete(self._crop_item)
+            self._crop_item = None
+        box_px = self._crop_box(x0, y0, event.x, event.y)
+        if box_px is None:
+            self.hint.configure(text='that rectangle is too small to crop - drag a bigger one')
+            return 'break'
+        left, top, right, bottom = box_px
+        from PIL import Image as _Image
+        with _Image.open(self._current) as im:
+            crop = im.convert('RGB').crop((left, top, right, bottom))
+            dest = Path(self.args.out) / ('%s-crop-%dx%d.png' % (Path(self._current).stem,
+                                                                crop.width, crop.height))
+            crop.save(dest)
+        meta = read_meta(self._current) or {}
+        record = dict(meta)
+        record.update({'crop': [left, top, right, bottom], 'source_image': str(Path(self._current).resolve()),
+                       'base_image': str(Path(self._current).resolve()),
+                       'denoise': self.denoise.get(), 'width': crop.width, 'height': crop.height,
+                       'created': datetime.now().isoformat(timespec='seconds')})
+        dest.with_suffix('.json').write_text(json.dumps(record, indent=1), encoding='utf-8')
+        self.toggle_crop_mode(False)
+        self.refresh_gallery()
+        self.select_file(dest)
+        self._set_base(dest, from_gallery=True)
+        self.status.configure(text='crop %dx%d is the new base' % (crop.width, crop.height))
+        self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to %s px'
+                            % (dest.name, crop.width, crop.height, self.denoise.get(), self.size_var.get()))
+        return 'break'
+
+    def _crop_box(self, ax, ay, bx, by):
+        """Canvas drag -> pixels in the source image, or None when the rectangle is too small to be a crop."""
+        if not self._draw or self._img is None:
+            return None
+        x0, y0, w, h = self._draw
+        if w <= 0 or h <= 0:
+            return None
+        iw, ih = self._img.size
+        sx, sy = iw / float(w), ih / float(h)
+        left = int(round((min(ax, bx) - x0) * sx))
+        top = int(round((min(ay, by) - y0) * sy))
+        right = int(round((max(ax, bx) - x0) * sx))
+        bottom = int(round((max(ay, by) - y0) * sy))
+        left, top = max(0, left), max(0, top)
+        right, bottom = min(iw, right), min(ih, bottom)
+        if right - left < 16 or bottom - top < 16:
+            return None
+        return left, top, right, bottom
+
     def _on_canvas_click(self, event):
+        if self.crop_var.get() and self._current is not None and self._mask_painting is False:
+            self._crop_start = (event.x, event.y)
+            return 'break'
         if self._mask_painting:
             return self._paint_mask(event)
         tile = self._tile_at(event.x, event.y)
@@ -2360,6 +2453,8 @@ class App:
         t(self.clip_btn, 'Makes a 2-second clip from the picture on screen with Wan 2.2 TI2V-5B.\n'
                          'The image model is unloaded first, so the first clip waits for 10.8 GiB of weights.')
         t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
+        t(self.crop_chk, 'Drag a rectangle on the picture and that rectangle becomes the base for the next run,\n'
+                         'so Enter edits just that region at the current strength. The size selector rescales it.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
                          'once.')
         t(self.steps_cb, 'Sampling steps. Changing the model sets this to that model\'s ceiling (50 for flux1 dev,\n'
@@ -2951,6 +3046,8 @@ class App:
             self.canvas.create_text(tx, y0 + 15, anchor=anchor, text=text, fill='#ffffff', tags='compare')
 
     def _on_compare_drag(self, event):
+        if getattr(self, 'crop_var', None) is not None and self.crop_var.get():
+            return None                      # the crop rectangle owns this drag
         if self._mask_painting:
             return self._paint_mask(event)
         if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not self._draw:
