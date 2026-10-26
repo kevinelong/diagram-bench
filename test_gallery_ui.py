@@ -427,7 +427,8 @@ def main():
         app.toggle_advanced()
     root.update(); root.update_idletasks()
     check('the model picker is visible while Advanced is closed', bool(app.model_cb.winfo_ismapped()))
-    check('it offers every installed profile', list(app.model_cb['values']) == list(zui.zg.MODELS),
+    shown = [n for n, prof in zui.zg.MODELS.items() if prof.get('in_picker', True)]
+    check('it offers every profile still in the picker', list(app.model_cb['values']) == shown,
           str(app.model_cb['values']))
     check('Clear base sits directly above Generate', app.clear_base_btn.winfo_y() < app.gen_btn.winfo_y(),
           'clear y=%d generate y=%d' % (app.clear_base_btn.winfo_y(), app.gen_btn.winfo_y()))

@@ -385,6 +385,14 @@ install; strength is on the slider and persisted alongside the model.
 | flux2 klein 9b uncensored | `flux-2-klein-9b-Q4_K_M.gguf` (UnetLoaderGGUF) | `flux2-klein-9b-uncensored-te-q5_k_m.gguf` (flux2, **CLIPLoaderGGUF**) | **32.5 s** median, 8.8 GiB peak |
 | flux1 dev | `flux1-dev-Q4_K_S.gguf` (UnetLoaderGGUF) | clip_l + t5xxl (flux) | **27.0 s** at its own 20 steps, cfg 3.5 |
 
+**Four of the six profiles are in the picker; two are deliberately out.** Measured at 512 px on the frozen corpus,
+one seed: `flux1 schnell` is slower than z-image (**6.1 s vs 2.0 s**), uses more VRAM (**10,502 vs 9,269 MiB**) and scores
+lower on labels (**0.749 vs 0.786**), and `flux1 dev` costs **11.2 s** with a **11,803 MiB** peak - a floor breach - for
+**0.704**. Both remain in `MODELS` because the 2026-10-20/21 arms cite them and `flux1 dev` is the only cfg>1 path and
+the only non-commercial licence, so they can be reproduced or brought back with one flag (`'in_picker': True`). The two
+klein arms stay because they are not substitutes: `flux2 klein` is the control that makes the uncensored row mean
+something, and `flux2 klein uncensored` is the cheap unfiltered arm at half the 9B's time and VRAM.
+
 **flux2 klein uncensored is an encoder swap, not a different diffusion model.** The diffusion GGUF, the VAE, steps and
 cfg are byte-identical to `flux2 klein`, so an A/B isolates the text encoder. The encoder is a Qwen3-4B language model
 in GGUF form (36 blocks, `blk.*` tensors, tokenizer metadata embedded - verified by reading the file, not the repo

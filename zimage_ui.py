@@ -844,7 +844,8 @@ class App:
         ttk.Label(stylerow, text='model').pack(side='left', padx=(10, 4))
         self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
         self.model_cb = ttk.Combobox(stylerow, textvariable=self.model_var, width=14, state='readonly',
-                                     values=list(zg.MODELS))
+                                     values=[name for name, prof in zg.MODELS.items()
+                                             if prof.get('in_picker', True)])
         self.model_cb.pack(side='left')
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
