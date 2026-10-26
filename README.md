@@ -251,12 +251,17 @@ loss.
 The **seed** field has minus / plus buttons and a **Rnd** button (0-999,999,999); the buttons clamp at 0 and fall back to
 the default seed if the box holds something non-numeric.
 
-The seed **randomises itself after every generation**, so pressing Enter twice gives two different images rather than
-the same one twice; the new value is guaranteed to differ from the old so the change is always visible, and the hint
-line reports it (`next seed 813589306`). The exception is an edit you armed with **Use as Base**: that picture's seed
-comes back with it and stays for the run, so an edit is reproducible (`seed 555 kept`). A plain click in the gallery
-restores the seed so you can read or reproduce the picture, but the next generation still randomises, because looking at
-an image is not editing it.
+The seed **steps on by one after every generation** (`next seed 4243 (+1)`), so pressing Enter twice gives two different
+images and the sequence is reproducible from the first one - a random jump is a value you cannot write down in advance
+and cannot walk back. **hold seed** next to the chain box pins it instead: ticked, a render leaves the seed exactly
+where it is, for when the same seed is wanted again on purpose. It is deliberately **not remembered** between windows,
+for the same reason the chain box is not. The **Rnd** button is still the way to ask for a random one. The banner shows
+`seed 4242 (held)` when it is pinned.
+
+The exception to the increment is an edit you armed with **Use as Base**: that picture's seed comes back with it and
+stays for the run, so an edit is reproducible (`seed 555 kept`). A plain click in the gallery restores the seed so you
+can read or reproduce the picture, but the next generation still increments, because looking at an image is not
+editing it.
 
 Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **one at a time

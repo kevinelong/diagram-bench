@@ -800,7 +800,13 @@ class App:
         self.chain_var = tk.BooleanVar(value=False)
         self.chain_chk = ttk.Checkbutton(row, text='chain: each new image becomes the next base',
                                          variable=self.chain_var)
-        self.chain_chk.grid(row=3, column=0, columnspan=4, sticky='w', pady=(2, 0))
+        self.chain_chk.grid(row=3, column=0, columnspan=3, sticky='w', pady=(2, 0))
+        # off by default: after a picture the seed steps on by one, which is reproducible and visible. Ticked, the
+        # seed is left exactly as it is, for when the same seed is wanted again on purpose.
+        self.hold_seed_var = tk.BooleanVar(value=False)
+        self.hold_seed_chk = ttk.Checkbutton(row, text='hold seed', variable=self.hold_seed_var,
+                                             command=self._update_banner)
+        self.hold_seed_chk.grid(row=3, column=3, columnspan=3, sticky='w', pady=(2, 0))
         seedbox = ttk.Frame(row)
         seedbox.grid(row=2, column=3, columnspan=3, sticky='w', pady=(4, 0))
         ttk.Label(seedbox, text='seed').pack(side='left', padx=(0, 4))
@@ -2341,7 +2347,9 @@ class App:
         t(self.seed_entry, 'The seed picks the starting noise. Same seed and prompt give the same picture.')
         t(self.seed_minus, 'Seed - 1')
         t(self.seed_plus, 'Seed + 1')
-        t(self.seed_rnd, 'Draw a new random seed.')
+        t(self.seed_rnd, 'Draw a new random seed. After a render the seed steps on by one unless hold seed is ticked.')
+        t(self.hold_seed_chk, 'On: the seed does not change after a render, so pressing Enter again repeats the same '
+                              'picture.\nOff: it steps on by one each time - reproducible, and never a surprise jump.')
         t(self.seq_chk, 'On: each tile is its own request with its own seed - reproducible, and only one image '
                         'in VRAM at a time.\nOff: one batch, about 8x faster, much higher VRAM peak.')
         t(self.chain_chk, 'On: the image just made becomes the base for the next run, so Enter keeps editing.\n'
@@ -2402,9 +2410,11 @@ class App:
         if vram and vram > VRAM_TOTAL_MIB - 400:
             colour = '#c0392b'
         self.banner.configure(text='%s   ·   %s · %s steps · %s · %s px · %s   ·   '
-                                   'style %s   ·   seed %s%s'
+                                   'style %s   ·   seed %s%s%s'
                                    % (mode, model, self.steps_var.get(), self.sampler_var.get(),
-                                      self.size_var.get(), what, style, self.seed.get(), vram_text),
+                                      self.size_var.get(), what, style, self.seed.get(),
+                                      ' (held)' if getattr(self, 'hold_seed_var', None)
+                                      and self.hold_seed_var.get() else '', vram_text),
                               foreground=colour)
 
     # -- persistence, starters, prompt history -------------------------------
@@ -2694,8 +2704,12 @@ class App:
                                 b.state(['!disabled' if self._llm_ok else 'disabled'])
                         except Exception:
                             pass
-                    self.hint.configure(text=('local model ready at %s' % url) if self._llm_ok
-                                        else ('no local model at %s - enhance and describe stay off' % url))
+                    # only speak if the hint line is free: the probe finishes whenever it finishes, and it used to
+                    # overwrite whatever the user had just done - a late probe was clobbering cost previews and
+                    # rephrase messages in the test suite
+                    if not self.hint['text'].strip():
+                        self.hint.configure(text=('local model ready at %s' % url) if self._llm_ok
+                                            else ('no local model at %s - enhance and describe stay off' % url))
                 elif kind == 'described':
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', payload)
@@ -2780,11 +2794,16 @@ class App:
                         base_note = 'base unchanged (%s)' % (
                             'none - next run is text to image' if self.base_path is None
                             else 'still %s' % self.base_path.name)
-                    if self._base_from_gallery and self.base_path is not None:
+                    if self.hold_seed_var.get():
+                        note = 'seed %s held' % self.seed.get()
+                    elif self._base_from_gallery and self.base_path is not None:
                         note = 'seed %s kept from the gallery image' % self.seed.get()
                     else:
-                        self.random_seed()
-                        note = 'next seed %s' % self.seed.get()
+                        before = self.seed.get()
+                        self.bump_seed(1)
+                        note = 'next seed %s (+1)' % self.seed.get() if self.seed.get() != before \
+                            else 'seed %s held at the top' % self.seed.get()
+                        self._update_banner()
                     self.hint.configure(text='saved; %s; %s' % (base_note, note))
                     self._current = Path(path)
                     self._run_recorded(path)
