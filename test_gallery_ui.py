@@ -862,7 +862,8 @@ def main():
     real_grab = Grab.grabclipboard
     Grab.grabclipboard = lambda: None
     app.paste_base()
-    check('an empty clipboard is reported', 'no image on the clipboard' in app.hint['text'], app.hint['text'])
+    check('an empty clipboard is reported', 'nothing usable on the clipboard' in app.hint['text'],
+          app.hint['text'])
     Grab.grabclipboard = lambda: Image.new('RGB', (64, 48), 'navy')
     app.paste_base(); root.update()
     check('a pasted image becomes the base',
@@ -1306,6 +1307,55 @@ def main():
     check('every subprocess call goes through winproc', not offenders, ', '.join(offenders))
     check('the server launcher hides its window', '-WindowStyle Hidden' in
           (here / 'start-comfy.ps1').read_text(encoding='utf-8'))
+
+    print('\n-- paste a reference from the clipboard as the base')
+    import PIL.ImageGrab as ig
+    real_grab = ig.grabclipboard
+    app.clear_base()
+
+    # 1) a bitmap
+    bitmap = Image.new('RGB', (300, 200), (12, 200, 90))
+    ig.grabclipboard = lambda: bitmap
+    app.paste_base(); root.update()
+    check('a bitmap becomes the base', app.base_path is not None and 'pasted-' in app.base_path.name,
+          str(app.base_path))
+    if app.base_path:
+        with Image.open(app.base_path) as p_:
+            check('the pasted bitmap keeps its size and pixels', p_.size == (300, 200)
+                  and p_.convert('RGB').getpixel((5, 5)) == (12, 200, 90), str(p_.size))
+        check('the status says it is the base', 'new base' in app.status['text'], app.status['text'])
+
+    # 2) a copied image file
+    src = app._files[0]
+    ig.grabclipboard = lambda: [str(src)]
+    app.paste_base(); root.update()
+    meta = json.loads(app.base_path.with_suffix('.json').read_text(encoding='utf-8'))
+    check('a copied image file becomes the base', 'pasted-' in app.base_path.name,
+          str(app.base_path))
+    check('and the sidecar records where it came from', meta.get('source_image', '').endswith(src.name),
+          str(meta.get('source_image')))
+
+    # 3) a copied path as text
+    ig.grabclipboard = lambda: None
+    root.clipboard_clear(); root.clipboard_append(str(src)); root.update()
+    app.paste_base(); root.update()
+    meta = json.loads(app.base_path.with_suffix('.json').read_text(encoding='utf-8'))
+    check('a copied path works too', meta.get('source_image', '').endswith(src.name), str(meta.get('source_image')))
+
+    # 4) things that are not images must not move the base
+    before = app.base_path
+    ig.grabclipboard = lambda: [str(tmp / 'notes.txt')]
+    (tmp / 'notes.txt').write_text('not an image', encoding='utf-8')
+    app.paste_base(); root.update()
+    check('a non-image file is refused', app.base_path == before and 'none of them is an image' in app.hint['text'],
+          app.hint['text'])
+    ig.grabclipboard = lambda: None
+    root.clipboard_clear(); root.clipboard_append('just some words'); root.update()
+    app.paste_base(); root.update()
+    check('unusable clipboard text is refused', app.base_path == before and 'nothing usable' in app.hint['text'],
+          app.hint['text'])
+    ig.grabclipboard = real_grab
+    app.clear_base(); app.select_file(src); root.update()
 
     print('\n-- crop a region and use it as the base for the next run')
     app.clear_base()

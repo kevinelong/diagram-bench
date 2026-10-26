@@ -1030,6 +1030,9 @@ class App:
         self.vary_soft_btn.pack(side='left', padx=(4, 0))
         self.upscale_btn = ttk.Button(act1, text='hires \u00d72', command=self.hires, state='disabled')
         self.upscale_btn.pack(side='left', padx=(4, 0))
+        # a reference picture from outside the folder: bitmap on the clipboard, or a copied file / path
+        self.paste_btn = ttk.Button(act1, text='Paste image', command=self.paste_base)
+        self.paste_btn.pack(side='left', padx=(4, 0))
         act2 = ttk.Frame(self.actions)
         act2.pack(fill='x', pady=(4, 0))
         self.mask_var = tk.BooleanVar(value=False)
@@ -1607,29 +1610,73 @@ class App:
         self.generate()
 
     def paste_base(self):
-        """Ctrl+V: take an image off the clipboard and use it as the base."""
+        """Take a reference picture off the clipboard and use it as the base.
+
+        Three shapes arrive on this clipboard and all three are accepted: a bitmap (screenshot, browser
+        "copy image"), a list of files (copy in Explorer), and text that is a path to an image. A clipboard that
+        holds something else says so instead of raising.
+        """
         from PIL import ImageGrab
         try:
             got = ImageGrab.grabclipboard()
         except Exception as e:
             self.hint.configure(text='clipboard unavailable: %s' % type(e).__name__)
             return
+
+        origin, image = None, None
         if got is None:
-            self.hint.configure(text='no image on the clipboard')
-            return
-        if isinstance(got, list):
-            got = Image.open(got[0])
+            # text on the clipboard: a copied path is a perfectly good reference
+            try:
+                import tkinter as _tk
+                text = self.root.clipboard_get()
+            except Exception:
+                text = ''
+            candidate = Path(text.strip().strip('"')) if text.strip() else None
+            if candidate and candidate.exists() and candidate.suffix.lower() in (
+                    '.png', '.jpg', '.jpeg', '.webp', '.bmp'):
+                try:
+                    from PIL import Image as _Image
+                    image = _Image.open(candidate)
+                    origin = candidate
+                except Exception:
+                    image = None
+            if image is None:
+                self.hint.configure(text='nothing usable on the clipboard - copy an image, or copy an image file '
+                                         'or its path')
+                return
+        elif isinstance(got, list):
+            files = [Path(f) for f in got if str(f).lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp'))]
+            if not files:
+                self.hint.configure(text='the clipboard holds %d file(s) and none of them is an image' % len(got))
+                return
+            origin = files[0]
+            try:
+                from PIL import Image as _Image
+                image = _Image.open(origin)
+            except Exception as e:
+                self.hint.configure(text='could not read %s: %s' % (origin.name, type(e).__name__))
+                return
+        else:
+            image = got                                  # a bitmap
+
         out = Path(self.args.out)
         out.mkdir(parents=True, exist_ok=True)
         path = out / ('pasted-%s.png' % datetime.now().strftime('%Y%m%d-%H%M%S'))
-        got.convert('RGB').save(path)
-        path.with_suffix('.json').write_text(json.dumps(
-            {'prompt': '', 'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
-             'width': got.size[0], 'height': got.size[1]}), encoding='utf-8')
+        image.convert('RGB').save(path)
+        meta = {'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
+                'width': image.size[0], 'height': image.size[1]}
+        if origin is not None:
+            meta['source_image'] = str(origin.resolve())
+            meta['prompt'] = (read_meta(origin) or {}).get('prompt', '')
+        else:
+            meta['prompt'] = ''
+        path.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
         self.refresh_gallery()
         self.select_file(path)
         self._set_base(path, from_gallery=True)
-        self.hint.configure(text='pasted %dx%d from the clipboard as the base' % got.size)
+        self.status.configure(text='pasted reference %dx%d is the new base' % image.size)
+        self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to %s px'
+                            % (path.name, image.size[0], image.size[1], self.denoise.get(), self.size_var.get()))
 
     # -- mask and expand, on the picture itself ---------------------------------
     def toggle_mask_mode(self, on=None):
@@ -2456,6 +2503,8 @@ class App:
         t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
         t(self.negative, 'Ignored by every flux2 profile while cfg is 1.0 - measured 2026-10-26: a real negative\n'
                          'prompt produced a byte-identical image. It only bites when guidance is above 1.')
+        t(self.paste_btn, 'Use a picture from outside the folder as the base: copy a bitmap, or copy an image file\n'
+                          'or its path, then paste. Ctrl+V does the same thing.')
         t(self.crop_chk, 'Drag a rectangle on the picture and that rectangle becomes the base for the next run,\n'
                          'so Enter edits just that region at the current strength. The size selector rescales it.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '

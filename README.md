@@ -151,6 +151,10 @@ not loaded - the graph will be rejected rather than silently falling back. `--pr
 - **The still is cropped to a grid the model was trained on** - 704x704, or 1280x704 for a wide picture, multiples of
   32. A 1024x1024 still becomes 704x704: 47 % of the pixels, which is also 47 % of the compute. Stretching to fit is
   what produces the warped-motion look.
+- **A reference can come from anywhere**, not just the output folder: **Paste image** accepts the three clipboard
+  shapes above and refuses anything else with a sentence rather than an exception (a non-image file in a multi-file
+  copy says "none of them is an image"; junk text says "nothing usable on the clipboard"). The size selector still
+  decides what resolution the next run works at.
 - **You know it is done when the status line changes.** The bar is determinate and the websocket reports
   `step x of 30` while the sampler runs, so it is not a spinner; at the end the status reads `clip done: <file>`, the
   hint gives frames, seconds, wall time, peak VRAM and where the file is, and the clip **opens by itself** in the
@@ -484,6 +488,7 @@ so it still lines up.
 | **paint mask -> Fill selection** | the brush lives on the picture: paint, and the Generate button becomes *Fill selection*; only painted pixels pass through `VAEEncodeForInpaint` | **8.9 s** on a 1040 px base |
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
+| **Paste image** (or `Ctrl+V`) | brings a picture from outside the folder in as the base: a **bitmap** (screenshot, browser "copy image"), a **copied file** (Explorer), or **copied text that is a path** to an image. Written as `pasted-<stamp>.png` with a sidecar recording the origin, then armed as the base like any other | verified on the real Windows clipboard: a 512x512 bitmap pasted from Explorer/PowerShell became the base, sidecar `{'source': 'clipboard', 'width': 512, 'height': 512}` |
 | **\u2702 crop** | arm it, drag a rectangle on the picture; that region is saved as a PNG, recorded in its sidecar with the source path and the box, and becomes the base - so the next Enter edits only what you framed. Mutually exclusive with painting a mask, because both start with a drag | measured 352x352 crop from a 704 px render used as a 512 px base: one 4-step klein run in **7.2 s** |
 
 
