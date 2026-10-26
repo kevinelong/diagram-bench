@@ -279,11 +279,17 @@ Two boxes beside it decide what it does:
 | **intensity** | `light` / `normal` / `strong` | how many matched words move on one press. `light` takes every third one, rotating so none is starved; `normal` takes all; `strong` takes all and prefers the farthest synonym in each list |
 | **matching** | `off` / `strict` / `loose` | how forgiving the lookup is. `off` = the word itself or an inflected form of a dictionary word; `strict` also fixes a listed typo and accepts **one** edit on a word of six letters or more sharing two opening letters; `loose` accepts **two** edits and one shared letter |
 
-A word is matched in four ways, in this order: **exact**, **stem** (a plural, past or gerund form: "columns" finds
-"column", and the replacement is re-inflected so "two columns" becomes "two towers", not "two tower"), **spelling**
+A word is matched in four ways, in this order: **exact**, **stem** (a plural, past, gerund or adverb form: "columns"
+finds "column", "softly" finds "soft" and comes back as "gently"; the replacement is re-inflected so "two columns"
+becomes "two towers", not "two tower"), **spelling**
 (en-GB/en-US pairs such as *colour/color*, *grey/gray*), then **fuzzy** - and a hyphenated compound is matched part by
 part, so *silk-towel-covered* keeps its first two words and swaps the third. Listed typos are their own table
 (`weathred` -> `weathered`) and apply even with matching off, because those are entries, not guesses.
+
+**Adverbs only move when their adjective is in the dictionary**, which is why `softly` becomes `gently` but
+`culturally` and `explicitly` do not: `cultural` and `explicit` are not visual vocabulary, and swapping them would
+change the meaning of the prompt rather than its wording ("culturally diverse" is not "societally diverse"). Measured on
+the 20 real prompts: 7 adverbs, **0** of them with a dictionary adjective behind them.
 
 Fuzzy is deliberately tight. A loose similarity rule matched **"three" to "tree"** and **"steam" to "stem"**, silently
 changing what the picture is about, so numbers and function words are excluded outright and the minimum word length is

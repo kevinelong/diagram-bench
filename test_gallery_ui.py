@@ -1115,6 +1115,12 @@ def main():
           rp2.rephrase_text('three trees', 1, fuzziness='loose')[0].startswith('three'),
           rp2.rephrase_text('three trees', 1, fuzziness='loose')[0])
     check('the dictionary grew past 1000 entries', len(rp2.LOOKUP) > 1000, str(len(rp2.LOOKUP)))
+    check('an adverb is matched through its adjective and stays an adverb',
+          rp2.rephrase_text('softly lit room', 1)[0].startswith('gently'),
+          rp2.rephrase_text('softly lit room', 1)[0])
+    check('the -ly rule fires only when the adjective is in the dictionary',
+          rp2.rephrase_text('zorbly lit room', 1)[0].startswith('zorbly'),
+          rp2.rephrase_text('zorbly lit room', 1)[0])
     check('a hyphenated compound is swapped part by part',
           rp2.rephrase_text('silk-towel-covered benches', 1)[0] == 'silk-towel-blanketed benches',
           rp2.rephrase_text('silk-towel-covered benches', 1)[0])

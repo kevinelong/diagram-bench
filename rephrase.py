@@ -445,14 +445,16 @@ TYPOS = {
 
 _INFLECTIONS = (('ies', 'y', 'plural'), ('ves', 'f', 'plural'), ('es', '', 'plural'), ('s', '', 'plural'),
                 ('ied', 'y', 'past'), ('ed', 'e', 'past'), ('ed', '', 'past'), ('ing', 'e', 'gerund'),
-                ('ing', '', 'gerund'))
+                ('ing', '', 'gerund'),
+                ('ily', 'y', 'adverb'), ('ly', '', 'adverb'))
 
 
 def _base_forms(word):
     """(base, kind) candidates for an inflected form, longest suffix first."""
     out = []
     for suffix, add_back, kind in _INFLECTIONS:
-        if word.endswith(suffix) and len(word) - len(suffix) + len(add_back) >= 3:
+        base_len = len(word) - len(suffix) + len(add_back)
+        if word.endswith(suffix) and base_len >= (4 if kind == 'adverb' else 3):
             out.append((word[:-len(suffix)] + add_back, kind))
     return out
 
@@ -471,6 +473,15 @@ def _reinflect(synonym, kind):
         return synonym + ('d' if synonym.endswith('e') else 'ed')
     if kind == 'gerund':
         return (synonym[:-1] + 'ing') if synonym.endswith('e') else (synonym + 'ing')
+    if kind == 'adverb':
+        # adjective -> adverb, the shapes English actually uses: gentle -> gently, soft -> softly, basic -> basically
+        if synonym.endswith('y') and len(synonym) > 2 and synonym[-2] not in 'aeiou':
+            return synonym[:-1] + 'ily'
+        if synonym.endswith('le'):
+            return synonym[:-1] + 'y'
+        if synonym.endswith('ic'):
+            return synonym + 'ally'
+        return synonym + 'ly'
     return synonym
 
 
