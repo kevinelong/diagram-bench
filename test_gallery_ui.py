@@ -570,6 +570,17 @@ def main():
     check('setting a layout shows an estimate', 'tiles' in app.hint['text'] and '\u2248' in app.hint['text'],
           app.hint['text'])
     check('the estimate compares sequential and batch', 'batch' in app.hint['text'], app.hint['text'])
+
+    print('\n-- changing the model sets that model\'s step ceiling')
+    for prof_name, want in (('flux1 dev', '50'), ('flux2 klein', '4'), ('z-image turbo', '9'),
+                            ('flux2 klein 9b uncensored', '4')):
+        app.model_var.set(prof_name)
+        app._on_model_change()
+        root.update()
+        check('%-26s sets %s steps' % (prof_name, want), app.steps_var.get() == want, app.steps_var.get())
+        check('and the step list can show it',
+              want in list(app.steps_cb['values']), str(list(app.steps_cb['values'])))
+    app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
     app.layout_var.set('single')
 
     print('\n-- keyboard navigation in the strip')
@@ -690,10 +701,11 @@ def main():
     check('the banner names the model and style', 'flux1 dev' in app.banner['text'] and 'style icon' in app.banner['text'],
           app.banner['text'])
     app.model_var.set('flux1 dev'); app._on_model_change(); root.update()
-    check('picking a model applies its step count', app.steps_var.get() == '20', app.steps_var.get())
-    check('and says so', 'steps at cfg 3.5' in app.hint['text'], app.hint['text'])
+    check('picking a model applies its step ceiling', app.steps_var.get() == '50', app.steps_var.get())
+    check('and says it is the maximum', 'maximum' in app.hint['text'] and 'cfg 3.5' in app.hint['text'],
+          app.hint['text'])
     app.model_var.set('z-image turbo'); app._on_model_change()
-    check('switching back restores 4 steps', app.steps_var.get() == '4', app.steps_var.get())
+    check('switching back applies the other ceiling', app.steps_var.get() == '9', app.steps_var.get())
     app.style_var.set('none')
     app.negative.delete('1.0', 'end')
     app.busy = False
@@ -1085,6 +1097,7 @@ def main():
     app.rephrase(); first = app.text.get('1.0', 'end').strip(); root.update()
     check('pressing it rewrites the prompt', first != LONG, first)
     check('and says how many words moved', 'rephrased' in app.hint['text'], app.hint['text'])
+    check('and how many were eligible', 'of 8 words that have synonyms' in app.hint['text'], app.hint['text'])
     check('and how many presses until the wording comes back', 'returns in' in app.hint['text'], app.hint['text'])
     app.rephrase(); second = app.text.get('1.0', 'end').strip()
     app.rephrase(); third = app.text.get('1.0', 'end').strip()

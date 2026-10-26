@@ -71,16 +71,19 @@ VAE = 'ae.safetensors'
 # Model profiles: everything that differs between checkpoints. Every file below is present in D:/models/comfyui and every
 # node type was confirmed in ComfyUI's /object_info before being listed (UnetLoaderGGUF comes from ComfyUI-GGUF).
 MODELS = {
+    # 'steps' is the count that model is distilled or documented for; 'max_steps' is its ceiling, and changing the
+    # model in the window sets the step count to that ceiling. Distilled turbo models gain nothing above theirs
+    # (measured in 2026-10-20/21 arms: z-image and klein were unchanged from 4 upward), so their ceiling is 9 and 4.
     'z-image turbo': {'unet': UNET, 'unet_node': 'UNETLoader',
                       'clip': CLIP, 'clip_node': 'CLIPLoader', 'clip_type': 'lumina2',
-                      'vae': VAE, 'steps': 4, 'cfg': 1.0},
+                      'vae': VAE, 'steps': 4, 'max_steps': 9, 'cfg': 1.0},
     'flux1 schnell': {'unet': 'flux1-schnell-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
                       'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
                       'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
-                      'vae': 'ae.safetensors', 'steps': 4, 'cfg': 1.0},
+                      'vae': 'ae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
     'flux2 klein': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                     'clip': 'qwen_3_4b_fp4_flux2.safetensors', 'clip_node': 'CLIPLoader', 'clip_type': 'flux2',
-                    'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
+                    'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
     # The same klein diffusion weights with an uncensored Qwen3-4B text encoder instead of the shipped fp4 one.
     # The encoder is a GGUF (Qwen3 arch, 36 blocks, tokenizer embedded) so it loads through CLIPLoaderGGUF with the
     # same clip_type. Diffusion, VAE, steps and CFG are byte-identical to 'flux2 klein', so an A/B isolates the
@@ -88,18 +91,18 @@ MODELS = {
     'flux2 klein uncensored': {'unet': 'flux-2-klein-4b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                                'clip': 'flux2-klein-4b-uncensored-q4_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
                                'clip_type': 'flux2',
-                               'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
+                               'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
     # The 9B diffusion with the 9B uncensored encoder (Qwen3-8B, Q5_K_M). Measured on the frozen corpus at 512 px:
     # OCR exact 0.732 against the 4B's 0.613, 4/10 prompts fully legible against 1/10, at 32.5 s median and an 8.8 GiB
     # peak. Same 4-step distilled settings as klein, so nothing but model size and encoder differs.
     'flux2 klein 9b uncensored': {'unet': 'flux-2-klein-9b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                                   'clip': 'flux2-klein-9b-uncensored-te-q5_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
                                   'clip_type': 'flux2',
-                                  'vae': 'flux2-vae.safetensors', 'steps': 4, 'cfg': 1.0},
+                                  'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
     'flux1 dev': {'unet': 'flux1-dev-Q4_K_S.gguf', 'unet_node': 'UnetLoaderGGUF',
                   'clip': ('clip_l.safetensors', 't5xxl_fp8_e4m3fn.safetensors'),
                   'clip_node': 'DualCLIPLoader', 'clip_type': 'flux',
-                  'vae': 'ae.safetensors', 'steps': 20, 'cfg': 3.5},
+                  'vae': 'ae.safetensors', 'steps': 20, 'max_steps': 50, 'cfg': 3.5},
 }
 # Default comes from measurement (pose_probe.py): an edit needs to cross the pose threshold at denoise 0.70, and
 # flux2 klein is the checkpoint that does it while keeping the character, at 7-8 s and 5.7 GiB. z-image turbo is

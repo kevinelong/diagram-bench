@@ -263,7 +263,9 @@ stays for the run, so an edit is reproducible (`seed 555 kept`). A plain click i
 can read or reproduce the picture, but the next generation still increments, because looking at an image is not
 editing it.
 
-Controls: **steps** (2-12; turbo is distilled for 4), **sampler** (euler or euler_ancestral - the latter injects noise
+Controls: **steps** (2, 4, 6, 8, 9, 12, 20, 30, 50 - and **changing the model sets it to that model's ceiling**:
+50 for `flux1 dev`, 9 for z-image, 4 for the distilled turbo models; above the ceiling costs time and changes nothing,
+measured on 2026-10-20/21), **sampler** (euler or euler_ancestral - the latter injects noise
 per step, which adds grain and is the real "randomisation" knob), **strength** for img2img, and **one at a time
 (seed+1)**, which is the default: an N-up is N separate requests with seeds seed..seed+N-1, so every tile is
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,

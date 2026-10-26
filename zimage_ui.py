@@ -938,7 +938,7 @@ class App:
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
-                                     values=['2', '4', '6', '8', '12'])
+                                     values=['2', '4', '6', '8', '9', '12', '20', '30', '50'])
         self.steps_cb.pack(side='left', padx=4)
         ttk.Label(adv1, text='sampler').pack(side='left', padx=(12, 4))
         self.sampler_var = tk.StringVar(value=self._settings.get('sampler') or 'euler')
@@ -1312,11 +1312,13 @@ class App:
     def _on_model_change(self, event=None):
         """A profile brings its own step count: flux dev at 4 steps would look broken."""
         prof = zg.MODELS.get(self.model_var.get()) or {}
-        if prof.get('steps'):
-            self.steps_var.set(str(prof['steps']))
+        top = prof.get('max_steps') or prof.get('steps')
+        if top:
+            self.steps_var.set(str(top))
         self._update_banner()
-        self.hint.configure(text='%s: %s steps at cfg %.1f - the first image loads that checkpoint, '
-                                 'about 10-30 s' % (self.model_var.get(), prof.get('steps', '?'), prof.get('cfg', 1.0)))
+        self.hint.configure(text='%s: %s steps (its maximum) at cfg %.1f - the first image loads that checkpoint, '
+                                 'about 10-30 s; lower the steps if you are in a hurry'
+                            % (self.model_var.get(), top or '?', prof.get('cfg', 1.0)))
 
     def set_sidebar(self, show):
         """Fold the gallery away so the picture can use the width."""
@@ -1435,8 +1437,11 @@ class App:
         self.text.insert('1.0', new)
         period = cycle_period(base)
         left = (period - self._rephrase_turn % period) if period else 0
-        self.hint.configure(text='rephrased %d word%s - press again for another variant%s'
-                                 % (changed, '' if changed == 1 else 's',
+        # say the denominator: a long prompt has only a handful of words the dictionary knows, and a press that lands
+        # back on the originals for some of them looks like a failure unless the total is on screen
+        known = has_synonyms(base)
+        self.hint.configure(text='rephrased %d of %d word%s that have synonyms - press again for another variant%s'
+                                 % (changed, known, '' if known == 1 else 's',
                                     '; your own wording returns in %d press%s' % (left, '' if left == 1 else 'es')
                                     if period and left else ''))
 
@@ -2345,7 +2350,9 @@ class App:
         t(self.clip_open_btn, 'Open the clip that was just made (MP4), without rendering it again.')
         t(self.model_cb, 'Which checkpoint draws the picture. Switching loads it on the next run - tens of seconds, '
                          'once.')
-        t(self.steps_cb, 'Sampling steps. This model is distilled for 4; extra steps cost time for little change.')
+        t(self.steps_cb, 'Sampling steps. Changing the model sets this to that model\'s ceiling (50 for flux1 dev,\n'
+                         '9 for z-image, 4 for the distilled turbo models). Above the ceiling costs time for no change:\n'
+                         'measured on 2026-10-20/21, z-image and klein were identical from 4 steps upward.')
         t(self.sampler_cb, 'euler is clean. euler_ancestral injects noise every step: grain and more variation.')
         t(self.seed_entry, 'The seed picks the starting noise. Same seed and prompt give the same picture.')
         t(self.seed_minus, 'Seed - 1')
