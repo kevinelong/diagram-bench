@@ -73,10 +73,49 @@ def _related(t, u):
     return (b is not None and t in b) or (a is not None and u in a)
 
 
+# Prompts written as briefs carry structural labels, and they are formatting rather than content: DESCRIPTION:,
+# COMPOSITION:, CAMERA:, LIGHT:, MOOD:, SOUND: (33 prompts each in this gallery). They repeat across entirely different
+# scenes, so a header is both a false similarity signal and a plausible name - one folder of 142 pictures was called
+# "• Multiple Angles: Front, side, 3/4 front..." purely from its section line.
+#
+# An all-caps label followed by ordinary text is the strongest signal, and it is deliberately narrow: a real sentence
+# that happens to end in a colon ("The pages are full of the room: a sofa") is left alone, and so is title-case prose
+# ("Footwear: black boots") unless the label stands on its own line or follows a bullet, which is how a section header
+# is written. Measured against the gallery, the all-caps rule covers every genuine header there; the standalone and
+# bulleted rules add "Multiple Angles:" without touching sentences.
+_CAPS_LABEL = re.compile(r'(?:^|\n|\u2022|\*)\s*([A-Z][A-Z0-9 \'&/\-]{2,40}?)\s*:\s*')
+_BULLET_LABEL = re.compile(r"(?:\u2022|\*)\s*([A-Z][A-Za-z /'&\-]{1,40}?)\s*:\s*")
+_LABEL_ONLY_LINE = re.compile(r"(?m)^\s*(?:[\u2022\-\*]\s*)?([A-Z][A-Za-z /'&\-]{1,40}?)\s*:\s*$")
+_SLUG = re.compile(r'(?m)^\s*(?:INT|EXT|INT\./EXT\.)\s*\.?\s*$')
+_SENTENCE_OPENERS = ('the', 'a', 'an', 'on', 'in', 'at', 'around', 'beside', 'behind', 'with', 'this', 'these', 'her',
+                     'his', 'their', 'it', 'there')
+
+
+def _is_header(match, caps_only=False):
+    """A match is a header when it is all caps (the strong signal), or short and clearly a label rather than prose."""
+    label = match.group(1).strip()
+    words = label.split()
+    if len(words) > 4 or words[0].lower() in _SENTENCE_OPENERS:
+        return False
+    if label.upper() == label and any(c.isalpha() for c in label):
+        return True                      # CAMERA:, MOOD:, PROPORTIONS:
+    return not caps_only                 # title case, only where the position already says "section" (line/bullet)
+
+
+def strip_headers(text):
+    """Drop generic section labels from a prompt, leaving the sentences that actually describe the picture."""
+    t = text or ''
+    t = _CAPS_LABEL.sub(lambda m: '\n' if _is_header(m, caps_only=True) else m.group(0), t)
+    t = _LABEL_ONLY_LINE.sub(lambda m: '' if _is_header(m) else m.group(0), t)
+    t = _BULLET_LABEL.sub(lambda m: '\n' if _is_header(m) else m.group(0), t)
+    t = _SLUG.sub(' ', t)
+    return t
+
+
 def tokens(text):
     """Content tokens, crudely stemmed - rephrase swaps plurals and gerunds, so 'columns' and 'column' must meet."""
     out = []
-    for t in _WORD.findall((text or '').lower()):
+    for t in _WORD.findall(strip_headers(text).lower()):
         if t in STOP or len(t) < 3:
             continue
         if t.endswith('ies') and len(t) > 4:
@@ -114,7 +153,7 @@ CLAUSE_WEIGHTS = (1.0, 0.6, 0.35)
 def token_weights(text):
     """token -> the strongest clause weight it appears in (first clause 1.0, later clauses fall away)."""
     out = {}
-    clauses = re.split(r'[,;.!?]|\n', (text or '').lower())
+    clauses = re.split(r'[,;.!?]|\n', strip_headers(text).lower())
     for i, clause in enumerate(clauses):
         w = CLAUSE_WEIGHTS[min(i, len(CLAUSE_WEIGHTS) - 1)]
         for t in tokens(clause):
@@ -309,7 +348,21 @@ def label_for(prompts, members, width=60, lexicon=None):
         best = top[0] if top else 0
 
     text = ' '.join(texts[best].split())
-    head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
+    for _ in range(6):                     # DESCRIPTION:\nA portrait...  ->  A portrait...
+        m = re.match(r"^(?:[\u2022\-\*]\s*)?([A-Z][A-Za-z /'-]{1,40}?)\s*:\s*", text)
+        if not m or len(m.group(1).split()) > 4:
+            break
+        text = text[m.end():]
+    # a screenplay slug is not a name either: "INT. A dark office..." must be named by the office, not by "INT."
+    text = re.sub(r'^(?:INT|EXT|INT\./EXT\.)\.?\s*', '', text)
+    # and a first sentence that is only a fragment ("INT.") is skipped for the first one that says something
+    head = ''
+    for part in re.split(r'(?<=[.!?])\s', text):
+        if len(tokens(part)) >= 2:
+            head = part
+            break
+    if not head:
+        head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
     if not head:
         head = text
     if len(head) > width:

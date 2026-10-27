@@ -213,6 +213,44 @@ def main():
     check('the concept sheet is named as one', 'concept' in gp.tokens(lab2), lab2)
 
 
+    print('\n-- generic section headers are formatting, not content (2026-10-27 report)')
+    brief_a = ('DESCRIPTION:\nA photorealistic portrait of two adult women kissing while seated on an ornate French '
+               'sofa.\nCOMPOSITION:\nA horizontal, eye-level medium-wide two-shot, framed from the knees.')
+    brief_b = ('DESCRIPTION:\na busy restaurant kitchen at service, steel surfaces, steam\n'
+               'COMPOSITION:\nwide angle from the pass, low light')
+    check('a header is not a content token', 'description' not in gp.tokens(brief_a)
+          and 'composition' not in gp.tokens(brief_a), gp.tokens(brief_a)[:6])
+    check('but the sentences after it are', {'portrait', 'french', 'sofa'} <= set(gp.tokens(brief_a)),
+          sorted(set(gp.tokens(brief_a)) - {'portrait', 'french', 'sofa'})[:6])
+    check('a sentence that merely ends in a colon is kept',
+          'room' in gp.tokens('The pages are full of the room: a sofa'), gp.tokens('The pages are full of the room: a sofa'))
+    check('an ALL-CAPS label is the strong signal and is stripped', 'camera' not in gp.tokens('CAMERA: wide, low angle')
+          and 'wide' in gp.tokens('CAMERA: wide, low angle'), gp.tokens('CAMERA: wide, low angle'))
+    check('a title-case label alone on its line is stripped',
+          'footwear' not in gp.tokens('Footwear:\nblack leather boots'), gp.tokens('Footwear:\nblack leather boots'))
+    check('the same title case inline is not a header',
+          'footwear' in gp.tokens('Footwear: black leather boots'), gp.tokens('Footwear: black leather boots'))
+    check('"The pages are full of the room:" is prose, not a header',
+          {'room', 'sofa'} <= set(gp.tokens('The pages are full of the room: a sofa')),
+          gp.tokens('The pages are full of the room: a sofa'))
+    check('a bullet header is dropped too', 'angles' not in gp.tokens('\u2022 Multiple Angles: Front, side views'),
+          gp.tokens('\u2022 Multiple Angles: Front, side views'))
+    lex2 = gp.fit_lexicon([brief_a, brief_b])
+    check('two different subjects do not match just because they share headers',
+          gp.similarity(brief_a, brief_b, lex2) < gp.DEFAULT_THRESHOLD,
+          '%.3f' % gp.similarity(brief_a, brief_b, lex2))
+    same = 'COMPOSITION:\nA photorealistic portrait of two adult women on an ornate French sofa.\nLIGHT:\nsoft'
+    check('the same subject in another section order still matches',
+          gp.similarity(brief_a, same, gp.fit_lexicon([brief_a, same])) > gp.DEFAULT_THRESHOLD,
+          '%.3f' % gp.similarity(brief_a, same, gp.fit_lexicon([brief_a, same])))
+    lab = gp.label_for([brief_a, brief_b], [0, 1])
+    check('a folder is never named after the header', not lab.upper().startswith('DESCRIPTION'), lab)
+    check('it is named from the sentence instead', 'portrait' in gp.tokens(lab) or 'sofa' in gp.tokens(lab), lab)
+    slug = 'INT.\nA dark office with a single desk lamp'
+    check('a screenplay slug is dropped from the name', not gp.label_for([slug], [0]).startswith('INT.'),
+          gp.label_for([slug], [0]))
+    check('and it is not a content token either', 'int' not in gp.tokens(slug), gp.tokens(slug))
+
     if args.real:
         print('\n-- the real gallery, read-only')
         import json
@@ -253,6 +291,11 @@ def main():
         rate = stray / total if total else 0
         print('   members sharing no word with their folder label: %d of %d (%.1f%%)' % (stray, total, 100 * rate))
         check('folders mostly contain what their label says', rate <= 0.12, '%.1f%% mismatched' % (100 * rate))
+        import re as _re
+        headerish = _re.compile(r'^\s*(?:[\u2022\-*]\s*)?[A-Z][A-Za-z /\'-]{1,40}:\s*$')
+        slugs = ('INT.', 'EXT.', 'INT./EXT.')
+        bad_names = [g['label'] for g in plan['groups'] if headerish.match(g['label']) or g['label'] in slugs]
+        check('no folder in the real gallery is named after a section header', not bad_names, bad_names[:4])
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
