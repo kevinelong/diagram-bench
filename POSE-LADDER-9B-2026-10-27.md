@@ -148,3 +148,16 @@ were measured here.
 Files: `pose-ladder-9b/result.json` (every verdict, timing and VRAM sample, with the controls), `pose-ladder-9b/sheet.jpg`
 (base first, then 0.40 / 0.55 / 0.70 / 0.85, one row per model), `pose-ladder-9b/face-check.json` (the face-only A/B).
 The cell images are generated folders and are ignored, as `pose-probe/*/` already was.
+
+
+## Disclosure: one possible cloud upload during smoke testing
+
+While smoke-testing the `--judge none` and `--judge cloud` branches of the new `--judge` flag, **`DEEPSEEK_API_KEY` was
+present in the environment**, so the cloud branch actually ran for roughly 60-80 s before it was killed. It reached the
+generation stage of its first cloud-judged cell (`z-image-turbo_d0.40`), so **one figure study may have been uploaded to
+api.deepseek.com** before the kill. The ladder itself used the local judge for every cell; nothing else left the machine.
+
+Two consequences, both applied: `--judge local` is now the **default** so a bare invocation cannot reach the cloud, and
+`--judge cloud` is the only path that does - it is an explicit choice, documented as *"keeps uploading the picture to
+DeepSeek"*. Anyone re-running this on a box where the key is set should assume the cloud path is a single typed flag
+away, not a safety net.
