@@ -71,6 +71,46 @@ def _registry_value(path, name, default=None):
         return default
 
 
+# A real bitmap face: at 8 px an antialiased UI font turns to mush, and Fixedsys is what Windows still ships for exactly
+# this job. Falls back to a monospace face that exists everywhere.
+PIXEL_FONT = ('Fixedsys', 8)
+FALLBACK_PIXEL_FONT = ('Consolas', 7)
+SIZE_BANDS = ((64 * 1024, '#ff6347', '#ffffff'),        # tomato red: 64 kB or less
+              (1024 * 1024, '#ffbf00', '#1a1a1a'),      # amber yellow: in between
+              (None, '#3cb371', '#0b1a10'))             # medium green: 1 MB or more
+
+
+def human_size(n):
+    """A file size a 3-character badge can hold: 64k, 412k, 1.2M."""
+    n = int(n or 0)
+    if n >= 1024 * 1024:
+        return '%.1fM' % (n / (1024.0 * 1024)) if n < 10 * 1024 * 1024 else '%dM' % round(n / (1024.0 * 1024))
+    return '%dk' % max(1, int(round(n / 1024.0)))
+
+
+def size_band(n):
+    """Background and text colour for a size: tomato red at 64 kB or less, green at 1 MB or more, amber between.
+
+    The boundaries are inclusive on both ends as asked, so exactly 1 MB is green and exactly 64 kB is red - a chain of
+    `n <= limit` tests cannot say that (1 MB would fall into the amber arm) and the test pins it.
+    """
+    n = int(n or 0)
+    if n <= 64 * 1024:
+        return '#ff6347', '#ffffff'
+    if n >= 1024 * 1024:
+        return '#3cb371', '#0b1a10'
+    return '#ffbf00', '#1a1a1a'
+
+
+def shorten_title(text, words=10):
+    """A folder tile shows three lines, which is about ten words; the full sentence stays in its tooltip."""
+    text = ' '.join(str(text or '').split())
+    parts = text.split(' ')
+    if len(parts) > words:
+        return ' '.join(parts[:words]).rstrip(',.;:-') + '\u2026'
+    return text
+
+
 class Theme:
     """The colours the user already chose, instead of colours invented here.
 
@@ -199,17 +239,44 @@ class Theme:
                 style.theme_use('vista')
             except Exception:
                 pass
-        self.dark_titlebar()
+        self.titlebar()
 
-    def dark_titlebar(self):
-        """The Win32 title bar does not follow dark mode by itself; DWMWA_USE_IMMERSIVE_DARK_MODE tells DWM to."""
+    def titlebar(self, window=None):
+        """Win32 title bar, done the way Windows does it: dark mode, and the accent when the user asked for it there.
+
+        Four DWM attributes, each best-effort because a build that does not know one must still get the others:
+        `DWMWA_USE_IMMERSIVE_DARK_MODE` (20, 19 on 1809-1909), `DWMWA_BORDER_COLOR` (34), `DWMWA_CAPTION_COLOR` (35) and
+        `DWMWA_TEXT_COLOR` (36). "Show accent colour on title bars and window borders" is `DWM\ColorPrevalence = 1`,
+        which is the only place Windows records that choice; caption text is then black or white by luminance, because
+        a caption colour without a matching text colour is worse than no accent at all. Colours here are COLORREFs -
+        0x00BBGGRR - not the RRGGBB the rest of this file uses.
+
+        Called for every window this app opens, not just the main one: a dark app with light sub-windows is the defect
+        this fixes.
+        """
+        target = window or self.root
         try:
             import ctypes
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-            value = ctypes.c_int(1 if self.dark else 0)
-            for attribute in (20, 19):        # 20 on Win10 2004+, 19 on 1809-1909
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), attribute,
-                                                           ctypes.byref(value), ctypes.sizeof(value))
+            hwnd = ctypes.windll.user32.GetParent(target.winfo_id()) or target.winfo_id()
+            handle = ctypes.c_void_p(hwnd)
+
+            def attribute(index, value):
+                datum = ctypes.c_int(int(value))
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(handle, index, ctypes.byref(datum),
+                                                           ctypes.sizeof(datum))
+
+            for index in (20, 19):
+                attribute(index, 1 if self.dark else 0)
+            if int(_registry_value(r'Software\Microsoft\Windows\DWM', 'ColorPrevalence', 0) or 0):
+                try:
+                    r, g, b = (int(self.accent[i:i + 2], 16) for i in (1, 3, 5))
+                    colourref = r | (g << 8) | (b << 16)
+                    attribute(35, colourref)                     # caption background
+                    attribute(34, colourref)                     # window border
+                    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                    attribute(36, 0x000000 if luminance > 150 else 0xFFFFFF)
+                except Exception:
+                    pass
             return True
         except Exception:
             return False
@@ -1398,6 +1465,7 @@ class App:
         right.rowconfigure(0, weight=1)
         self.canvas = tk.Canvas(right, background=self.theme.window, highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
+
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
         self.canvas.bind('<B1-Motion>', self._on_crop_drag, add='+')
@@ -1412,6 +1480,10 @@ class App:
         self.graph_btn.pack(side='left', padx=(6, 0))
         self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
         self.describe_btn.pack(side='left', padx=(6, 0))
+        # what the picture actually is: pixels, bytes on disk, the seed - at the end of the tools row, where it lines up
+        # with the picture rather than competing for a grid cell (row 1 already belongs to this row of controls)
+        self.res_label = ttk.Label(tools, text='', foreground=self.theme.muted, font=('Segoe UI', 8), anchor='e')
+        self.res_label.pack(side='right')
         self.copy_status = ttk.Label(tools, text='', foreground=self.theme.muted)
         self.copy_status.pack(side='left', padx=(8, 0))
         # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
@@ -1518,7 +1590,7 @@ class App:
         except Exception:
             pass
         try:
-            self.theme.dark_titlebar()      # the title bar is only real once the window exists
+            self.theme.titlebar()      # the title bar is only real once the window exists
         except Exception:
             pass
 
@@ -1708,6 +1780,7 @@ class App:
         from PIL import ImageTk
 
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         self._folder_win = win
         win.title('Prompt folders (%d)' % len(self._plan['groups']))
         try:
@@ -1755,7 +1828,7 @@ class App:
 
         def folder_caption(item):
             group = item['group']
-            return '%s\n%d pictures' % (group.get('title') or group['label'], len(group['items']))
+            return '%s\n%d pictures' % (shorten_title(group.get('title') or group['label']), len(group['items']))
 
         left = ScrollGrid(body, folder_tile, caption=folder_caption, batch=40, tile_target=150,
                           background=self.theme.window, muted=self.theme.muted)
@@ -1862,6 +1935,7 @@ class App:
             self._review['win'].lift()
             return
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         win.title('A/B review - %s' % label[:50])
         try:
             win.state('zoomed')
@@ -2188,6 +2262,20 @@ class App:
             cell.grid(row=i // cols, column=i % cols, padx=1, pady=1)
             lab = self._tile_widget(cell, row['path'], photo)
             lab.pack()
+            # the corner badge: how big this file is, on the three bands - tomato red 64 kB or less, amber between,
+            # medium green 1 MB or more. A pixel font because at 8 px an antialiased face is unreadable.
+            try:
+                bytes_on_disk = Path(row['path']).stat().st_size
+            except Exception:
+                bytes_on_disk = 0
+            if bytes_on_disk:
+                background, foreground = size_band(bytes_on_disk)
+                badge = tk.Label(cell, text=human_size(bytes_on_disk), font=PIXEL_FONT,
+                                 background=background, foreground=foreground, bd=0, padx=2, pady=0)
+                badge.place(relx=1.0, rely=1.0, anchor='se', x=-2, y=-2)
+                # a badge sits over the thumbnail, so it must not swallow the click that selects the picture
+                badge.bind('<Button-1>', lambda e, q=row['path']: self._on_tile_click(e, q))
+                self._tip(badge, '%s\n%d bytes' % (Path(row['path']).name, bytes_on_disk))
             try:
                 import pair_rank
                 mark = pair_rank.badge(row['path'])
@@ -2275,10 +2363,12 @@ class App:
             pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background=self.theme.sheet_bg)
             pic.image = photo
             pic.pack()
-            title = tk.Label(tile, text=group.get('title') or group['label'], wraplength=sheet_px - 4,
+            full_title = group.get('title') or group['label']
+            title = tk.Label(tile, text=shorten_title(full_title), wraplength=sheet_px - 4,
                              justify='left', anchor='w', font=('Segoe UI', 8),
                              foreground=self.theme.text, background=self.theme.window)
             title.pack(fill='x', pady=(3, 0))
+            self._tip(title, full_title)
             meta = tk.Label(tile, text='%d pictures' % len(group['items']), anchor='w',
                             font=('Segoe UI', 8), foreground=self.theme.muted,
                             background=self.theme.window)
@@ -2912,6 +3002,7 @@ class App:
 
     def show_run_log(self):
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         win.title('Run log - this session')
         win.geometry('760x320')
         cols = ('time', 'file', 'seed', 'model', 'style', 'wall')
@@ -2977,6 +3068,7 @@ class App:
         """Show the ComfyUI workflow the last run actually sent - the SwarmUI "look inside" trick."""
         wf = getattr(self.engine, 'last_workflow', None)
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         win.title('Workflow sent to ComfyUI')
         win.geometry('620x460')
         txt = tk.Text(win, wrap='none', font=('Consolas', 9))
@@ -3018,6 +3110,7 @@ class App:
         body = '\n'.join(lines)
 
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         win.title('Metadata - %s' % Path(path).name)
         win.geometry('560x320')
         txt = tk.Text(win, wrap='word', font=('Consolas', 9))
@@ -3331,6 +3424,7 @@ class App:
             self.hint.configure(text='no images yet')
             return
         win = tk.Toplevel(self.root)
+        self.root.after(30, lambda w=win: self.theme.titlebar(w))
         self._browser_win = win
         win.title('View All')
         try:
@@ -3405,6 +3499,30 @@ class App:
             side='left', padx=(6, 0))
         render()
 
+    def _show_resolution(self):
+        """Pixels, file size and the seed, under the picture - the three facts a render is usually asked about."""
+        if not hasattr(self, 'res_label'):
+            return
+        if self._img is None:
+            self.res_label.configure(text='')
+            return
+        parts = ['%dx%d' % self._img.size]
+        path = self._current
+        if path is not None:
+            try:
+                parts.append(human_size(Path(path).stat().st_size))
+            except Exception:
+                pass
+        try:
+            meta = (read_meta(Path(path)) or {}) if path is not None else {}
+        except Exception:
+            meta = {}
+        if meta.get('seed') is not None:
+            parts.append('seed %s' % meta['seed'])
+        if meta.get('steps') is not None:
+            parts.append('%s steps' % meta['steps'])
+        self.res_label.configure(text='  \u00b7  '.join(parts))
+
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
@@ -3415,6 +3533,7 @@ class App:
         self._img = Image.open(io.BytesIO(raw))
         self.canvas.delete('placeholder')
         self.root.after_idle(self._redraw)
+        self.root.after_idle(self._show_resolution)
 
     def _display(self, path):
         self._current = Path(path)
@@ -3428,6 +3547,7 @@ class App:
             return
         self.canvas.delete('placeholder')
         self.root.after_idle(self._redraw)
+        self.root.after_idle(self._show_resolution)
 
     def _set_base(self, path, from_gallery=False):
         self._base_from_gallery = from_gallery

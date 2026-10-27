@@ -238,6 +238,17 @@ list**, **three across**, sized from the pane's live width and as tall as the co
 moves the folder list. All three lists - pictures, folder tiles, folder contents - use **infinite scrolling**: they
 show a first batch and append the next one when you reach the bottom.
 
+**Three details that make the panes readable at a glance** (2026-10-27):
+
+- **Folder titles are cut to ten words** (about three lines at tile width) with an ellipsis; the full sentence stays in
+  the tile's tooltip. A 30-word prompt used to take six lines and push the next row of folders off the screen.
+- **Every picture in the open-folder pane wears a size badge in its corner**: the file size (`2k`, `330k`, `1.9M`) in a
+  real bitmap font (`Fixedsys`, because at 8 px an antialiased face is mush), coloured by band - **tomato red at 64 kB or
+  less, amber yellow between, medium green at 1 MB or more**. The boundaries are inclusive at both ends, which a chain
+  of `n <= limit` tests cannot express: exactly 1 MB is green and exactly 64 kB is red, and a test pins both. The badge
+  takes the click that selects its picture rather than swallowing it.
+- **The picture pane reports what the picture is**: `512x512 · 328k · seed 1007 · 4 steps`, in the tools row above it.
+
 **The folder control is a button, not a dropdown.** It names what is open (`All folders`, `steampunk cyberdeck... (82)`)
 and opens a **full-screen folder browser**: 4-up folder tiles on the left, that folder's pictures in a grid on the right,
 both reflowing to the window and scrolling under the wheel. It is the same widget as View All (`ScrollGrid`), so there
@@ -303,6 +314,13 @@ Colours come from Windows, not from this file (`Theme`, `zimage_ui.py`), in thre
   readonly combobox draws its field from the *state map*, which is why the first dark pass still showed white boxes;
 - **the DWM accent** (`HKCU\...\DWM\AccentColor`, stored AABBGGRR) for the selection ring, the status colour and the A/B
   overlay. This desktop's accent is olive `#758500`, and the app drew it rather than a blue of its own.
+
+**The title bar follows Windows too**, for every window this app opens (View All, the folder browser, A/B review, the
+log and metadata windows) and not just the main one: `DWMWA_USE_IMMERSIVE_DARK_MODE` for the mode, and
+`DWMWA_CAPTION_COLOR` / `DWMWA_BORDER_COLOR` / `DWMWA_TEXT_COLOR` when "Show accent colour on title bars and window
+borders" is on. That setting is `HKCU\...\DWM\ColorPrevalence`, i.e. `1`; on this desktop it is `0`, so no accent is
+painted on the caption - the app follows the user's choice instead of forcing one. Caption text is black or white by
+luminance, since an accent caption with the wrong text colour is worse than no accent.
 
 Everything Windows does not provide - the backdrop behind a contact sheet, a hover tone, a field fill - is **derived**
 from the window colour by mixing, so it tracks light/dark and contrast themes instead of being a second palette that

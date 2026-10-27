@@ -1676,10 +1676,13 @@ def main():
         check('two folder tiles per row in the first column',
               len({int(w.grid_info()['column']) for w in two_up}) == min(2, len(two_up)),
               [int(w.grid_info()['column']) for w in two_up])
-        check('the full folder name is shown, wrapped rather than cut',
-              title['text'] == (app._plan['groups'][0].get('title') or app._plan['groups'][0]['label'])
-              and int(title['wraplength']) > 0
-              and '\u2026' not in title['text'], (title['text'][:40], title['wraplength']))
+        full_title = app._plan['groups'][0].get('title') or app._plan['groups'][0]['label']
+        check('the tile title is the first ten words, with an ellipsis when there is more',
+              title['text'] == zui.shorten_title(full_title) and len(title['text'].split()) <= 10,
+              (title['text'][:60], full_title[:60]))
+        check('and it wraps inside the tile rather than running off it',
+              int(title['wraplength']) > 0 and int(title['wraplength']) <= pic.image.width(),
+              (title['wraplength'], pic.image.width() if pic.image else None))
         check('and the tile says how many pictures it holds',
               meta['text'].endswith('pictures'), meta['text'])
         check('the title uses the small font', '8' in str(title['font']), title['font'])
@@ -1742,6 +1745,35 @@ def main():
     check('a narrower window uses fewer, not smaller, columns', cols2 <= cols and tile2 <= tile,
           (cols, tile, cols2, tile2))
     probe_win.destroy()
+
+    print('\n-- size badges, three-line folder titles, and the picture resolution (2026-10-27)')
+    check('the 64 kB band is tomato red', zui.size_band(64 * 1024)[0] == '#ff6347', zui.size_band(64 * 1024))
+    check('one byte over 64 kB is amber', zui.size_band(64 * 1024 + 1)[0] == '#ffbf00', zui.size_band(64 * 1024 + 1))
+    check('1 MB is medium green', zui.size_band(1024 * 1024)[0] == '#3cb371', zui.size_band(1024 * 1024))
+    check('a size reads in three characters or so',
+          [zui.human_size(n) for n in (2 * 1024, 330 * 1024, 2 * 1024 * 1024)] == ['2k', '330k', '2.0M'],
+          [zui.human_size(n) for n in (2 * 1024, 330 * 1024, 2 * 1024 * 1024)])
+    long_title = ' '.join(['word%d' % i for i in range(30)])
+    short = zui.shorten_title(long_title)
+    check('a long folder title is cut to ten words with an ellipsis',
+          len(short.split()) == 10 and short.endswith('\u2026'), short)
+    check('a short title is left alone', zui.shorten_title('a lighthouse at dusk') == 'a lighthouse at dusk')
+    app.select_folder(0); root.update(); time.sleep(0.2)
+    badges = [w for cell in app.contents.winfo_children() for w in cell.winfo_children()
+              if w.winfo_class() == 'Label' and str(w.cget('text')).endswith(('k', 'M'))]
+    check('each picture in the pane wears a size badge', len(badges) >= 1, len(badges))
+    if badges:
+        colour = str(badges[0].cget('background'))
+        check('the badge colour is one of the three bands', colour in ('#ff6347', '#ffbf00', '#3cb371'), colour)
+        check('the badge uses the pixel font', 'Fixedsys' in str(badges[0].cget('font')), badges[0].cget('font'))
+    newest = app._files[0]
+    app.select_file(newest); root.update(); time.sleep(0.2)
+    text = app.res_label['text']
+    check('the picture reports its pixels', 'x' in text and text.split('x')[0].isdigit(), text)
+    check('and its file size on the same band', any(text.count(u) for u in ('k', 'M')), text)
+    check('and the seed it was made with', 'seed' in text, text)
+    check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
+    app.select_folder(None); root.update()
 
     print('\n-- the wheel goes to the list under the pointer, not to whatever has focus')
     app.select_folder(None); root.update()
