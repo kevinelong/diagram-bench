@@ -84,6 +84,25 @@ def fit_lexicon(prompts):
     return {'n': n, 'df': df, 'idf': {t: math.log((n + 1) / (c + 0.5)) for t, c in df.items()}}
 
 
+# A prompt is written subject first, then style: 142 prompts here end in the identical clause
+# ", photograph, natural light, shallow depth of field". Because that tail is shared by *different* subjects, weighting
+# every token equally merged life-drawing figure models into the steampunk folder (196 members, only 98 mentioning
+# steampunk). Clause position is the cheap, domain-correct discriminator: the head clause is what the picture is of.
+CLAUSE_WEIGHTS = (1.0, 0.6, 0.35)
+
+
+def token_weights(text):
+    """token -> the strongest clause weight it appears in (first clause 1.0, later clauses fall away)."""
+    out = {}
+    clauses = re.split(r'[,;.!?]|\n', (text or '').lower())
+    for i, clause in enumerate(clauses):
+        w = CLAUSE_WEIGHTS[min(i, len(CLAUSE_WEIGHTS) - 1)]
+        for t in tokens(clause):
+            if w > out.get(t, 0.0):
+                out[t] = w
+    return out
+
+
 def vector(text, lexicon, expand_synonyms=True):
     """idf-weighted unit vector for one prompt; synonyms of its words are added at a lower weight.
 
@@ -91,13 +110,14 @@ def vector(text, lexicon, expand_synonyms=True):
     its original without the threshold being lowered for everyone.
     """
     bag = Counter(tokens(text))
+    weights = token_weights(text)
     idf = lexicon['idf']
-    v = {t: (1 + math.log(c)) * idf[t] for t, c in bag.items() if t in idf}
+    v = {t: (1 + math.log(c)) * idf[t] * weights.get(t, 1.0) for t, c in bag.items() if t in idf}
     if expand_synonyms and _SYN:
         for t, c in bag.items():
             for o in _SYN.get(t, ()):
                 if o in idf and o not in v:
-                    v[o] = SYNONYM_WEIGHT * (1 + math.log(c)) * idf[o]
+                    v[o] = SYNONYM_WEIGHT * (1 + math.log(c)) * idf[o] * weights.get(t, 1.0)
     norm = math.sqrt(sum(x * x for x in v.values())) or 1.0
     return {t: x / norm for t, x in v.items()}
 
@@ -154,8 +174,49 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None):
 
 
 def label_for(prompts, members, width=60):
-    """A folder name: the oldest member's prompt, first sentence, elided. Never invented, never summarised by a model."""
-    text = ' '.join((prompts[members[0]] or '').split())
+    """A folder name taken from the member that best represents the folder - never invented, never a bare fragment.
+
+    It used to be the *oldest* member's prompt, which is how a folder of 303 pictures ended up called "less intense
+    eyes": that phrase was simply the first thing saved. Now the label comes from the medoid unless a member carries the
+    folder's most distinctive shared token, and a prompt with fewer than three content words is never chosen while a
+    fuller one exists - "less intense eyes" identifies nothing.
+    """
+    texts = [(prompts[m] or '').strip() for m in members]
+    if not texts:
+        return '(no prompt recorded)'
+    idf = {}
+    try:
+        idf = fit_lexicon(texts)['idf']
+    except Exception:
+        pass
+    # the folder's own core: tokens in most of its members, rarest first
+    counts = Counter()
+    for t in texts:
+        counts.update(set(tokens(t)))
+    need = max(2, int(0.6 * len(texts)))
+    core = [t for t, c in counts.items() if c >= need]
+    core.sort(key=lambda t: -(idf.get(t, 0.0)))
+    core = core[:3]
+
+    def content_len(t):
+        return len(tokens(t))
+
+    # Captions written by a model open with meta-talk, not a subject: "This image is a detailed digital illustration
+    # showcasing...". A folder named that way tells the eye nothing, so such a head is only used when every member
+    # has one - i.e. the folder really is a set of captions.
+    template = re.compile(r'^(this|the)\s+(image|picture|photo|shots?)\b|^(pictured|shown here|depicted|in this)')
+
+    cands = [i for i, t in enumerate(texts) if content_len(t) >= 3] or list(range(len(texts)))
+    def score(i):
+        toks = set(tokens(texts[i]))
+        shared = toks & set(core)
+        return (1 if shared else 0,
+                0 if template.match(' '.join(texts[i].split()).lower()) else 1,
+                sum(idf.get(t, 0.0) for t in shared),
+                content_len(texts[i]))
+    best = max(cands, key=score) if cands else 0
+
+    text = ' '.join(texts[best].split())
     head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
     if not head:
         head = text

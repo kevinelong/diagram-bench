@@ -726,6 +726,7 @@ class App:
         self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
         for c in range(RECENT_COLS + 12):
             self.recent.columnconfigure(c, weight=0)
+        self._sheets = {}                 # folder label -> composed 3x3 contact sheet
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
         self._all_widgets = {}            # same, for the "More..." window
@@ -1246,6 +1247,7 @@ class App:
             self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
 
     def _apply_plan(self, plan):
+        self._sheets = {}
         self._plan = plan
         self._grouping = False
         self._active_folder = None
@@ -1277,6 +1279,9 @@ class App:
         self.folder_cb.current(0 if self._active_folder is None else self._folder_choices.index(self._active_folder))
         self.folder_cb.pack(side='left')
         self.folder_cb.bind('<<ComboboxSelected>>', self._on_folder_pick)
+        if self._active_folder is not None:
+            ttk.Button(self.folder_bar, text='\u2039 folders', width=9,
+                       command=lambda: self.select_folder(None)).pack(side='left', padx=(3, 0))
         ttk.Button(self.folder_bar, text='A/B', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
         ttk.Button(self.folder_bar, text='\u2026', width=2, command=self.show_folders).pack(side='left', padx=(2, 0))
 
@@ -1532,6 +1537,69 @@ class App:
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
         return files
 
+    def _folders_view_active(self):
+        """The strip lists folders when grouping is on, nothing is selected and nothing is filtered."""
+        return (bool(self._plan) and not getattr(self, '_grouping', False)
+                and self._active_folder is None
+                and not self.search_var.get().strip() and not self.starred_only.get())
+
+    def _folder_sheet(self, group, size):
+        """A 3x3 contact sheet of a folder's first nine pictures, built from the thumbnail cache.
+
+        One PhotoImage per folder instead of nine keeps a 60-folder view cheap, and the sheet is memoised so scrolling or
+        a redraw does not re-compose it.
+        """
+        from PIL import Image as _I
+        key = (group['label'], len(group['items']), size, group['items'][0]['path'] if group['items'] else '')
+        hit = self._sheets.get(key)
+        if hit is not None:
+            return hit
+        cell = size // 3
+        sheet = _I.new('RGB', (size, size), '#1b1b1b')
+        paths = [r['path'] for r in group['items'][:9]]
+        thumbs = thumbs_for(paths)
+        for i, path in enumerate(paths):
+            tp = thumbs.get(path)
+            if not tp:
+                continue
+            try:
+                with _I.open(tp) as im:
+                    im = im.convert('RGB')
+                    im.thumbnail((cell - 2, cell - 2), _I.LANCZOS)
+                    sheet.paste(im, ((i % 3) * cell + (cell - im.width) // 2,
+                                     (i // 3) * cell + (cell - im.height) // 2))
+            except Exception:
+                continue
+        self._sheets[key] = sheet
+        if len(self._sheets) > 400:
+            self._sheets.clear()
+        return sheet
+
+    def _render_folder_tiles(self):
+        """Large tiles: a 9-up thumbnail, the folder's full name wrapped, and how many pictures it holds."""
+        from PIL import ImageTk
+        for w in self.recent.winfo_children():
+            w.destroy()
+        self._tile_widgets = {}
+        width = max(190, self.gal_canvas.winfo_width() - 10)
+        sheet_px = max(150, min(width, 300))
+        for index, group in enumerate(self._plan['groups']):
+            tile = ttk.Frame(self.recent, padding=(2, 4))
+            tile.pack(fill='x', padx=2, pady=3)
+            photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px))
+            pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background='#1b1b1b')
+            pic.image = photo
+            pic.pack()
+            title = tk.Label(tile, text=group['label'], wraplength=sheet_px - 4, justify='left',
+                             anchor='w', font=('Segoe UI', 8), foreground='#333')
+            title.pack(fill='x', pady=(3, 0))
+            meta = tk.Label(tile, text='%d pictures' % len(group['items']), anchor='w',
+                            font=('Segoe UI', 8), foreground='#777')
+            meta.pack(fill='x')
+            for w in (tile, pic, title, meta):
+                w.bind('<Button-1>', lambda e, i=index: self.select_folder(i))
+        self.root.after_idle(self._on_strip_resize)
+
     def _strip_cols(self):
         """How many tiles fit across the strip right now (it was a fixed 3, which wasted a wide window)."""
         try:
@@ -1564,6 +1632,11 @@ class App:
         needle = self.search_var.get().strip()
         if needle:
             label += '  \u00b7  \u201c%s\u201d' % needle
+        if self._folders_view_active():
+            self.gal_title.configure(text='Folders (%d)  \u00b7  %d pictures'
+                                     % (len(self._plan['groups']), sum(len(g['items']) for g in self._plan['groups'])))
+            self._render_folder_tiles()
+            return
         self.gal_title.configure(text=label)
         cols = self._strip_cols()
         thumbs = thumbs_for(recent) if recent else {}

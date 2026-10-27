@@ -172,6 +172,47 @@ def main():
     check('an 18k-character prompt does not hang', time.monotonic() - t0 < 5, '%.2fs' % (time.monotonic() - t0))
     check('grouping is deterministic', gp.group_texts(texts) == gp.group_texts(texts))
 
+    print('\n-- a shared style tail must not merge two subjects (2026-10-27 report)')
+    TAIL = ', photograph, natural light, shallow depth of field'
+    cyber = ['steampunk cyberdeck with brass keys' + TAIL,
+             'steampunk cyberdeck on a walnut desk' + TAIL,
+             'a steampunk cyberdeck, rivets and dials' + TAIL,
+             'steampunk cyberdeck, leather straps' + TAIL]
+    figure = ['life drawing figure model, charcoal' + TAIL,
+              'life drawing figure model, standing pose' + TAIL,
+              'a life drawing figure model on a dais' + TAIL,
+              'life drawing figure model, seated' + TAIL]
+    mixed_groups = gp.group_texts(cyber + figure)
+    mixed_sets = [{('cyber' if i < 4 else 'figure') for i in g} for g in mixed_groups]
+    check('two subjects sharing one style clause stay apart', all(len(s_) == 1 for s_ in mixed_sets), mixed_sets)
+    # how many folders the variants split into is incidental on an 8-prompt corpus; purity is the invariant
+    check('and no folder contains both subjects', len(mixed_groups) >= 2, len(mixed_groups))
+    check('the head clause outweighs the style tail',
+          gp.cosine(gp.vector(cyber[0], gp.fit_lexicon(cyber + figure)),
+                    gp.vector(cyber[1], gp.fit_lexicon(cyber + figure)))
+          > gp.cosine(gp.vector(cyber[0], gp.fit_lexicon(cyber + figure)),
+                      gp.vector(figure[0], gp.fit_lexicon(cyber + figure))))
+
+    print('\n-- the folder name describes the folder (2026-10-27 report)')
+    frag = ['less intense eyes',
+            'four mature older adult women clothed in dark colours, standing',
+            'four mature older adult women in dark clothes, a wide shot',
+            'four mature older adult women, dark coloured clothing']
+    lab = gp.label_for(frag, list(range(len(frag))))
+    check('the oldest member is not automatically the label', 'less intense eyes' not in lab, lab)
+    check('a bare fragment is never chosen while a fuller prompt exists',
+          len(gp.tokens(lab)) >= 4, lab)
+    check('and the label names the shared subject', 'women' in gp.tokens(lab), lab)
+    caps = ['This image is a detailed digital illustration showcasing a fox.',
+            'a full-body character concept sheet from multiple angles',
+            'a full-body character concept sheet, front and side',
+            'full-body character concept sheet, three views']
+    lab2 = gp.label_for(caps, list(range(len(caps))))
+    check('a model caption template is not used as the name',
+          not lab2.lower().startswith(('this image', 'the image', 'the shot')), lab2)
+    check('the concept sheet is named as one', 'concept' in gp.tokens(lab2), lab2)
+
+
     if args.real:
         print('\n-- the real gallery, read-only')
         import json
@@ -199,6 +240,19 @@ def main():
               all(len(g['items']) <= len(rows) / 2 for g in plan['groups']),
               max((len(g['items']) for g in plan['groups']), default=0))
         print('   largest folders:', [len(g['items']) for g in plan['groups'][:8]])
+        # the reader's complaint, measured: members of a folder should mention what its label says
+        def head_words(text):
+            return set(gp.tokens(re.split(r'[,;.]', (text or '').lower())[0]))
+        total = sum(len(g['items']) for g in plan['groups'])
+        stray = 0
+        for g in plan['groups']:
+            lab = head_words(g['label'])
+            if not lab:
+                continue
+            stray += sum(1 for it in g['items'] if not (set(gp.tokens(it['prompt'])) & lab))
+        rate = stray / total if total else 0
+        print('   members sharing no word with their folder label: %d of %d (%.1f%%)' % (stray, total, 100 * rate))
+        check('folders mostly contain what their label says', rate <= 0.12, '%.1f%% mismatched' % (100 * rate))
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0

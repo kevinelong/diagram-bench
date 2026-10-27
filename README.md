@@ -226,9 +226,11 @@ naming a folder from a 70-token prompt.
 
 ## Folders: one selector, and a strip that keeps its place
 
-`folders` groups the gallery by prompt, and a **readonly selector** in the gallery column picks one:
-`All (1810)`, `less intense eyes\u2026 (303)`, and so on; `A/B` reviews the selected folder, `\u2026` opens the full folder
-list with search.
+`folders` groups the gallery by prompt. With nothing selected the strip becomes **large folder tiles**: a 3x3 contact
+sheet of the folder's first nine pictures, its **full name wrapped** in small type (never elided) and how many pictures
+it holds; clicking one opens that folder, and `\u2039 folders` returns to the tiles. A **readonly selector** picks a folder by
+name as well (`All (1827)`, `steampunk cyberdeck\u2026 (82)`), `A/B` reviews the selected folder, `\u2026` opens the full list
+with search.
 
 **This replaced a row of chips, because the chips broke the window.** Eight buttons carrying folder names asked for
 about 1,330 px, and a grid column is always given at least the width its children request - so at 2560 px wide the

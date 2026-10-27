@@ -1505,6 +1505,30 @@ def main():
           (btn_frame[0].winfo_rooty() + btn_frame[0].winfo_height() if btn_frame else None,
            root.winfo_rooty() + root.winfo_height()))
 
+    print('\n-- folders show as large 9-up tiles with a wrapped title')
+    app.select_folder(None); root.update()
+    tiles = app.recent.winfo_children()
+    check('one tile per folder', len(tiles) == len(app._plan['groups']), (len(tiles), len(app._plan['groups'])))
+    if tiles:
+        pic, title, meta = tiles[0].winfo_children()[:3]
+        check('each tile carries a contact sheet', pic.image is not None and pic.image.width() >= 150,
+              pic.image.width() if pic.image else None)
+        check('the sheet is a 3x3 of thumbnails, not one picture', pic.image.width() == pic.image.height(),
+              (pic.image.width(), pic.image.height()))
+        check('the full folder name is shown, wrapped rather than cut',
+              title['text'] == app._plan['groups'][0]['label'] and int(title['wraplength']) > 0
+              and '\u2026' not in title['text'], (title['text'][:40], title['wraplength']))
+        check('and the tile says how many pictures it holds',
+              meta['text'].endswith('pictures'), meta['text'])
+        check('the title uses the small font', '8' in str(title['font']), title['font'])
+        tiles[1].winfo_children()[0].event_generate('<Button-1>')
+        root.update(); time.sleep(0.2)
+        check('clicking a tile opens that folder', app._active_folder == 1, app._active_folder)
+        check('and the strip switches to the pictures', not app.recent.winfo_children()
+              or len(app.recent.winfo_children()) != len(app._plan['groups']))
+        app.select_folder(None); root.update()
+        check('going back returns to the tiles', len(app.recent.winfo_children()) == len(app._plan['groups']))
+
     print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
     import pair_review as prv
     # give one folder enough members that it has several pairs: six of the oldest share a prompt
