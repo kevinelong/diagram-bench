@@ -105,6 +105,28 @@ def prepare_still(src, width, height, out=None):
 
 
 
+
+_CODEC_TAGS = (b'avc1', b'avc3', b'hvc1', b'hev1', b'av01', b'vp09', b'mp4v')
+
+def mp4_codec(path):
+    """The sample-entry fourcc of an MP4's video track, or None.
+
+    Windows' own player refuses some of these outright - HEVC without the paid extension and AV1 without the AV1
+    extension both surface as 0xC00D36C4 "unsupported or corrupt", which reads like a broken file and is not one. The
+    app opens clips in VLC, which ships its own decoders, and this lets the hint say which case it is.
+    """
+    try:
+        blob = Path(path).read_bytes()[:262144]
+    except OSError:
+        return None
+    head = blob.find(b'ftyp')
+    if head < 0:
+        return None
+    for tag in _CODEC_TAGS:
+        if blob.find(tag, head) > 0:
+            return tag.decode('latin-1')
+    return None
+
 def _wsl_path(path):
     """C:\\Users\\kevin\\x -> /mnt/c/Users/kevin/x, for the ffmpeg that lives in WSL."""
     p = Path(path).resolve()

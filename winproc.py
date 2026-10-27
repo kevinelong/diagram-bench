@@ -29,6 +29,28 @@ def hidden():
     return {'creationflags': CREATE_NO_WINDOW, 'startupinfo': si}
 
 
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def detached():
+    """Keyword arguments for a program the user should SEE, detached from this process.
+
+    `hidden()` is for consoles we never want to show; a video player is the opposite case, and STARTF_USESHOWWINDOW
+    with SW_HIDE would start it minimised or invisible. Detached means closing this app does not close the player.
+    """
+    if not _WINDOWS:
+        return {'close_fds': True}
+    return {'creationflags': DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, 'close_fds': True,
+            'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
+
+
+def launch(*args, **kwargs):
+    """Start a GUI program for the user, outside this process's console and lifetime."""
+    kwargs.update(detached())
+    return subprocess.Popen(*args, **kwargs)
+
+
 def run(*args, **kwargs):
     """subprocess.run, but the child has no visible window."""
     kwargs.update(hidden())

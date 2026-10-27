@@ -248,6 +248,32 @@ characters.
 Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
 pane 846 px - the picture keeps the majority, which it did not before.
 
+## Clips: why they would not play, and what opens them now
+
+The clips themselves were never broken. A `wan-clip-*.mp4` in the gallery is H.264 **High@3.1, 8-bit 4:2:0, 24 fps,
+2.04 s, 49 frames**, written by our own `libx264 -pix_fmt yuv420p -movflags +faststart`; an independent decode returns
+all 49 frames at 704x704, and VLC plays it and exits 0.
+
+What was broken was the **handler**: `.mp4` and `.webm` both have a `UserChoice` pointing at the Windows Media Player
+app package, and the `HKLM` fallback for `.mp4` is `WMP11.AssocFile.MP4`, a handler Windows 11 no longer ships. The
+player reported `0xC00D36C4` ("unsupported, wrong extension, or corrupt") on files that decode perfectly.
+
+Two changes, in this order of importance:
+
+1. **The app opens clips in a player that exists.** `App.find_player()` picks VLC (installed here, 3.0.16) or mpv, and
+   launches it detached and *visible* through `winproc.launch` - `winproc.popen` would start it with `SW_HIDE`, which is
+   right for consoles and wrong for a player. `ZIMAGE_PLAYER` overrides. When no player is installed it falls back to
+   the Windows association. `--play-and-exit` is deliberately not used: a two-second clip would close the window as it
+   ended, so the window stays open with the clip loaded and its controls available.
+2. **A codec note in the hint.** `video.mp4_codec()` reads the sample-entry fourcc, and a non-AVC clip says so
+   (`hvc1`, `av01`) instead of leaving a bare failure - Windows needs the HEVC or AV1 extension for those, VLC does not.
+
+`tools/set-clip-default.ps1` points `HKCU\Software\Classes\.mp4/.webm` at `VLC.mp4`/`VLC.webm` and backs up what it
+replaced to `%LOCALAPPDATA%\zimage-ui\clip-default-backup-*.reg` (`-Undo` restores it). **It cannot finish the job on
+its own and says so:** Windows hash-protects `UserChoice` and denies both `Remove-Item` and `reg delete`, so making
+double-click work is two clicks in Settings > Apps > Default apps > VLC media player (the script opens that page).
+The in-app player path needs none of it.
+
 ## Where the evidence lives
 
 - **`RESULTS-*.md`** — one per experiment: the table, the predictions, the corrections, and what the run does *not*

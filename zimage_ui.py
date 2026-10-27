@@ -186,8 +186,11 @@ BATCH_SECONDS_PER_TILE = 0.67      # measured: 16-up at 384 px in one batch took
 
 
 def settings_path():
-    base = Path(os.environ.get('LOCALAPPDATA') or Path.home())
-    return base / 'zimage-ui' / 'settings.json'
+    """Where the window keeps its state. ZIMAGE_SETTINGS_DIR redirects it, so tests never touch a real profile."""
+    base = os.environ.get('ZIMAGE_SETTINGS_DIR')
+    if base:
+        return Path(base) / 'settings.json'
+    return Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'zimage-ui' / 'settings.json'
 
 
 def load_settings():
@@ -1385,6 +1388,8 @@ class App:
         right_lbl = tk.Label(win, background='#111', foreground='#ddd', compound='center')
         left_lbl.grid(row=0, column=0, sticky='nsew', padx=(6, 3), pady=6)
         right_lbl.grid(row=0, column=1, sticky='nsew', padx=(3, 6), pady=6)
+        for lbl in (left_lbl, right_lbl):
+            lbl.bind('<Configure>', self._on_review_resize)
         bar = ttk.Frame(win)
         bar.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 8))
         for c in range(4):
@@ -1410,6 +1415,29 @@ class App:
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
         self._review_show_next()
 
+
+    def _review_fit(self, lbl, path=None, redraw_only=False):
+        """Size a picture to the label's own cell, not to the screen.
+
+        Sizing from the screen clipped the picture whenever the window was smaller than the display or the taskbar
+        offset reduced the work area; binding <Configure> means every resize refits and nothing is ever cropped.
+        """
+        from PIL import ImageTk
+        path = path or getattr(lbl, 'source', None)
+        if not path:
+            return
+        w = max(160, lbl.winfo_width() - 8)
+        h = max(120, lbl.winfo_height() - 8)
+        try:
+            with Image.open(path) as im:
+                im = im.convert('RGB')
+                im.thumbnail((w, h), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+            lbl.configure(image=photo, text='')
+            lbl.image = photo
+        except Exception as e:
+            lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+
     def _review_show_next(self):
         import pair_review
         from PIL import ImageTk
@@ -1428,21 +1456,27 @@ class App:
             return
         a, b, dist = queue[0]
         r['pair'] = (a, b)
-        screen_w = max(600, self.root.winfo_screenwidth() // 2 - 30)
-        screen_h = max(400, self.root.winfo_screenheight() - 140)
         for lbl, path in ((r['left_lbl'], a), (r['right_lbl'], b)):
-            try:
-                with Image.open(path) as im:
-                    im = im.convert('RGB')
-                    im.thumbnail((screen_w, screen_h), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(im)
-                lbl.configure(image=photo, text='')
-                lbl.image = photo
-            except Exception as e:
-                lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+            lbl.source = path
+            self._review_fit(lbl, path)
         r['info'].configure(text='pair %d of %d \u00b7 %d deleted \u00b7 similarity distance %d \u00b7 '
                                  '%s | %s' % (decided + 1, total, deletes, dist,
                                               Path(a).name[:34], Path(b).name[:34]))
+
+    def _on_review_resize(self, event=None):
+        r = getattr(self, '_review', None)
+        if not r or r.get('_resize_job'):
+            return
+        r['_resize_job'] = self.root.after(120, self._review_refit)
+
+    def _review_refit(self):
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        r['_resize_job'] = None
+        for lbl in (r['left_lbl'], r['right_lbl']):
+            if getattr(lbl, 'source', None):
+                self._review_fit(lbl)
 
     def review_decide(self, choice):
         import pair_review
@@ -3024,6 +3058,27 @@ class App:
         self.engine.make_clip(self._current, grid=grid, frames=49,
                               prompt=self.text.get('1.0', 'end').strip(), seed=seed)
 
+    @staticmethod
+    def find_player(exists=None):
+        """The first clip player that is actually installed, or None for the Windows association.
+
+        The association cannot be trusted here: every media extension's UserChoice points at the Windows Media Player
+        app package, and .mp4 falls back to WMP11.AssocFile.MP4, a handler Windows 11 no longer ships. VLC 3.0.16 is
+        installed on this machine and plays the clips, so it is preferred; ZIMAGE_PLAYER overrides.
+        """
+        exists = exists or (lambda p: Path(p).exists())
+        forced = os.environ.get('ZIMAGE_PLAYER')
+        if forced:
+            return [forced, '--started-from-file']
+        for exe, flags in (
+                (r'C:\Program Files\VideoLAN\VLC\vlc.exe', ['--started-from-file']),
+                (r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe', ['--started-from-file']),
+                (r'C:\Program Files\mpv\mpv.exe', ['--force-window=yes']),
+                (r'C:\Program Files\MPC-HC\mpc-hc64.exe', [])):
+            if exists(exe):
+                return [exe] + flags
+        return None
+
     def _open_clip(self, path, video=True):
         """Open a clip the way its container deserves: MP4 to the player, WebP to the browser.
 
@@ -3036,6 +3091,24 @@ class App:
             self.hint.configure(text='%s is gone from disk' % path.name)
             return False
         if video and path.suffix.lower() == '.mp4':
+            player = self.find_player()
+            if player:
+                try:
+                    import winproc
+                    codec = None
+                    try:
+                        import video as _v
+                        codec = _v.mp4_codec(path)
+                    except Exception:
+                        pass
+                    if codec not in (None, 'avc1', 'avc3'):
+                        self.hint.configure(text='%s is %s - the Windows player needs a codec pack for that; '
+                                                 'VLC decodes it itself' % (path.name, codec))
+                    winproc.launch(player + [str(path)])      # visible and detached, unlike winproc.hidden()
+                    return Path(player[0]).stem
+                except Exception as e:
+                    self.hint.configure(text='%s failed (%s) - falling back to the default app'
+                                        % (Path(player[0]).name, e))
             zg.open_output(str(path))
         else:
             webbrowser.open(path.resolve().as_uri())
@@ -3047,9 +3120,14 @@ class App:
             self.hint.configure(text='no clip yet - press Make clip first')
             return
         is_video = getattr(self, '_last_clip_is_video', False)
-        if self._open_clip(self._last_clip, video=is_video):
-            self.hint.configure(text='opening %s%s' % (
-                self._last_clip, '' if is_video else ' in the browser (no MP4 for this clip)'))
+        who = self._open_clip(self._last_clip, video=is_video)
+        if who:
+            self.hint.configure(text='opening %s in %s%s' % (
+                Path(self._last_clip).name,
+                who if who is not True else 'the default app',
+                '' if is_video else ' (animated WebP goes to the browser)'))
+        else:
+            self.hint.configure(text='could not open %s' % Path(self._last_clip).name)
 
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)

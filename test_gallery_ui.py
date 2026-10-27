@@ -26,6 +26,9 @@ import tkinter as tk
 from PIL import Image, ImageDraw, ImageGrab
 from tkinter import ttk
 
+# the suite drives the real window, which persists its state - keep that out of the user's profile
+os.environ['ZIMAGE_SETTINGS_DIR'] = tempfile.mkdtemp(prefix='zimage-settings-')
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import zimage_ui as zui  # noqa: E402
 
@@ -1010,17 +1013,23 @@ def main():
     check('a remote endpoint is refused', 'local-only' in app.hint['text'], app.hint['text'])
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'       # keep-alive with a real Content-Length, or the socket gets RST
+
         def do_POST(self):
+            n = int(self.headers.get('Content-Length') or 0)
+            if n:
+                self.rfile.read(n)          # leaving the body unread makes Windows abort the connection (10053)
             body = json.dumps({'choices': [{'message': {'content': 'a crisp vector fox'}}]}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
         def log_message(self, *a):
             pass
 
-    srv = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % srv.server_port
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
@@ -1030,20 +1039,28 @@ def main():
         if 'vector fox' in app.text.get('1.0', 'end'):
             break
     check('a local model rewrites the prompt', 'vector fox' in app.text.get('1.0', 'end'),
-          app.text.get('1.0', 'end').strip())
+          'text=%r hint=%r' % (app.text.get('1.0', 'end').strip()[:60], app.hint['text'][:120]))
     srv.shutdown()
 
     print('\n-- describe captions the picture through the local endpoint')
     class Vision(http.server.BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
         def do_POST(self):
+            n = int(self.headers.get('Content-Length') or 0)
+            if n:
+                self.rfile.read(n)
             body = json.dumps({'choices': [{'message': {'content': 'a fox sitting on a log'}}]}).encode()
-            self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
             self.wfile.write(body)
 
         def log_message(self, *a):
             pass
 
-    vsrv = http.server.HTTPServer(('127.0.0.1', 0), Vision)
+    vsrv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Vision)
     threading.Thread(target=vsrv.serve_forever, daemon=True).start()
     app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % vsrv.server_port
     app.select_file(app._files[0]); root.update()
@@ -1527,6 +1544,25 @@ def main():
         check('it shows two pictures', bool(r['left_lbl'].cget('image')) and bool(r['right_lbl'].cget('image')))
         check('the status line says which pair', 'pair 1 of' in r['info']['text'], r['info']['text'])
         check('the keys are bound', bool(r['win'].bind('1')) and bool(r['win'].bind('<Escape>')))
+        # a picture is fitted to its cell, never stretched past its own size, and refits when the window shrinks
+        im = r['left_lbl'].image
+        check('the picture fits its cell', im is not None and im.width() <= r['left_lbl'].winfo_width(),
+              (im.width() if im else None, r['left_lbl'].winfo_width()))
+        check('and is never upscaled past the file', im is not None and im.width() <= 1024,
+              im.width() if im else None)
+        r['win'].state('normal')
+        r['win'].geometry('760x520+40+40')
+        for _ in range(20):
+            root.update(); time.sleep(0.05)
+        small = r['left_lbl'].image
+        from PIL import Image as _PILImage
+        with _PILImage.open(r['left_lbl'].source) as src:
+            src_w = src.width
+        check('resizing refits the picture to the new cell, without upscaling past the file',
+              small is not None and small.width() != im.width()
+              and small.width() <= min(r['left_lbl'].winfo_width(), src_w),
+              (small.width() if small else None, im.width() if im else None,
+               r['left_lbl'].winfo_width(), src_w))
         left, right = r['pair']
         first_left = left
         state_key = r['state']['key']
@@ -1561,6 +1597,27 @@ def main():
     app._recycle_files = real_recycle
     app.select_folder(None); root.update()
 
+    print('\n-- clips open in a player that exists, not in a broken association')
+    forced = zui.App.find_player()
+    check('a real player is found on this machine', bool(forced), forced)
+    check('and it is not the AppX Media Player', bool(forced) and 'MediaPlayer' not in forced[0], forced)
+    launched = []
+    import winproc
+    real_launch = winproc.launch
+    winproc.launch = lambda cmd, **kw: launched.append(cmd) or type('P', (), {'pid': 1})()
+    clip = app._files[0].with_suffix('.mp4')
+    clip.write_bytes(b'not really a clip')          # only the launch path is under test here
+    who = app._open_clip(clip, video=True)
+    check('opening a clip launches that player with the file',
+          bool(launched) and launched[0][-1] == str(clip) and launched[0][0] == forced[0],
+          launched)
+    check('and the caller learns which player opened it', who == Path(forced[0]).stem, who)
+    winproc.launch = real_launch
+    # with no player installed the app falls back to the Windows association instead of failing
+    fallback = zui.App.find_player(exists=lambda p: False)
+    check('with no player installed it defers to the default app', fallback is None, fallback)
+    clip.unlink()
+
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
     app.clip_btn.invoke(); root.update()
@@ -1583,8 +1640,9 @@ def main():
     clip_file = tmp / '20261025-clip_00001_.mp4'
     clip_file.write_bytes(b'\x00' * 64)
     opened = []
-    real_open = zui.zg.open_output
-    zui.zg.open_output = lambda p: opened.append(str(p)) or True
+    import winproc as _wp
+    real_open = _wp.launch
+    _wp.launch = lambda cmd, **kw: opened.append(list(cmd)) or type('P', (), {'pid': 1})()
     app.engine.events.put(('clip', {'clip': str(tmp / '2026-clip.webp'), 'mp4': str(clip_file),
                                     'frames': 49, 'seconds': 2.04, 'wall_s': 109.7,
                                     'vram_peak_mib': 9732, 'mp4_seconds': 1.4,
@@ -1592,13 +1650,14 @@ def main():
     app._poll(); root.update()
     check('a finished clip says so', 'clip done' in app.status['text'], app.status['text'])
     check('and names the file it opened', clip_file.name in app.hint['text'], app.hint['text'])
-    check('the MP4 is what gets opened', opened == [str(clip_file)], str(opened))
+    check('the MP4 is what gets opened, in a player', len(opened) == 1 and opened[0][-1] == str(clip_file),
+          str(opened))
     check('Open clip becomes available', 'disabled' not in app.clip_open_btn.state())
     check('the button is released again', 'disabled' not in app.clip_btn.state())
     opened.clear()
     app.clip_open_btn.invoke(); root.update()
-    check('Open clip reopens the same file', opened == [str(clip_file)], str(opened))
-    zui.zg.open_output = real_open
+    check('Open clip reopens the same file', len(opened) == 1 and opened[0][-1] == str(clip_file), str(opened))
+    _wp.launch = real_open
 
     # a WebP must go to the browser, never to the media player: that handoff is what says "corrupt or unsupported"
     opened.clear()
