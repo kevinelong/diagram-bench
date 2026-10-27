@@ -190,6 +190,40 @@ pixels moved, the bicycle stays coherent across the clip - no warping, no limb d
 704x704 / 24 fps / 49 frames / 2.04 s, and 1280x704 / 121 frames / 5.04 s.
 CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt "the camera drifts left"`.
 
+## Folders by prompt, without touching the disk
+
+A gallery of 1,800 renders is a list of timestamps. **folders** (top right of the strip) derives the scene groups from
+the prompt text in the sidecars - no image is decoded, no model runs, nothing is written - and shows them as chips:
+`all`, then the biggest few, then **more…** for the rest. Selecting a chip filters the strip to that folder.
+
+**What it uses, and what it deliberately does not.** Prompt text only. Two renders of the same scene at different seeds,
+styles, strengths or quantisations share a prompt and belong together; two renders of different scenes do not, however
+similar their pixels. The test that pins this writes one prompt onto three of the oldest pictures and asserts they land
+in one folder.
+
+**How the grouping was chosen, on evidence** (2026-10-27):
+- plain token overlap **over-merges**: these prompts run to ~70 tokens of shared scaffolding, their nearest-neighbour
+  similarity has a median of **0.96**, and at threshold 0.6 the 679 distinct prompts still collapse into 164 groups with
+  a 144-image lump.
+- **idf weighting** - down-weighting words that are common *in this corpus* - separates a labelled set of six scenes x
+  six phrasings at **precision 1.00 / recall 1.00**; a rare-tokens-only version scores 0.00.
+- **idf must come from the corpus, never from the pair being compared**: over two documents a shared token has df=2 and
+  a unique one df=1, so sharing is penalised and a rephrased prompt scores ~0.20 against its own original. That bug is
+  in the history; the module now fits a lexicon once and reuses it.
+- **synonym-aware matching closes the last gap**: the rephrase button swaps words on purpose ("brickwork" -> "masonry"),
+  so each token also contributes its dictionary synonyms at weight 0.45. With that, four rephrase turns keep every
+  scene in one folder.
+
+**What you see on load:** the newest 18 pictures stay **ungrouped and in date order** for immediate work, while the
+grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). Folders are ordered oldest first, a
+folder needs at least two pictures so a one-off is not dressed up as a category, and a picture with no prompt is never
+folded - nothing can be said about it.
+
+**Measured on the real gallery:** 1,810 pictures -> **56 folders**, 1,732 folded, 18 recent untouched, 60 ungrouped,
+**0.5 s** of background work, folder sizes 303 / 196 / 154 / 142 / 100 / 68 / 64 / 56 / 53 / 42. Folder names are the
+oldest member's opening sentence, elided - never invented, and occasionally a fragment, which is the honest cost of
+naming a folder from a 70-token prompt.
+
 ## Where the evidence lives
 
 - **`RESULTS-*.md`** — one per experiment: the table, the predictions, the corrections, and what the run does *not*

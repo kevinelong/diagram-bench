@@ -675,8 +675,19 @@ class App:
         gal.grid(row=0, column=0, sticky='nsew')
         self.gal = gal
         gal.columnconfigure(0, weight=1)
-        self.gal_title = ttk.Label(gal, text='Recent (%d)' % RECENT_N)
-        self.gal_title.grid(row=0, column=0, columnspan=2, sticky='w')
+        self.group_var = tk.BooleanVar(value=False)
+        self._plan = None                 # the grouping plan, when computed
+        self._active_folder = None        # index into self._plan['groups'], or None for everything
+        self._grouping = False
+        self.folder_bar = ttk.Frame(gal)
+        self.folder_bar.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(4, 0))
+        self.folder_bar.grid_remove()
+        # title and the folders switch share one row *and one column*, so the strip cannot gain a third column and
+        # steal width from the picture pane (it did, by 70 px, and squeezed the action bar)
+        self.title_row = ttk.Frame(gal)
+        self.title_row.grid(row=0, column=0, columnspan=2, sticky='ew')
+        self.gal_title = ttk.Label(self.title_row, text='Recent (%d)' % RECENT_N)
+        self.gal_title.pack(side='left')
         self.search_box = ttk.Entry(gal, textvariable=self.search_var, width=16)
         self._tip(self.search_box, 'Search file names, prompts, styles, models, seeds and steps.')
         self.search_box.grid(row=1, column=0, sticky='ew', pady=(3, 0))
@@ -684,9 +695,12 @@ class App:
         self.starred_chk = ttk.Checkbutton(gal, text='\u2605 only', variable=self.starred_only,
                                            command=self.refresh_gallery)
         self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
+        self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
+                                         command=self.toggle_groups)
+        self.group_chk.pack(side='right')
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = ttk.Frame(gal)
-        holder.grid(row=2, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        holder.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
         # width the canvas to the grid, or tk's default width clips the last column
@@ -741,7 +755,7 @@ class App:
         self.sel_label.pack(anchor='w', pady=(3, 0))
         ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
                   foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
-        gal.rowconfigure(2, weight=1)
+        gal.rowconfigure(3, weight=1)   # the strip, below the folder bar
 
         self.rail = ttk.Frame(root, padding=(4, 12, 0, 10))
         self.rail.grid(row=0, column=0, sticky='ns')
@@ -1196,10 +1210,104 @@ class App:
         self._meta_cache[path.name] = (mtime, sidecar_mtime, blob)
         return blob
 
+    def toggle_groups(self, on=None):
+        """Turn the prompt folders on: compute them in the background, oldest first, and touch nothing on disk."""
+        want = bool(self.group_var.get()) if on is None else bool(on)
+        self.group_var.set(want)
+        if not want:
+            self._plan, self._active_folder, self._grouping = None, None, False
+            self.folder_bar.grid_remove()
+            self.refresh_gallery()
+            return
+        self._grouping = True
+        self.folder_bar.grid()
+        self._render_folder_bar()
+        threading.Thread(target=self._compute_groups, daemon=True).start()
+
+    def _compute_groups(self):
+        """Background: prompts only, no images decoded, no model, no file written."""
+        started = time.time()
+        try:
+            import group_prompts
+            rows = []
+            for path, stamp in self._scan():          # (path, mtime); the prompt lives in the sidecar
+                meta = read_meta(path) or {}
+                rows.append({'path': str(path), 'prompt': meta.get('prompt') or '',
+                             'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds')})
+            plan = group_prompts.plan(rows)
+            plan['seconds'] = round(time.time() - started, 2)
+            self.ui_events.put(('groups', plan))
+        except Exception as e:
+            self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
+
+    def _apply_plan(self, plan):
+        self._plan = plan
+        self._grouping = False
+        self._active_folder = None
+        self._render_folder_bar()
+        self.refresh_gallery()
+        self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
+                              % (len(plan['groups']), len(plan['recent']) + len(plan['groups']) and
+                                 sum(len(g['items']) for g in plan['groups']) + len(plan['ungrouped']) + len(plan['recent']),
+                                 plan.get('seconds') or 0, len(plan['recent'])))
+
+    def _render_folder_bar(self):
+        for w in self.folder_bar.winfo_children():
+            w.destroy()
+        if self._grouping:
+            ttk.Label(self.folder_bar, text='grouping prompts\u2026', foreground='#666').pack(side='left')
+            return
+        if not self._plan:
+            return
+        top = sorted(range(len(self._plan['groups'])), key=lambda i: -len(self._plan['groups'][i]['items']))[:8]
+        b = ttk.Button(self.folder_bar, text='all (%d)' % sum(len(g['items']) for g in self._plan['groups']),
+                       command=lambda: self.select_folder(None))
+        b.pack(side='left')
+        for i in top:
+            g = self._plan['groups'][i]
+            label = g['label'][:22] + ('\u2026' if len(g['label']) > 22 else '')
+            ttk.Button(self.folder_bar, text='%s (%d)' % (label, len(g['items'])),
+                       command=lambda k=i: self.select_folder(k)).pack(side='left', padx=(3, 0))
+        if len(self._plan['groups']) > len(top):
+            ttk.Button(self.folder_bar, text='more\u2026', command=self.show_folders).pack(side='left', padx=(3, 0))
+
+    def select_folder(self, index):
+        self._active_folder = index
+        self.refresh_gallery()
+
+    def show_folders(self):
+        """Every folder in a list, since the bar only has room for the biggest few."""
+        if not self._plan:
+            return
+        win = tk.Toplevel(self.root)
+        win.title('Prompt folders (%d)' % len(self._plan['groups']))
+        win.geometry('560x420')
+        box = ttk.Treeview(win, columns=('n', 'oldest'), show='tree headings', height=18)
+        box.heading('#0', text='folder')
+        box.heading('n', text='pictures')
+        box.heading('oldest', text='oldest')
+        box.column('#0', width=340)
+        box.column('n', width=70, anchor='e')
+        box.column('oldest', width=120)
+        for i, g in enumerate(self._plan['groups']):
+            box.insert('', 'end', iid=str(i), text=g['label'], values=(len(g['items']), g['oldest'][:16]))
+        box.pack(fill='both', expand=True, padx=8, pady=8)
+
+        def open_row(_=None):
+            sel = box.selection()
+            if sel:
+                self.select_folder(int(sel[0]))
+                win.destroy()
+        box.bind('<Double-1>', open_row)
+        ttk.Button(win, text='Show', command=open_row).pack(pady=(0, 8))
+
     def _visible_files(self):
         """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
         rows = self._scan()
         files = [p for p, _m in rows]
+        if self._plan and self._active_folder is not None:
+            chosen = {r['path'] for r in self._plan['groups'][self._active_folder]['items']}
+            files = [f for f in files if str(f) in chosen]
         needle = self.search_var.get().strip().lower()
         if needle:
             stamps = dict(rows)
@@ -2891,6 +2999,14 @@ class App:
                     self.hint.configure(text='prompt rewritten by the local model')
                 elif kind == 'enhance_failed':
                     self.hint.configure(text='enhance failed: %s' % payload)
+                elif kind == 'groups':
+                    # posted by _compute_groups on this queue (the engine's queue is a different one, which is why
+                    # this branch sat unreachable for a while and the plan never arrived)
+                    self._apply_plan(payload)
+                elif kind == 'groups_error':
+                    self._grouping = False
+                    self.hint.configure(text='grouping failed: %s' % payload)
+                    self._render_folder_bar()
         except queue.Empty:
             pass
         try:

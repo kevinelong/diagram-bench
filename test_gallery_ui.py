@@ -1395,6 +1395,49 @@ def main():
     app.toggle_crop_mode(False); root.update()
     app.select_file(src); app._set_base(src); root.update()
 
+    print('\n-- prompt folders: grouping is by prompt text, in the background, with no disk change')
+    import group_prompts as gpx
+    # three pictures share one prompt, one has its own; the pixels are all different, so pixel proximity must not group
+    shared = 'three women standing on a mountain top at sunrise'
+    other = 'two women kissing on a leather sofa in a warm living room'
+    # the three OLDEST files get the shared scene: the newest 18 are deliberately left ungrouped
+    for i, prompt in ((-1, shared), (-2, shared), (-3, other)):
+        sc = app._files[i].with_suffix('.json')
+        meta = json.loads(sc.read_text(encoding='utf-8'))
+        meta['prompt'] = prompt
+        sc.write_text(json.dumps(meta), encoding='utf-8')
+    listing = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*'))
+    app.toggle_groups(True)
+    for _ in range(60):
+        app._poll(); root.update(); time.sleep(0.05)
+        if app._plan:
+            break
+    check('turning folders on computes a plan in the background', bool(app._plan),
+          'hint=%r grouping=%s' % (app.hint['text'][:120], app._grouping))
+    after = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*'))
+    check('and writes nothing to disk', listing == after)
+    if app._plan:
+        labels = [g['label'] for g in app._plan['groups']]
+        sizes = [len(g['items']) for g in app._plan['groups']]
+        check('it found the shared scene as one folder', any(l.startswith('three women') for l in labels),
+              str(labels[:3]))
+        check('with both of its pictures', any(len(g['items']) >= 2 and g['label'].startswith('three women')
+                                               for g in app._plan['groups']), sizes)
+        check('the plan is built from prompts, not pixels', app._plan['threshold'] == gpx.DEFAULT_THRESHOLD)
+        check('the folder bar shows chips once the plan exists',
+              len(app.folder_bar.winfo_children()) > 0, len(app.folder_bar.winfo_children()))
+        idx = next(i for i, g in enumerate(app._plan['groups']) if g['label'].startswith('three women'))
+        app.select_folder(idx); root.update()
+        visible = {f.name for f in app._visible_files()}
+        chosen = {Path(r['path']).name for r in app._plan['groups'][idx]['items']}
+        check('selecting a folder filters the strip to it', visible and visible <= chosen,
+              '%d visible, %d chosen' % (len(visible), len(chosen)))
+        app.select_folder(None); root.update()
+        check('clearing the selection shows everything again', len(app._visible_files()) >= len(chosen))
+    app.toggle_groups(False)
+    check('turning folders off drops the plan', app._plan is None and not app.folder_bar.winfo_ismapped())
+    app.refresh_gallery(); root.update()
+
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
     app.clip_btn.invoke(); root.update()
