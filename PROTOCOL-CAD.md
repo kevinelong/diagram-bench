@@ -62,5 +62,11 @@ comparing them on the overlap (`schematic`, `blueprint`, `flowchart`) is require
 
 The instrument extends the same way the LLM track extended to nine batteries: **frame-level scoring plus temporal
 consistency** - OCR and structure checks on sampled frames, trace metrics per frame, and a *continuity* measure
-(does an object's identity survive between frames?). That is a separate protocol revision, declared when the first
-animated asset is attempted, not bolted on now.
+(does an object's identity survive between frames?).
+
+**Built 2026-10-27 and measured on a fixture** (`a4_fixture.py` + `a4_check.py`, `PIN-20261021.md`): three frames out of
+`blender -b` + Grease Pencil as SVG, scored on structure, RapidOCR legibility and continuity, all passing. Three facts
+about that exporter are now recorded there rather than guessed: it ignores the camera and projects through a fixed
+perspective view (measured with a homography, residual 0.000 px), it crops to the drawing's bounds, and it writes stroke
+ribbons rather than centrelines. What is still missing before an animated *asset* can be scored: a frame sampler for a
+longer clip, and a continuity metric that survives a camera move (the fixture's objects only translate).

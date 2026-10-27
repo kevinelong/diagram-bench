@@ -274,6 +274,16 @@ characters.
 Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
 pane 846 px - the picture keeps the majority, which it did not before.
 
+## Blender frames: the fixture that proves the animated path
+
+`a4_fixture.py` (run inside Blender's own interpreter) writes **one SVG per frame** plus a single animatable SVG, and
+`a4_check.py` scores the output: shared canvas, axis-aligned border, equal squares, a horizontal connector, **both
+labels read back by RapidOCR on every frame**, and the moving square travelling exactly 69 px per frame with the START
+label riding it. Two exporter facts are measured inside the fixture rather than assumed - it ignores the camera and
+projects through a fixed **perspective** view (so the fixture fits a homography to nine probe strokes, residual
+0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
+first answers are in [PIN-20261021.md](PIN-20261021.md).
+
 ## The window takes the host's size and colours
 
 The window opens **maximised**, confirmed after it is mapped (`state('zoomed')` is silently ignored on some Tk/Windows

@@ -52,7 +52,8 @@ FRAMES = [1, 2, 3]
 HALF = 1.0                       # half-size of both squares
 LABEL_SIZE = 0.95                # label height, scene units
 CENTER = (0.5, 0.0)              # centre of the drawing
-BORDER = (10.0, 7.0)             # static border, scene units, pins the export crop
+BORDER = (13.0, 8.0)             # static border, scene units; it must contain every frame's content, because
+                                 # the exporter crops to the drawing and a moving label would then shift the canvas
 PROJ_SCALE = 46.0                # output pixels per scene unit
 RADIUS = {'border': 0.02, 'block': 0.035, 'end': 0.035, 'link': 0.025,
           'label_start': 0.022, 'label_end': 0.022}
