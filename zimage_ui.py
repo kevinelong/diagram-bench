@@ -1263,6 +1263,7 @@ class App:
         b = ttk.Button(self.folder_bar, text='all (%d)' % sum(len(g['items']) for g in self._plan['groups']),
                        command=lambda: self.select_folder(None))
         b.pack(side='left')
+        ttk.Button(self.folder_bar, text='A/B review\u2026', command=self.review_start).pack(side='left', padx=(6, 0))
         for i in top:
             g = self._plan['groups'][i]
             label = g['label'][:22] + ('\u2026' if len(g['label']) > 22 else '')
@@ -1300,6 +1301,155 @@ class App:
                 win.destroy()
         box.bind('<Double-1>', open_row)
         ttk.Button(win, text='Show', command=open_row).pack(pady=(0, 8))
+
+
+    # -- paired A/B review of one folder --------------------------------------------------------------
+    def review_start(self, index=None):
+        """Review the selected folder (or the biggest one) as most-similar-first A/B pairs, full screen."""
+        if not self._plan:
+            self.hint.configure(text='turn folders on first - A/B review works inside a prompt folder')
+            return
+        if index is None:
+            index = self._active_folder
+        if index is None:
+            index = max(range(len(self._plan['groups'])), key=lambda i: len(self._plan['groups'][i]['items']))
+        group = self._plan['groups'][index]
+        paths = [r['path'] for r in group['items']]
+        if len(paths) < 2:
+            self.hint.configure(text='that folder has only one picture - nothing to pair')
+            return
+        self.status.configure(text='preparing %d pairs from %s\u2026' % (len(paths) // 2, group['label'][:28]))
+        self.update_idletasks() if hasattr(self, 'update_idletasks') else None
+        self.root.update_idletasks()
+
+        def work():
+            try:
+                import pair_review
+                key = pair_review.state_key(paths)
+                state = pair_review.load_state(key)
+                pair_review.build(paths, state, hash_store=pair_review.STATE_DIR / ('%s-hashes.json' % key))
+                pair_review.save_state(state)
+                self.ui_events.put(('review_ready', (group['label'], state)))
+            except Exception as e:
+                self.ui_events.put(('review_error', '%s: %s' % (type(e).__name__, e)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def review_open(self, label, state):
+        """The comparison window: left and right, three decisions, and a way out that keeps the progress."""
+        import pair_review
+        if getattr(self, '_review', None) is not None and self._review.get('win') and self._review['win'].winfo_exists():
+            self._review['win'].lift()
+            return
+        win = tk.Toplevel(self.root)
+        win.title('A/B review - %s' % label[:50])
+        try:
+            win.state('zoomed')
+        except Exception:
+            win.geometry('%dx%d+0+0' % (self.root.winfo_screenwidth(), self.root.winfo_screenheight()))
+        win.configure(background='#111')
+        win.columnconfigure(0, weight=1)
+        win.columnconfigure(1, weight=1)
+        win.rowconfigure(0, weight=1)
+        left_lbl = tk.Label(win, background='#111', foreground='#ddd', compound='center')
+        right_lbl = tk.Label(win, background='#111', foreground='#ddd', compound='center')
+        left_lbl.grid(row=0, column=0, sticky='nsew', padx=(6, 3), pady=6)
+        right_lbl.grid(row=0, column=1, sticky='nsew', padx=(3, 6), pady=6)
+        bar = ttk.Frame(win)
+        bar.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 8))
+        for c in range(4):
+            bar.columnconfigure(c, weight=1)
+        info = ttk.Label(bar, text='', anchor='center')
+        info.grid(row=0, column=0, columnspan=4, sticky='ew', pady=(0, 4))
+        b_left = ttk.Button(bar, text='Delete left  (1)', command=lambda: self.review_decide('delete_left'))
+        b_keep = ttk.Button(bar, text='Keep both  (2)', command=lambda: self.review_decide('keep_both'))
+        b_right = ttk.Button(bar, text='Delete right  (3)', command=lambda: self.review_decide('delete_right'))
+        b_stop = ttk.Button(bar, text='Stop  (Esc)', command=self.review_stop)
+        for i, b in enumerate((b_left, b_keep, b_right, b_stop)):
+            b.grid(row=1, column=i, sticky='ew', padx=4)
+        self._review = {'win': win, 'state': state, 'left_lbl': left_lbl, 'right_lbl': right_lbl, 'info': info,
+                        'pair': None, 'deleted': 0, 'queue': None, 'path': None}
+        for key, fn in (('1', lambda: self.review_decide('delete_left')),
+                        ('2', lambda: self.review_decide('keep_both')),
+                        ('3', lambda: self.review_decide('delete_right')),
+                        ('<Escape>', self.review_stop),
+                        ('<Left>', lambda: self.review_decide('delete_left')),
+                        ('<Right>', lambda: self.review_decide('delete_right')),
+                        ('<space>', lambda: self.review_decide('keep_both'))):
+            win.bind(key, lambda e, f=fn: (f(), 'break')[1])
+        win.protocol('WM_DELETE_WINDOW', self.review_stop)
+        self._review_show_next()
+
+    def _review_show_next(self):
+        import pair_review
+        from PIL import ImageTk
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        queue = pair_review.remaining(r['state'])
+        if r['queue'] is None or not queue:
+            r['queue'] = queue
+        queue = r['queue']
+        decided, total, deletes = pair_review.progress(r['state'])
+        if not queue:
+            r['info'].configure(text='done - %d pairs decided, %d deleted. Close this window.' % (decided, total))
+            for w in (r['left_lbl'], r['right_lbl']):
+                w.configure(image='', text='')
+            return
+        a, b, dist = queue[0]
+        r['pair'] = (a, b)
+        screen_w = max(600, self.root.winfo_screenwidth() // 2 - 30)
+        screen_h = max(400, self.root.winfo_screenheight() - 140)
+        for lbl, path in ((r['left_lbl'], a), (r['right_lbl'], b)):
+            try:
+                with Image.open(path) as im:
+                    im = im.convert('RGB')
+                    im.thumbnail((screen_w, screen_h), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(im)
+                lbl.configure(image=photo, text='')
+                lbl.image = photo
+            except Exception as e:
+                lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+        r['info'].configure(text='pair %d of %d \u00b7 %d deleted \u00b7 similarity distance %d \u00b7 '
+                                 '%s | %s' % (decided + 1, total, deletes, dist,
+                                              Path(a).name[:34], Path(b).name[:34]))
+
+    def review_decide(self, choice):
+        import pair_review
+        r = getattr(self, '_review', None)
+        if not r or not r.get('pair'):
+            return
+        a, b = r['pair']
+        to_delete = pair_review.decide(r['state'], a, b, choice)
+        if to_delete:
+            try:
+                self._recycle_files([Path(to_delete), Path(to_delete).with_suffix('.json'),
+                                     Path(to_delete).parent / THUMB_DIR / (Path(to_delete).stem + '.jpg')])
+                r['deleted'] = r.get('deleted', 0) + 1
+            except Exception as e:
+                self.hint.configure(text='could not delete %s: %s' % (Path(to_delete).name, e))
+        pair_review.save_state(r['state'])
+        r['pair'] = None
+        if r['queue']:
+            r['queue'] = r['queue'][1:]
+        self._review_show_next()
+
+    def review_stop(self, event=None):
+        import pair_review
+        r = getattr(self, '_review', None)
+        if not r:
+            return 'break'
+        pair_review.save_state(r['state'])
+        decided, total, deletes = pair_review.progress(r['state'])
+        try:
+            r['win'].destroy()
+        except Exception:
+            pass
+        self._review = None
+        self.refresh_gallery()
+        self._render_folder_bar()
+        self.status.configure(text='A/B review stopped: %d of %d pairs decided, %d deleted - progress saved'
+                              % (decided, total, deletes))
+        return 'break'
 
     def _visible_files(self):
         """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
@@ -3003,6 +3153,12 @@ class App:
                     # posted by _compute_groups on this queue (the engine's queue is a different one, which is why
                     # this branch sat unreachable for a while and the plan never arrived)
                     self._apply_plan(payload)
+                elif kind == 'review_ready':
+                    self.status.configure(text='pairing ready')
+                    self.review_open(payload[0], payload[1])
+                elif kind == 'review_error':
+                    self.hint.configure(text='A/B review failed: %s' % payload)
+                    self.status.configure(text='ready')
                 elif kind == 'groups_error':
                     self._grouping = False
                     self.hint.configure(text='grouping failed: %s' % payload)

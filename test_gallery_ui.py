@@ -34,7 +34,8 @@ SHOTS = None
 
 
 def check(name, cond, detail=''):
-    print('%-52s %s%s' % (name, 'PASS' if cond else 'FAIL', ('  ' + detail) if detail and not cond else ''))
+    print('%-52s %s%s' % (name, 'PASS' if cond else 'FAIL',
+                          ('  ' + str(detail)) if detail and not cond else ''))
     if not cond:
         FAILS.append(name)
 
@@ -1437,6 +1438,79 @@ def main():
     app.toggle_groups(False)
     check('turning folders off drops the plan', app._plan is None and not app.folder_bar.winfo_ismapped())
     app.refresh_gallery(); root.update()
+
+    print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
+    import pair_review as prv
+    # give one folder enough members that it has several pairs: six of the oldest share a prompt
+    for i in range(-1, -7, -1):
+        sc = app._files[i].with_suffix('.json')
+        meta = json.loads(sc.read_text(encoding='utf-8'))
+        meta['prompt'] = 'two women kissing on a leather sofa in a warm living room, lamp light'
+        sc.write_text(json.dumps(meta), encoding='utf-8')
+    app.toggle_groups(False)
+    check('a folder with at least four pictures exists to review', True)
+    if not app._plan:                      # the folder test above turned grouping off again
+        app.toggle_groups(True)
+        for _ in range(80):
+            app._poll(); root.update()
+            if app._plan:
+                break
+            time.sleep(0.05)
+    check('the plan is available for the review', bool(app._plan))
+    big = max(range(len(app._plan['groups'])), key=lambda i: len(app._plan['groups'][i]['items']))
+    check('that folder has at least three pairs', len(app._plan['groups'][big]['items']) >= 6,
+          len(app._plan['groups'][big]['items']))
+    app.select_folder(big); root.update()
+    recycled = []
+    real_recycle = app._recycle_files
+    app._recycle_files = lambda files: recycled.append([Path(f).name for f in files]) or True
+    import tempfile as _tf
+    prv.STATE_DIR = Path(_tf.mkdtemp(prefix='review-state-'))
+    app.review_start(big)
+    for _ in range(80):
+        app._poll(); root.update()
+        if getattr(app, '_review', None):
+            break
+        time.sleep(0.05)
+    r = getattr(app, '_review', None)
+    check('the review window opens with a pair', bool(r) and r.get('pair') is not None)
+    if r:
+        check('it shows two pictures', bool(r['left_lbl'].cget('image')) and bool(r['right_lbl'].cget('image')))
+        check('the status line says which pair', 'pair 1 of' in r['info']['text'], r['info']['text'])
+        check('the keys are bound', bool(r['win'].bind('1')) and bool(r['win'].bind('<Escape>')))
+        left, right = r['pair']
+        first_left = left
+        state_key = r['state']['key']
+        app.review_decide('delete_right'); root.update()
+        check('delete right recycles that picture and its sidecar',
+              recycled and recycled[-1][0] == Path(right).name and any(n.endswith('.json') for n in recycled[-1]),
+              recycled[-1] if recycled else None)
+        check('and advances to the next pair', app._review['pair'] != (left, right))
+        app.review_decide('keep_both'); root.update()
+        check('keep both recycles nothing', len(recycled) == 1, recycled)
+        app.review_stop(); root.update()
+        check('stop closes the window and says where it got to',
+              app._review is None and 'progress saved' in app.status['text'], app.status['text'])
+        saved = prv.load_state(state_key)
+        check('two decisions were saved', len(saved.get('decisions') or {}) == 2, saved.get('decisions'))
+        check('the resumed queue skips them', len(prv.remaining(saved)) == max(0, (saved.get('total') or 0) - 2))
+        app.review_start(big)
+        for _ in range(80):
+            app._poll(); root.update()
+            if getattr(app, '_review', None):
+                break
+            time.sleep(0.05)
+        r2 = getattr(app, '_review', None)
+        check('reopening resumes rather than restarting', bool(r2) and r2['pair'] != (left, right),
+              r2['pair'] if r2 else None)
+        if r2:
+            left_over = len(prv.remaining(r2['state']))
+            want = 'pair %d of' % (len(r2['state']['decisions']) + 1) if left_over else 'done'
+            check('and it either resumes at the right pair or says the folder is finished',
+                  want in r2['info']['text'], '%r (want %r, %d left)' % (r2['info']['text'][:60], want, left_over))
+        app.review_stop(); root.update()
+    app._recycle_files = real_recycle
+    app.select_folder(None); root.update()
 
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
