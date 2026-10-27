@@ -702,6 +702,7 @@ class App:
         self.starred_chk = ttk.Checkbutton(gal, text='\u2605 only', variable=self.starred_only,
                                            command=self.refresh_gallery)
         self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
+
         self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
                                          command=self.toggle_groups)
         self.group_chk.pack(side='left', padx=(8, 0))
@@ -772,6 +773,15 @@ class App:
         self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
         self.star_btn = ttk.Button(btns, text='\u2605 Star', command=self.toggle_star)
         self.star_btn.pack(fill='x', pady=(6, 0))
+        sortrow = ttk.Frame(btns)
+        sortrow.pack(fill='x', pady=(6, 0))
+        ttk.Label(sortrow, text='order', foreground='#666').pack(side='left')
+        # wins travel with the picture, so "Wins" is a stable order across folders and restarts
+        self.sort_var = tk.StringVar(value='Recent')
+        self.sort_cb = ttk.Combobox(sortrow, state='readonly', width=8, values=['Recent', 'Wins'],
+                                    textvariable=self.sort_var)
+        self.sort_cb.pack(side='left', padx=(4, 0))
+        self.sort_cb.bind('<<ComboboxSelected>>', lambda e: self._resort())
         self.log_btn = ttk.Button(btns, text='Run log', command=self.show_run_log)
         self.log_btn.pack(fill='x', pady=(3, 0))
         self.collapse_btn = ttk.Button(btns, text='Hide gallery \u00ab', command=lambda: self.set_sidebar(False))
@@ -1331,6 +1341,10 @@ class App:
         self._active_folder = index
         self._content_shown = BATCH_CONTENTS
         self._render_contents()
+        try:
+            self.contents_canvas.yview_moveto(0)
+        except Exception:
+            pass
         if getattr(self, 'folder_cb', None) is not None and self._plan:
             try:
                 if index is None:
@@ -1427,21 +1441,30 @@ class App:
             bar.columnconfigure(c, weight=1)
         info = ttk.Label(bar, text='', anchor='center')
         info.grid(row=0, column=0, columnspan=4, sticky='ew', pady=(0, 4))
-        b_left = ttk.Button(bar, text='Delete left  (1)', command=lambda: self.review_decide('delete_left'))
-        b_keep = ttk.Button(bar, text='Keep both  (2)', command=lambda: self.review_decide('keep_both'))
-        b_right = ttk.Button(bar, text='Delete right  (3)', command=lambda: self.review_decide('delete_right'))
+        mode_row = ttk.Frame(bar)
+        mode_row.grid(row=1, column=0, columnspan=4, sticky='ew', pady=(0, 3))
+        self._review_mode = tk.StringVar(value='rank')
+        ttk.Radiobutton(mode_row, text='Rank - mark a winner, delete nothing', value='rank',
+                        variable=self._review_mode, command=self._review_relabel).pack(side='left')
+        ttk.Radiobutton(mode_row, text='Delete - recycle the loser', value='delete',
+                        variable=self._review_mode, command=self._review_relabel).pack(side='left', padx=(12, 0))
+        ttk.Button(mode_row, text='Reset wins in this folder', command=self._review_reset).pack(side='right')
+        b_left = ttk.Button(bar, text='Left wins  (1)', command=lambda: self.review_decide('left'))
+        b_keep = ttk.Button(bar, text='Tie  (2)', command=lambda: self.review_decide('middle'))
+        b_right = ttk.Button(bar, text='Right wins  (3)', command=lambda: self.review_decide('right'))
         b_stop = ttk.Button(bar, text='Stop  (Esc)', command=self.review_stop)
         for i, b in enumerate((b_left, b_keep, b_right, b_stop)):
-            b.grid(row=1, column=i, sticky='ew', padx=4)
+            b.grid(row=2, column=i, sticky='ew', padx=4)
         self._review = {'win': win, 'state': state, 'left_lbl': left_lbl, 'right_lbl': right_lbl, 'info': info,
-                        'pair': None, 'deleted': 0, 'queue': None, 'path': None}
-        for key, fn in (('1', lambda: self.review_decide('delete_left')),
-                        ('2', lambda: self.review_decide('keep_both')),
-                        ('3', lambda: self.review_decide('delete_right')),
+                        'pair': None, 'deleted': 0, 'queue': None, 'path': None,
+                        'buttons': (b_left, b_keep, b_right)}
+        for key, fn in (('1', lambda: self.review_decide('left')),
+                        ('2', lambda: self.review_decide('middle')),
+                        ('3', lambda: self.review_decide('right')),
                         ('<Escape>', self.review_stop),
-                        ('<Left>', lambda: self.review_decide('delete_left')),
-                        ('<Right>', lambda: self.review_decide('delete_right')),
-                        ('<space>', lambda: self.review_decide('keep_both'))):
+                        ('<Left>', lambda: self.review_decide('left')),
+                        ('<Right>', lambda: self.review_decide('right')),
+                        ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
         self._review_show_next()
@@ -1468,6 +1491,37 @@ class App:
             lbl.image = photo
         except Exception as e:
             lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+
+    def _review_relabel(self):
+        """Rank mode marks a winner; delete mode recycles a file. The buttons say which is which."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        left, middle, right = r['buttons']
+        if self._review_mode.get() == 'rank':
+            left.configure(text='Left wins  (1)')
+            middle.configure(text='Tie  (2)')
+            right.configure(text='Right wins  (3)')
+        else:
+            left.configure(text='Delete left  (1)')
+            middle.configure(text='Keep both  (2)')
+            right.configure(text='Delete right  (3)')
+        self._review_show_next()
+
+    def _review_reset(self):
+        """Zero the record for this folder only - the one explicit way to start a comparison over."""
+        import pair_rank
+        r = getattr(self, '_review', None)
+        if not r or not self._plan:
+            return
+        group = self._plan['groups'][self._active_folder] if self._active_folder is not None else None
+        paths = [it['path'] for it in (group['items'] if group else self._files)]
+        n = pair_rank.reset_wins(paths)
+        r['state']['decisions'] = {}
+        r['queue'] = None
+        r['deleted'] = 0
+        self.hint.configure(text='cleared the record on %d pictures - comparisons start from zero' % n)
+        self._review_show_next()
 
     def _review_show_next(self):
         import pair_review
@@ -1511,10 +1565,32 @@ class App:
 
     def review_decide(self, choice):
         import pair_review
+        import pair_rank
         r = getattr(self, '_review', None)
         if not r or not r.get('pair'):
             return
         a, b = r['pair']
+        # the buttons say left/middle/right; the mode decides what that means
+        if choice in ('left', 'middle', 'right'):
+            rank = getattr(self, '_review_mode', None) and self._review_mode.get() == 'rank'
+            choice = {('left', True): 'left_wins', ('middle', True): 'tie', ('right', True): 'right_wins',
+                      ('left', False): 'delete_left', ('middle', False): 'keep_both',
+                      ('right', False): 'delete_right'}[(choice, rank)]
+        if choice in pair_rank.WIN_CHOICES:
+            winner = {'left_wins': a, 'right_wins': b}.get(choice)
+            to_delete = pair_rank.record(r['state'], a, b, choice)
+            if winner:
+                rec = pair_rank.record_of(winner)
+                self.hint.configure(text='%s now %dW-%dL (rank %d)' % (
+                    Path(winner).name, rec['wins'], rec['losses'], int(rec['wins'])))
+            else:
+                self.hint.configure(text='tie recorded')
+            pair_review.save_state(r['state'])
+            r['pair'] = None
+            if r['queue']:
+                r['queue'] = r['queue'][1:]
+            self._review_show_next()
+            return
         to_delete = pair_review.decide(r['state'], a, b, choice)
         if to_delete:
             try:
@@ -1546,6 +1622,32 @@ class App:
         self.status.configure(text='A/B review stopped: %d of %d pairs decided, %d deleted - progress saved'
                               % (decided, total, deletes))
         return 'break'
+
+    def _scroll_pos(self, canvas):
+        try:
+            return canvas.yview()[0]
+        except Exception:
+            return 0.0
+
+    def _restore_scroll(self, canvas, pos):
+        """Put a list back where the reader left it. Selecting in one column must not scroll another."""
+        if not pos:
+            return
+        def restore():
+            try:
+                canvas.yview_moveto(pos)
+            except Exception:
+                pass
+        self.root.after_idle(restore)
+
+    def _sort_wins(self):
+        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'
+
+    def _resort(self):
+        self._content_shown = BATCH_CONTENTS
+        self.refresh_gallery()
+        if getattr(self, '_active_folder', None) is not None:
+            self._render_contents()
 
     def _visible_files(self):
         """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
@@ -1607,13 +1709,21 @@ class App:
             self.contents_holder.grid_remove()
             return
         group = self._plan['groups'][self._active_folder]
+        pane_pos = self._scroll_pos(self.contents_canvas)
+        self._rebuilding = True
         self.contents_holder.grid()
         for w in self.contents.winfo_children():
             w.destroy()
         self._content_widgets = {}
         cols = max(1, (CONTENTS_W - 12) // (RECENT_PX + 6))
-        thumbs = thumbs_for([r['path'] for r in group['items']])
-        for i, row in enumerate(group['items'][:self._content_shown]):
+        items = list(group['items'])
+        if self._sort_wins():
+            import pair_rank
+            order = pair_rank.sort_by_wins([r['path'] for r in items])
+            pos = {p: i for i, p in enumerate(order)}
+            items.sort(key=lambda r: pos.get(r['path'], len(items)))
+        thumbs = thumbs_for([r['path'] for r in items])
+        for i, row in enumerate(items[:self._content_shown]):
             tp = thumbs.get(row['path'])
             if not tp:
                 continue
@@ -1623,16 +1733,32 @@ class App:
                     photo = ImageTk.PhotoImage(im)
             except Exception:
                 continue
-            lab = self._tile_widget(self.contents, row['path'], photo)
-            lab.grid(row=i // cols, column=i % cols, padx=1, pady=1)
+            cell = ttk.Frame(self.contents)
+            cell.grid(row=i // cols, column=i % cols, padx=1, pady=1)
+            lab = self._tile_widget(cell, row['path'], photo)
+            lab.pack()
+            try:
+                import pair_rank
+                mark = pair_rank.badge(row['path'])
+            except Exception:
+                mark = ''
+            if mark:
+                ttk.Label(cell, text=mark, font=('Segoe UI', 7), foreground='#1a6b2a').pack()
             self._content_widgets[Path(row['path'])] = lab
-        self.contents_canvas.yview_moveto(0)
+        self._rebuilding = False
+        self.root.after_idle(self._on_contents_resize)
+        if pane_pos:
+            self._restore_scroll(self.contents_canvas, pane_pos)
+        else:
+            self.contents_canvas.yview_moveto(0)
 
     def _on_strip_scrollbar(self, *args):
         self.gal_canvas.yview(*args)
         self._maybe_more('strip')
 
     def _on_contents_resize(self, event=None):
+        if getattr(self, '_rebuilding', False):
+            return
         box = self.contents_canvas.bbox('all')
         if box:
             self.contents_canvas.configure(scrollregion=box)
@@ -1685,7 +1811,8 @@ class App:
             pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background='#1b1b1b')
             pic.image = photo
             pic.pack()
-            title = tk.Label(tile, text=group['label'], wraplength=sheet_px - 4, justify='left',
+            title = tk.Label(tile, text=group.get('title') or group['label'], wraplength=sheet_px - 4,
+                             justify='left',
                              anchor='w', font=('Segoe UI', 8), foreground='#333')
             title.pack(fill='x', pady=(3, 0))
             meta = tk.Label(tile, text='%d pictures' % len(group['items']), anchor='w',
@@ -1706,12 +1833,24 @@ class App:
         return max(1, w // (RECENT_PX + 6))
 
     def refresh_gallery(self, select=None):
+        strip_pos = self._scroll_pos(self.gal_canvas)
+        self._rebuilding = True          # <Configure> mid-rebuild would see an empty container and clamp the view
+        try:
+            self._refresh_gallery(select)
+        finally:
+            self._rebuilding = False
+        self._restore_scroll(self.gal_canvas, strip_pos)
+
+    def _refresh_gallery(self, select=None):
         everything = self._all_files()
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
         files = self._visible_files()
+        if self._sort_wins():
+            import pair_rank
+            files = pair_rank.sort_by_wins(files)
         self._files = files
         # a search turns the strip into a result list, so it shows matches from the whole folder, not 18 of them
         filtering = bool(self.search_var.get().strip()) or bool(self.starred_only.get())
@@ -1763,7 +1902,20 @@ class App:
         self._paint()
 
     def _on_strip_resize(self, event=None):
-        """Keep the scroll region current and show the scrollbar only when the strip overflows."""
+        """Debounce: a rebuild emits a burst of <Configure> events while the container is half-built.
+
+        Applying them immediately made the scroll region collapse to a few pixels, and Tk then clamped the view to the
+        top - which is what lost the reader's place when a picture in the other column was selected.
+        """
+        if getattr(self, '_strip_job', None):
+            try:
+                self.root.after_cancel(self._strip_job)
+            except Exception:
+                pass
+        self._strip_job = self.root.after(50, self._apply_strip_resize)
+
+    def _apply_strip_resize(self):
+        self._strip_job = None
         cols = self._strip_cols()
         if cols != getattr(self, '_strip_cols_seen', None):
             self._strip_cols_seen = cols
@@ -1779,8 +1931,10 @@ class App:
         if need:
             self.gal_bar.grid()
         else:
+            # Hide the bar, but never move the view: a <Configure> arrives mid-rebuild while the tile container is
+            # momentarily a few pixels tall, and treating that as "everything fits" snapped the list back to the top
+            # (reported 2026-10-27). Tk clamps the view anyway when the content really is shorter than the viewport.
             self.gal_bar.grid_remove()
-            self.gal_canvas.yview_moveto(0)
 
     def _strip_has_focus(self):
         """True only when the keyboard is actually on the strip, not merely because a binding exists."""

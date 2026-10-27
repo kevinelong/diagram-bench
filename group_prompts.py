@@ -365,7 +365,7 @@ def label_for(prompts, members, width=60, lexicon=None):
         head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
     if not head:
         head = text
-    if len(head) > width:
+    if width and len(head) > width:
         cut = head[:width].rsplit(' ', 1)[0]
         head = (cut or head[:width]) + '\u2026'
     return head or '(no prompt recorded)'
@@ -394,8 +394,10 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             if len(members) < min_group:
                 continue
             rows = sorted((with_prompt[m] for m in members), key=lambda r: r.get('created') or '')
-            groups.append({'label': label_for(prompts, members, lexicon=lexicon), 'items': rows,
-                           'oldest': rows[0].get('created') or ''})
+            # `label` is the short form for the selector; `title` is the same sentence uncut, for the tile
+            groups.append({'label': label_for(prompts, members, lexicon=lexicon),
+                           'title': label_for(prompts, members, width=0, lexicon=lexicon),
+                           'items': rows, 'oldest': rows[0].get('created') or ''})
     grouped_paths = {r['path'] for g in groups for r in g['items']}
     leftovers = [r for r in with_prompt if r['path'] not in grouped_paths]
     groups.sort(key=lambda g: g['oldest'])

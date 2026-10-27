@@ -52,6 +52,14 @@ def make_set(root):
     return [a, b, c, d1, e1]
 
 
+def _raises(fn):
+    try:
+        fn()
+    except Exception:
+        return True
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--real', action='store_true')
@@ -112,6 +120,66 @@ def main():
         check('an unknown choice is refused', False)
     except ValueError:
         check('an unknown choice is refused', True)
+
+    print('\n-- rank mode: a win is a fact about the picture, and it survives being moved')
+    import pair_rank as rank
+    tmp2 = Path(tempfile.mkdtemp(prefix='rank-'))
+    def pic(name, prompt):
+        png = tmp2 / (name + '.png')
+        png.write_bytes(b'\x89PNG\r\n\x1a\n')
+        (tmp2 / (name + '.json')).write_text(json.dumps({'image': str(png), 'prompt': prompt, 'seed': 7}),
+                                             encoding='utf-8')
+        return str(png)
+    a = pic('a', 'a red bicycle')
+    b = pic('b', 'a blue bicycle')
+    c = pic('c', 'a green bicycle')
+    st = {'key': 'run1', 'total': 3, 'pairs': [[a, b, 0], [b, c, 1], [a, c, 2]], 'decisions': {}}
+    check('a fresh picture has no record', rank.record_of(a)['bouts'] == 0, rank.record_of(a))
+    check('a win is recorded on the winner and the loser',
+          rank.record(st, a, b, 'left_wins') is None
+          and rank.record_of(a)['wins'] == 1 and rank.record_of(b)['losses'] == 1,
+          (rank.record_of(a), rank.record_of(b)))
+    check('it deletes nothing at all', (tmp2 / 'a.png').exists() and (tmp2 / 'b.png').exists())
+    meta = json.loads((tmp2 / 'a.json').read_text(encoding='utf-8'))
+    check('the sidecar keeps the prompt and gains the record',
+          meta.get('prompt') == 'a red bicycle' and meta.get('wins') == 1 and meta.get('bouts') == 1, meta)
+    check('a win at the other side is symmetric',
+          rank.record(st, a, c, 'right_wins') is None
+          and rank.record_of(c)['wins'] == 1 and rank.record_of(a)['losses'] == 1, rank.record_of(c))
+    check('a tie counts for neither', rank.record(st, b, c, 'tie') is None
+          and rank.record_of(b)['ties'] == 1 and rank.record_of(b)['wins'] == 0, rank.record_of(b))
+    check('an unknown choice is refused', _raises(lambda: rank.record(st, a, b, 'both_win')))
+    check('the comparison is remembered so it is not asked again',
+          len(st['decisions']) == 3 and pr.remaining(st) == [], len(st['decisions']))
+
+    # ranking: wins, then rate, then fewer losses
+    for _ in range(3):
+        rank.record(st, c, a, 'left_wins')          # c: 3W 1T, a: 1W 4L
+    rank.record(st, b, a, 'left_wins')              # b: 1W 1T 1L
+    order = [Path(p_).name for p_ in rank.sort_by_wins([a, b, c])]
+    check('most wins come first', order[0] == 'c.png', order)
+    check('the tail is ordered by record', order[1] == 'b.png' and order[2] == 'a.png', order)
+    check('a badge says what a picture has done',
+          rank.badge(c).startswith('%dW' % rank.record_of(c)['wins']), (rank.badge(c), rank.record_of(c)))
+    check('an untouched picture has no badge', rank.badge(pic('d', 'uncompared')) == '', rank.badge(pic('d', 'uncompared')))
+
+    # moved to another folder: the record goes with the file, so it ranks first in its new home
+    moved = tmp2 / 'moved'
+    moved.mkdir()
+    import shutil
+    shutil.move(str(tmp2 / 'c.png'), str(moved / 'c.png'))
+    shutil.move(str(tmp2 / 'c.json'), str(moved / 'c.json'))
+    fresh_others = [pic('e', 'another scene'), pic('f', 'another scene')]
+    ranked = rank.sort_by_wins([str(moved / 'c.png')] + fresh_others)
+    check('a winner sorts first in a folder it was moved into', Path(ranked[0]).name == 'c.png',
+          [Path(x).name for x in ranked])
+
+    # an explicit reset is the only thing that clears a record
+    cleared = rank.reset_wins([str(moved / 'c.png'), a, b])
+    check('reset clears the record', rank.record_of(str(moved / 'c.png'))['bouts'] == 0, rank.record_of(str(moved / 'c.png')))
+    check('and leaves the prompt alone',
+          json.loads((moved / 'c.json').read_text(encoding='utf-8')).get('prompt') == 'a green bicycle')
+    check('reset reports what it touched', cleared == 3, cleared)
 
     print('\n-- edges')
     one = pr.load_state('one', state_dir)

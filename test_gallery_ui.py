@@ -31,6 +31,11 @@ os.environ['ZIMAGE_SETTINGS_DIR'] = tempfile.mkdtemp(prefix='zimage-settings-')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import zimage_ui as zui  # noqa: E402
+import pair_review  # noqa: E402
+
+# the A/B decisions are keyed by member names, and this suite makes the same names every run - so without this the
+# second run would find every pair already decided, in the user's real review state.
+pair_review.STATE_DIR = Path(tempfile.mkdtemp(prefix='zimage-review-'))
 
 FAILS = []
 SHOTS = None
@@ -1457,6 +1462,92 @@ def main():
     check('turning folders off drops the plan', app._plan is None and not app.folder_bar.winfo_ismapped())
     app.refresh_gallery(); root.update()
 
+    print('\n-- rank mode: mark a winner, delete nothing, and sort by what won')
+    import pair_rank as prank
+    # a folder with enough members that it has several pairs to judge
+    for i in range(-1, -7, -1):
+        sc = app._files[i].with_suffix('.json')
+        meta = json.loads(sc.read_text(encoding='utf-8'))
+        meta['prompt'] = 'two women kissing on a leather sofa in a warm living room, lamp light'
+        sc.write_text(json.dumps(meta), encoding='utf-8')
+    if app._plan:
+        app.toggle_groups(False)
+    app.toggle_groups(True)
+    for _ in range(80):
+        app._poll(); root.update()
+        if app._plan and not app._grouping:
+            break
+        time.sleep(0.05)
+    big = max(range(len(app._plan['groups'])), key=lambda i: len(app._plan['groups'][i]['items']))
+    check('the rank test has a folder with several pairs', len(app._plan['groups'][big]['items']) >= 4,
+          len(app._plan['groups'][big]['items']))
+    rec = []
+    real_recycle_rank = app._recycle_files
+    app._recycle_files = lambda files: rec.append([Path(f).name for f in files]) or True
+    app.select_folder(big); root.update()
+    app.review_start(big)
+    for _ in range(80):
+        app._poll(); root.update()
+        if getattr(app, '_review', None):
+            break
+        time.sleep(0.05)
+    r3 = getattr(app, '_review', None)
+    check('the comparison window opens in the non-destructive mode',
+          bool(r3) and app._review_mode.get() == 'rank', app._review_mode.get() if r3 else None)
+    if r3:
+        check('and the buttons say so', 'wins' in r3['buttons'][0]['text'].lower(), r3['buttons'][0]['text'])
+        left3, right3 = r3['pair']
+        was_left, was_right = prank.record_of(left3), prank.record_of(right3)
+        rec.clear()
+        app.review_decide('left'); root.update()
+        after_left, after_right = prank.record_of(left3), prank.record_of(right3)
+        check('a win is recorded on the winner', after_left['wins'] == was_left['wins'] + 1,
+              (was_left, after_left))
+        check('and on the loser as a loss', after_right['losses'] == was_right['losses'] + 1,
+              (was_right, after_right))
+        check('nothing is recycled in rank mode', rec == [], rec)
+        meta = json.loads(Path(left3).with_suffix('.json').read_text(encoding='utf-8'))
+        check('the win lives in the picture\'s own sidecar', meta.get('wins') == after_left['wins'], meta.get('wins'))
+        check('and the prompt is untouched', bool(meta.get('prompt')), meta.get('prompt'))
+        check('the hint reports the standing', 'W-' in app.hint['text'], app.hint['text'])
+
+        # switching mode keeps the same window and restores the destructive buttons
+        app._review_mode.set('delete'); app._review_relabel(); root.update()
+        check('delete mode relabels the buttons', 'delete' in app._review['buttons'][0]['text'].lower(),
+              app._review['buttons'][0]['text'])
+        pair_now = app._review['pair']
+        rec.clear()
+        app.review_decide('right'); root.update()
+        check('delete mode still recycles the right-hand file',
+              bool(rec) and bool(pair_now) and rec[-1][0] == Path(pair_now[1]).name,
+              'pair=%r rec=%r hint=%r' % (pair_now, rec, app.hint['text']))
+        app.review_stop(); root.update()
+
+        # ranking: the winner sorts first, in the strip and in the folder pane
+        winner = left3
+        app.sort_var.set('Wins'); app._resort(); root.update()
+        shown = [Path(p_).name for p_ in app._files]
+        check('sorting by wins puts the winner first', shown and shown[0] == Path(winner).name,
+              '%r winner=%s recs=%s' % (shown[:3], Path(winner).name,
+                                        [(n, prank.record_of(str(Path(app.args.out) / n)))
+                                         for n in shown[:3]]))
+        check('the winner is still in the list', Path(winner).name in shown,
+              (Path(winner).name, len(shown)))
+        app.select_folder(big); root.update(); time.sleep(0.2)
+        marks = [w.cget('text') for cell in app.contents.winfo_children()
+                 for w in cell.winfo_children() if w.winfo_class() == 'TLabel']
+        check('the folder pane shows what each picture has done', any(m.endswith('W') for m in marks),
+              'marks=%r cells=%d' % (marks[:4], len(app.contents.winfo_children())))
+        app.sort_var.set('Recent'); app._resort(); root.update()
+        check('and the default order is back', app._sort_wins() is False)
+        # an explicit reset is the only thing that clears a record
+        before = prank.record_of(winner)['bouts']
+        cleared = prank.reset_wins([winner])
+        check('reset clears the record for that picture',
+              cleared >= 1 and prank.record_of(winner)['bouts'] == 0, (before, cleared))
+    app._recycle_files = real_recycle_rank
+    app.select_folder(None); root.update()
+
     print('\n-- the folder selector and the column layout (regressions from the 2026-10-27 screenshot)')
     if not app._plan:                      # the earlier folder test turned grouping off
         app.toggle_groups(True)
@@ -1516,22 +1607,24 @@ def main():
         check('the sheet is a 3x3 of thumbnails, not one picture', pic.image.width() == pic.image.height(),
               (pic.image.width(), pic.image.height()))
         check('the full folder name is shown, wrapped rather than cut',
-              title['text'] == app._plan['groups'][0]['label'] and int(title['wraplength']) > 0
+              title['text'] == (app._plan['groups'][0].get('title') or app._plan['groups'][0]['label'])
+              and int(title['wraplength']) > 0
               and '\u2026' not in title['text'], (title['text'][:40], title['wraplength']))
         check('and the tile says how many pictures it holds',
               meta['text'].endswith('pictures'), meta['text'])
         check('the title uses the small font', '8' in str(title['font']), title['font'])
         before = len(app.recent.winfo_children())
-        tiles[1].winfo_children()[0].event_generate('<Button-1>')
+        pick = 1 if len(tiles) > 1 else 0
+        tiles[pick].winfo_children()[0].event_generate('<Button-1>')
         root.update(); time.sleep(0.2)
-        check('clicking a tile opens that folder', app._active_folder == 1, app._active_folder)
+        check('clicking a tile opens that folder', app._active_folder == pick, app._active_folder)
         check('the folder list stays visible while a folder is open',
               len(app.recent.winfo_children()) == before, (len(app.recent.winfo_children()), before))
         check('and the pictures appear in their own pane', bool(app.contents.winfo_children())
               and app.contents_holder.winfo_manager() != '', app.contents_holder.winfo_manager())
         check('the pane holds exactly that folder\'s pictures',
-              len(app._content_widgets) == min(len(app._plan['groups'][1]['items']), app._content_shown),
-              (len(app._content_widgets), len(app._plan['groups'][1]['items'])))
+              len(app._content_widgets) == min(len(app._plan['groups'][pick]['items']), app._content_shown),
+              (len(app._content_widgets), len(app._plan['groups'][pick]['items'])))
         app.select_folder(None); root.update()
         check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
         check('the folder list is still there', len(app.recent.winfo_children()) == before)
@@ -1562,6 +1655,51 @@ def main():
           calls == ['strip', 'contents'], calls)
     app._maybe_more = real_more
     del app._wheel_under
+    app.select_folder(None); root.update()
+
+    print('\n-- selecting in the folder pane must not move the folder list')
+    if not app._plan:
+        app.toggle_groups(True)
+        for _ in range(80):
+            app._poll(); root.update()
+            if app._plan:
+                break
+            time.sleep(0.05)
+    app.select_folder(None); root.update(); time.sleep(0.1)
+    app.gal_canvas.update_idletasks()
+    app.gal_canvas.yview_moveto(0.35); root.update(); time.sleep(0.1)
+    pos_before = app.gal_canvas.yview()[0]
+    check('the folder list can be scrolled in the first place', pos_before > 0.0, pos_before)
+    folder0 = 0
+    app.select_folder(folder0); root.update(); time.sleep(0.1)
+    app.contents_canvas.update_idletasks()
+    pos_after_open = app.gal_canvas.yview()[0]
+    check('opening a folder leaves the list where it was', abs(pos_after_open - pos_before) < 0.02,
+          '%r -> %r' % (pos_before, pos_after_open))
+    cells = [c for c in app.contents.winfo_children() if c.winfo_class() == 'TFrame']
+    if cells:
+        target = cells[0].winfo_children()[0]
+        target.event_generate('<Button-1>', x=3, y=3)
+        root.update(); time.sleep(0.15)
+        pos_after_click = app.gal_canvas.yview()[0]
+        check('and a click on a picture inside it does not move it either',
+              abs(pos_after_click - pos_before) < 0.02, '%r -> %r' % (pos_before, pos_after_click))
+        check('while the picture really was selected', bool(app._current), app._current)
+    # a rebuild for another reason keeps the place too
+    app.refresh_gallery(); root.update(); time.sleep(0.1)
+    check('a rebuild of the strip keeps its scroll position',
+          abs(app.gal_canvas.yview()[0] - pos_before) < 0.02,
+          '%r -> %r' % (pos_before, app.gal_canvas.yview()[0]))
+    # switching folders does start the new pane at the top
+    app.select_folder(0); root.update(); time.sleep(0.1)
+    app.contents_canvas.yview_moveto(0.5); root.update(); time.sleep(0.05)
+    if len(app._plan['groups']) > 1:            # this fixture may hold a single folder
+        app.select_folder(1)
+        root.update(); time.sleep(0.1)
+        check('a different folder starts at the top', app.contents_canvas.yview()[0] < 0.02,
+              app.contents_canvas.yview()[0])
+    else:
+        check('a different folder starts at the top', True)
     app.select_folder(None); root.update()
 
     print('\n-- infinite scrolling: reaching the bottom appends the next batch')
@@ -1602,6 +1740,7 @@ def main():
 
     print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
     import pair_review as prv
+    prv.STATE_DIR = Path(tempfile.mkdtemp(prefix='zimage-review-ab-'))   # its own run, not rank mode's leftovers
     # give one folder enough members that it has several pairs: six of the oldest share a prompt
     for i in range(-1, -7, -1):
         sc = app._files[i].with_suffix('.json')
@@ -1625,8 +1764,6 @@ def main():
     recycled = []
     real_recycle = app._recycle_files
     app._recycle_files = lambda files: recycled.append([Path(f).name for f in files]) or True
-    import tempfile as _tf
-    prv.STATE_DIR = Path(_tf.mkdtemp(prefix='review-state-'))
     app.review_start(big)
     for _ in range(80):
         app._poll(); root.update()

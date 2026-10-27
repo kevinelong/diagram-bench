@@ -263,6 +263,32 @@ characters.
 Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
 pane 846 px - the picture keeps the majority, which it did not before.
 
+## Ranking by wins: a non-destructive alternative to deleting
+
+The A/B window opens in **Rank** mode: `Left wins (1)` / `Tie (2)` / `Right wins (3)` mark a winner and delete nothing.
+`Delete` mode (the old `Delete left` / `Keep both` / `Delete right`) is one radio button away, and switching modes only
+relabels the buttons - the same window, the same queue.
+
+**A win belongs to the picture, not to the folder or the run.** The record lives in the picture's own `.json`, beside
+its prompt:
+
+| field | meaning |
+|---|---|
+| `wins` / `losses` / `ties` | bouts won, lost, tied |
+| `bouts` | how many comparisons it has been in |
+| `last_bout` | when it was last judged |
+
+Because it sits on the file, a picture keeps its record when the gallery is regrouped, when it is moved to another
+folder, and across restarts - and it **sorts first wherever it is shown next**, which is what "winners go first even
+when moved to a different folder" needs. `order: Wins` in the gallery panel sorts the strip and the folder pane by
+**most wins, then the better win rate, then fewer losses, then newest** (raw wins alone would let a picture that was
+compared twenty times outrank one that won every bout it entered). The folder pane shows each picture's tally as a small
+badge (`4W`, `4W 1L`).
+
+Records accumulate; `Reset wins in this folder` in the window is the one explicit way to start over, and it clears only
+the record, never the prompt or the file. Writing a sidecar is atomic (temp file + `os.replace`), so an interrupted
+write cannot cost a picture its prompt.
+
 ## Clips: why they would not play, and what opens them now
 
 The clips themselves were never broken. A `wan-clip-*.mp4` in the gallery is H.264 **High@3.1, 8-bit 4:2:0, 24 fps,
