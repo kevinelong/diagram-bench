@@ -235,6 +235,13 @@ the pane follows. `\u2039 folders` (or choosing nothing) empties the pane again.
 folder contents - use **infinite scrolling**: they show a first batch (21 pictures, 12 folders, 24 pictures) and append
 the next one when you reach the bottom, with the title saying `Folders (12 of 97)` while more remain.
 
+**The wheel works over any of them.** On Windows Tk sends `<MouseWheel>` to the widget that has *focus*, not the one
+under the pointer, so binding the canvases scrolled nothing and only dragging a scrollbar moved a list. One handler on
+the toplevel now routes the wheel by what is under the cursor - checked from the deepest widget upwards, so a
+thumbnail inside a pane still scrolls that pane - and returns `None` everywhere else, leaving the prompt box and any
+dialog with their own scrolling. Measured with real events: strip `yview` 0.000 -> 0.020 on one notch, folder pane
+0.000 -> 0.081.
+
 A **readonly selector** picks a folder by name as well (`All (1827)`, `steampunk cyberdeck\u2026 (82)`), `A/B` reviews the
 selected folder, `\u2026` opens the full list with search.
 

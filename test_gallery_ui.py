@@ -1536,6 +1536,34 @@ def main():
         check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
         check('the folder list is still there', len(app.recent.winfo_children()) == before)
 
+    print('\n-- the wheel goes to the list under the pointer, not to whatever has focus')
+    app.select_folder(None); root.update()
+    check('the folder list is the strip', app._wheel_owner(app.gal_canvas) == 'strip')
+    check('a tile inside it counts too', app._wheel_owner(app.recent.winfo_children()[0]) == 'strip'
+          if app.recent.winfo_children() else True)
+    app.select_folder(0); root.update()
+    check('the open folder pane is its own scroll target',
+          app._wheel_owner(app.contents_canvas) == 'contents', app._wheel_owner(app.contents_canvas))
+    check('a thumbnail inside the pane routes to the pane',
+          not app.contents.winfo_children() or app._wheel_owner(app.contents.winfo_children()[0]) == 'contents')
+    check('the prompt box keeps its own scrolling', app._wheel_owner(app.text) is None, app._wheel_owner(app.text))
+
+    calls = []
+    real_more = app._maybe_more
+    app._maybe_more = lambda which: calls.append(which)
+    ev = NS(x_root=0, y_root=0, delta=-120)
+    app._wheel_under = lambda e: app.gal_canvas
+    check('a wheel over the strip is consumed', app._on_any_wheel(ev) == 'break')
+    app._wheel_under = lambda e: app.contents_canvas
+    check('a wheel over the pane is consumed', app._on_any_wheel(ev) == 'break')
+    app._wheel_under = lambda e: app.text
+    check('a wheel over the prompt is left alone', app._on_any_wheel(ev) is None)
+    check('and only the two lists asked for more',
+          calls == ['strip', 'contents'], calls)
+    app._maybe_more = real_more
+    del app._wheel_under
+    app.select_folder(None); root.update()
+
     print('\n-- infinite scrolling: reaching the bottom appends the next batch')
     app.select_folder(None); root.update()
     if app._folders_view_active():

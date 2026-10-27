@@ -722,7 +722,6 @@ class App:
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
         self.contents.bind('<Configure>', self._on_contents_resize)
         self.contents_canvas.bind('<Configure>', self._on_contents_resize)
-        self.contents_canvas.bind('<MouseWheel>', self._on_contents_wheel)
         self.contents_holder.grid_remove()
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
@@ -737,14 +736,13 @@ class App:
         self._gal_item = self.gal_canvas.create_window((0, 0), window=self.recent, anchor='nw')
         self.recent.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<Configure>', self._on_strip_resize)
-        self.gal_canvas.bind('<MouseWheel>', self._on_gallery_wheel)
+        self.root.bind_all('<MouseWheel>', self._on_any_wheel, add='+')
         self.gal_bar.configure(command=self._on_strip_scrollbar)
         self.gal_canvas.configure(takefocus=1)
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1)),
                         ('<space>', self._nav_toggle_key), ('<Return>', self._nav_open_key)):
             self.gal_canvas.bind(seq, fn)
-        self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
         for c in range(RECENT_COLS + 12):
             self.recent.columnconfigure(c, weight=0)
         self._shown = RECENT_N            # how many strip pictures are on screen (grows as you scroll)
@@ -1646,10 +1644,6 @@ class App:
         else:
             self.contents_bar.grid_remove()
 
-    def _on_contents_wheel(self, event):
-        self.contents_canvas.yview_scroll(int(-event.delta / 120), 'units')
-        self._maybe_more('contents')
-
     def _maybe_more(self, which):
         """Infinite scrolling: at the bottom of a list, append the next batch."""
         if which == 'strip':
@@ -1761,7 +1755,6 @@ class App:
             self._thumbs[p] = ph
             lab = self._tile_widget(self.recent, p, ph)
             lab.grid(row=i // cols, column=i % cols, padx=1, pady=1)
-            lab.bind('<MouseWheel>', self._on_gallery_wheel)
             self._tile_widgets[Path(p)] = lab
         if files:
             self.starters.grid_remove()
@@ -2408,10 +2401,40 @@ class App:
             self.copy_status.configure(text='metadata copied')
         ttk.Button(win, text='Copy metadata', command=copy).pack(pady=(0, 8))
 
-    def _on_gallery_wheel(self, event):
-        self.gal_canvas.yview_scroll(int(-event.delta / 120), 'units')
-        self._maybe_more('strip')
-        return 'break'
+    def _wheel_owner(self, widget):
+        """Which list the pointer is over: 'contents', 'strip', or None for anything else (the prompt, dialogs)."""
+        node = widget
+        while node is not None:
+            if node is self.contents_canvas or node is self.contents:
+                return 'contents'
+            if node is self.gal_canvas or node is self.recent:
+                return 'strip'
+            node = getattr(node, 'master', None)
+        return None
+
+    def _wheel_under(self, event):
+        """The widget under the pointer. Its own method so a test can name one without depending on window stacking."""
+        try:
+            return self.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return None
+
+    def _on_any_wheel(self, event):
+        """Windows sends <MouseWheel> to the *focused* widget, not the one under the pointer, so binding the canvases
+        alone meant the wheel did nothing and only dragging the scrollbar moved a list. This routes the wheel to the
+        list under the cursor, and returns None everywhere else so the prompt and dialogs behave normally."""
+        owner = self._wheel_owner(self._wheel_under(event))
+        steps = int(-event.delta / 120)
+        if owner == 'contents':
+            if self._active_folder is not None:
+                self.contents_canvas.yview_scroll(steps, 'units')
+                self._maybe_more('contents')
+            return 'break'
+        if owner == 'strip':
+            self.gal_canvas.yview_scroll(steps, 'units')
+            self._maybe_more('strip')
+            return 'break'
+        return None
 
     # -- gallery: selection --------------------------------------------------
     def _click_order(self):
