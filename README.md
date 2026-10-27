@@ -224,16 +224,27 @@ folded - nothing can be said about it.
 oldest member's opening sentence, elided - never invented, and occasionally a fragment, which is the honest cost of
 naming a folder from a 70-token prompt.
 
-## Folders: one selector, and a strip that keeps its place
+## Folders: on by default, two per row, and a full-screen browser
 
-`folders` groups the gallery by prompt. The strip becomes **large folder tiles**: a 3x3 contact sheet of the folder's
-first nine pictures, its **full name wrapped** in small type (never elided) and how many pictures it holds.
+`folders` is **checked at startup** and remembered; grouping runs once, in the background, just after the first paint.
+
+Folder tiles are a **2x2 contact sheet of the folder's first four pictures**, so **two folders sit side by side** in the
+first column, each with its full name wrapped in small type (never elided) and its picture count. A 3x3 sheet needed
+~270 px and left room for exactly one folder per row - measured on a 1707x960 desktop, which is where the request came
+from.
 
 **Opening a folder does not replace the list.** Its pictures appear in a **second pane to the right of the folder
-list**, so the list stays where it is and you move between folders without closing anything: click another folder and
-the pane follows. `\u2039 folders` (or choosing nothing) empties the pane again. All three lists - pictures, folder tiles,
-folder contents - use **infinite scrolling**: they show a first batch (21 pictures, 12 folders, 24 pictures) and append
-the next one when you reach the bottom, with the title saying `Folders (12 of 97)` while more remain.
+list**, **three across**, sized from the pane's live width and as tall as the column. Selecting in that pane never
+moves the folder list. All three lists - pictures, folder tiles, folder contents - use **infinite scrolling**: they
+show a first batch and append the next one when you reach the bottom.
+
+**The folder control is a button, not a dropdown.** It names what is open (`All folders`, `steampunk cyberdeck... (82)`)
+and opens a **full-screen folder browser**: 4-up folder tiles on the left, that folder's pictures in a grid on the right,
+both reflowing to the window and scrolling under the wheel. It is the same widget as View All (`ScrollGrid`), so there
+is one interaction to learn and both scale the same way: **the column count comes from the live width and the tile grows
+into the leftover space**, re-flowed on resize (debounced). Measured: a 1186 px pane shows six 190 px tiles rather than
+eight 113 px ones with a gutter - the first version derived both the column count *and* the tile from the 96 px floor,
+which converges and never grows.
 
 **The wheel works over any of them.** On Windows Tk sends `<MouseWheel>` to the widget that has *focus*, not the one
 under the pointer, so binding the canvases scrolled nothing and only dragging a scrollbar moved a list. One handler on
@@ -242,8 +253,8 @@ thumbnail inside a pane still scrolls that pane - and returns `None` everywhere 
 dialog with their own scrolling. Measured with real events: strip `yview` 0.000 -> 0.020 on one notch, folder pane
 0.000 -> 0.081.
 
-A **readonly selector** picks a folder by name as well (`All (1827)`, `steampunk cyberdeck\u2026 (82)`), `A/B` reviews the
-selected folder, `\u2026` opens the full list with search.
+`A/B` reviews the selected folder; the folder button opens the browser described above; the strip no longer has to
+double as the folder index, so the treeview list that used to sit beside the selector is gone.
 
 **This replaced a row of chips, because the chips broke the window.** Eight buttons carrying folder names asked for
 about 1,330 px, and a grid column is always given at least the width its children request - so at 2560 px wide the
@@ -254,7 +265,7 @@ gallery column grew to 1,330 px and squeezed the prompt column and the picture p
   other: buttons across the middle of the tiles, and a stray tile row peeking out under the hints;
 - the strip's tiles were a **fixed three columns** whatever the width.
 
-Now the order in the gallery column is title, search, selector, buttons, strip, with the strip as the one flexible row,
+Now the order in the gallery column is title, search, folder button, buttons, strip, with the strip as the one flexible row,
 so the buttons can never be pushed past the bottom edge; a resize re-flows the tile grid to the columns that actually
 fit; and `test_gallery_ui.py` asserts that no two widgets share a grid cell in the gallery or prompt column, that the
 buttons sit above the strip and inside the window, and that the selector offers every folder with names capped at 26
@@ -262,6 +273,52 @@ characters.
 
 Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
 pane 846 px - the picture keeps the majority, which it did not before.
+
+## The window takes the host's size and colours
+
+The window opens **maximised**, confirmed after it is mapped (`state('zoomed')` is silently ignored on some Tk/Windows
+combinations, and a later `minsize` can un-maximise it), and the process is **per-monitor DPI aware before Tk starts**
+(`SetProcessDpiAwareness(2)`), because otherwise Windows scales the finished window as a bitmap and text goes soft on
+every display that is not at 100 %.
+
+Colours come from Windows, not from this file (`Theme`, `zimage_ui.py`), in three steps of authority:
+
+- **Tk's system colour names** - `SystemWindow`, `SystemButtonFace`, `SystemWindowText`, `SystemGrayText`,
+  `SystemHighlight`: on Windows these are `GetSysColor`, so they follow the user's classic colour settings and
+  high-contrast themes;
+- **`AppsUseLightTheme`** (`HKCU\...\Themes\Personalize`): dark mode is a *mode*, reported nowhere else, and without it a
+  Tk app is a light island on a dark desktop. In dark mode the neutrals come from the mode (the classic system colours
+  stay light), ttk switches to `clam` so its colours can actually be set, the title bar gets
+  `DWMWA_USE_IMMERSIVE_DARK_MODE` through DWM, and the readonly-combobox and dropdown-list state maps are set - a
+  readonly combobox draws its field from the *state map*, which is why the first dark pass still showed white boxes;
+- **the DWM accent** (`HKCU\...\DWM\AccentColor`, stored AABBGGRR) for the selection ring, the status colour and the A/B
+  overlay. This desktop's accent is olive `#758500`, and the app drew it rather than a blue of its own.
+
+Everything Windows does not provide - the backdrop behind a contact sheet, a hover tone, a field fill - is **derived**
+from the window colour by mixing, so it tracks light/dark and contrast themes instead of being a second palette that
+drifts. `test_gallery_ui.py` asserts the palette is real hex, that the prompt box and picture pane wear it, and that a
+derived colour lies between the two it blends.
+
+**What else Windows-hosted apps are expected to do**, from Microsoft's own guidance
+([best practices](https://learn.microsoft.com/en-us/windows/apps/get-started/best-practices),
+[theming](https://learn.microsoft.com/en-us/windows/apps/develop/ui/theming),
+[dark and light for Win32](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-windows-themes),
+[contrast themes](https://learn.microsoft.com/en-us/windows/apps/design/accessibility/high-contrast-themes)) - and
+where this app stands:
+
+| expectation | here |
+|---|---|
+| per-monitor DPI awareness, no blurry scaling | **done** (`SetProcessDpiAwareness(2)` before Tk) |
+| follow light/dark and the accent colour | **done** (`Theme`) |
+| honour contrast themes | **partly** - system colours are used for chrome; the photo panes stay photographic |
+| system font, system icons | **done** for text (Segoe UI, which is what Tk's default resolves to on Windows) |
+| native window behaviour: maximise, snap layouts, rounded corners | **done** - the window is a plain Tk toplevel, so DWM owns the frame and snap |
+| keyboard access to everything, mnemonics | **partly** - arrows/space/Enter/Delete/Ctrl+A/Esc in the gallery |
+| native file and folder dialogs | **done** (`tkinter.filedialog`, Explorer) |
+| a responsive layout down to small windows, always scrollable | **done** - every list scrolls, tiles reflow |
+| visible state for long operations, cancel | **done** - progress bar, ticks, Stop |
+| window position and size remembered | **deliberately not** - it opens maximised, which is what was asked |
+| taskbar progress, thumbnails, jump lists | **not done** - Windows-specific shell integration, no Tk path without a COM shim |
 
 ## Ranking by wins: a non-destructive alternative to deleting
 

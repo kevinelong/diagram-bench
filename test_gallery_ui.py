@@ -147,6 +147,38 @@ def main():
     root.update()
     shot(root, '01-start')
 
+    print("\n-- the window takes the host size and colours (2026-10-27)")
+    state = root.state()
+    check('the window starts maximised', state == 'zoomed' or
+          (root.winfo_width() >= root.winfo_screenwidth() - 40 and root.winfo_height() >= 600),
+          (state, root.winfo_geometry()))
+    th = app.theme
+    for key in ('window', 'surface', 'text', 'muted', 'accent', 'on_accent'):
+        check('the palette has a real %s colour' % key,
+              isinstance(th.colours.get(key), str) and th.colours[key].startswith('#'), th.colours.get(key))
+    check('the mode came from Windows, not from a guess', isinstance(th.dark, bool), th.dark)
+    check('the prompt box wears the palette', app.text['background'] == th.field and app.text['fg'] == th.text,
+          (app.text['background'], app.text['fg']))
+    check('the picture pane is the window colour', app.canvas['background'] == th.window,
+          app.canvas['background'])
+    check('the tooltip follows it too', zui.Tooltip.BG == th.tooltip_bg, zui.Tooltip.BG)
+    check('a derived colour stays between the two it blends', th.sheet_bg != th.window and th.sheet_bg != th.text,
+          (th.window, th.sheet_bg, th.text))
+
+    print('\n-- folders are the default view (2026-10-27)')
+    for _ in range(80):
+        app._poll()
+        root.update()
+        if app._plan is not None:
+            break
+        time.sleep(0.05)
+    check('folders are checked at startup', app.group_var.get() is True, app.group_var.get())
+    check('and the plan was computed without being asked', app._plan is not None, bool(app._plan))
+    # everything below is about the picture strip, so put the window back in picture mode first
+    app.toggle_groups(False)
+    root.update()
+    check('turning folders off shows the pictures again', not app._folders_view_active())
+
     print('\n-- gallery contents')
     check('gallery shows 18 of 26 files', len(app._tile_widgets) == 18, str(len(app._tile_widgets)))
     check('all 26 known to the app', len(app._files) == 26, str(len(app._files)))
@@ -603,7 +635,9 @@ def main():
     app._nav(1, 0)
     check('right moves one tile on', app.selected[0].name == app._files[1].name, app.selected[0].name)
     app._nav(0, 1)
-    check('down moves one row (3 columns)', app.selected[0].name == app._files[4].name, app.selected[0].name)
+    cols = app._strip_cols()
+    check('down moves one row (%d columns at this width)' % cols,
+          app.selected[0].name == app._files[1 + cols].name, app.selected[0].name)
     n_before = len(app.selected)
     app._nav_toggle()
     check('space removes the current tile', len(app.selected) == n_before - 1)
@@ -1556,20 +1590,51 @@ def main():
             if app._plan:
                 break
             time.sleep(0.05)
-    vals = list(app.folder_cb['values'] or [])
-    check('the selector offers All plus every folder', len(vals) == len(app._plan['groups']) + 1, len(vals))
-    check('All carries the gallery total, singletons included',
-          vals[0] == 'All (%d)' % len(app._all_files()), (vals[0], len(app._all_files())))
-    longest = max(len(v) for v in vals)
-    check('no selector entry is longer than 26 characters', longest <= 26, longest)
+    longest = max(len(app._folder_text(i)) for i in [None] + list(range(len(app._plan['groups']))))
+    check('no folder label is longer than 26 characters', longest <= 26, longest)
+    check('the folder control is a button, not a dropdown',
+          not hasattr(app, 'folder_cb') and 'folders' in str(app.folder_pick_btn['text']).lower(),
+          getattr(app, 'folder_pick_btn', None) and app.folder_pick_btn['text'])
     target = max(range(len(app._plan['groups'])), key=lambda i: len(app._plan['groups'][i]['items']))
-    app.folder_cb.current(target + 1)
-    app._on_folder_pick(); root.update()
-    check('picking a folder in the selector filters the strip',
+    app.select_folder(target); root.update()
+    check('choosing a folder filters the strip to it',
           app._active_folder == target and len(app._files) == len(app._plan['groups'][target]['items']),
           '%r but %d files visible' % (app.gal_title['text'], len(app._files)))
-    app.folder_cb.current(0); app._on_folder_pick(); root.update()
-    check('picking All clears the filter', app._active_folder is None, app._active_folder)
+    check('and the button names the open folder',
+          app._folder_text(target).split(' (')[0] in str(app.folder_pick_btn['text']),
+          app.folder_pick_btn['text'])
+    app.select_folder(None); root.update()
+    check('choosing All clears the filter', app._active_folder is None, app._active_folder)
+    check('and the button says so', 'all' in str(app.folder_pick_btn['text']).lower(),
+          app.folder_pick_btn['text'])
+
+    print('\n-- the folder button opens the full-screen browser')
+    app.open_folder_browser()
+    for _ in range(40):
+        root.update(); time.sleep(0.02)
+    browser = getattr(app, '_folder_win', None)
+    check('the browser window opens', browser is not None and browser.winfo_exists())
+    body = [w for w in browser.winfo_children() if w.winfo_class() == 'TFrame'][-1] if browser else None
+    grids = [w for w in (body.winfo_children() if body else []) if isinstance(w, zui.ScrollGrid)]
+    check('it lays out the folders and their pictures side by side', len(grids) == 2,
+          [type(w).__name__ for w in (body.winfo_children() if body else [])])
+    if len(grids) == 2:
+        check('the folder grid holds every folder plus All', len(grids[0].items) == len(app._plan['groups']) + 1,
+              len(grids[0].items))
+        check('the picture grid starts on the open folder',
+              len(grids[1].items) == (len(app._all_files()) if app._active_folder is None
+                                      else len(app._plan['groups'][app._active_folder]['items'])),
+              len(grids[1].items))
+    # picking inside the browser opens that folder in the main window too
+    pick_at = 1 if app._plan is not None and len(app._plan['groups']) > 1 else None
+    if pick_at is not None:
+        app.select_folder(pick_at); root.update()
+        check('picking in the browser drives the main window', app._active_folder == pick_at, app._active_folder)
+        app.select_folder(None); root.update()
+    else:
+        check('picking in the browser drives the main window (single-folder fixture)', True)
+    app._close_folder_browser(); root.update()
+    check('and it closes', getattr(app, '_folder_win', None) is None)
 
     def cells(frame):
         seen = {}
@@ -1602,10 +1667,15 @@ def main():
     check('one tile per folder', len(tiles) == len(app._plan['groups']), (len(tiles), len(app._plan['groups'])))
     if tiles:
         pic, title, meta = tiles[0].winfo_children()[:3]
-        check('each tile carries a contact sheet', pic.image is not None and pic.image.width() >= 150,
+        check('each tile carries a contact sheet',
+              pic.image is not None and pic.image.width() >= zui.STRIP_TILE_MIN,
               pic.image.width() if pic.image else None)
-        check('the sheet is a 3x3 of thumbnails, not one picture', pic.image.width() == pic.image.height(),
-              (pic.image.width(), pic.image.height()))
+        check('the sheet is square, so four thumbnails sit in it as a 2x2',
+              pic.image.width() == pic.image.height(), (pic.image.width(), pic.image.height()))
+        two_up = [w for w in app.recent.winfo_children() if w.grid_info()]
+        check('two folder tiles per row in the first column',
+              len({int(w.grid_info()['column']) for w in two_up}) == min(2, len(two_up)),
+              [int(w.grid_info()['column']) for w in two_up])
         check('the full folder name is shown, wrapped rather than cut',
               title['text'] == (app._plan['groups'][0].get('title') or app._plan['groups'][0]['label'])
               and int(title['wraplength']) > 0
@@ -1628,6 +1698,50 @@ def main():
         app.select_folder(None); root.update()
         check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
         check('the folder list is still there', len(app.recent.winfo_children()) == before)
+
+    print('\n-- the open-folder pane is three pictures wide and fills what it is given')
+    if not (app._plan and app._plan['groups']):
+        app.toggle_groups(True)
+        for _ in range(80):
+            app._poll(); root.update()
+            if app._plan and app._plan['groups']:
+                break
+            time.sleep(0.05)
+    app.select_folder(0 if (app._plan and app._plan['groups']) else None); root.update(); time.sleep(0.15)
+    pane_cols = {}
+    for cell in app.contents.winfo_children():
+        info = cell.grid_info()
+        if info:
+            pane_cols[int(info['column'])] = info
+    check('the pane lays out three per row', sorted(pane_cols) == [0, 1, 2], sorted(pane_cols))
+    if pane_cols:
+        cell_w = max(int(c.winfo_width()) for c in app.contents.winfo_children())
+        pane_w = app.contents_canvas.winfo_width()
+        check('and the three of them fill the pane rather than a band of it',
+              cell_w * 3 >= pane_w - 24, (cell_w, pane_w))
+    check('the pane is as tall as the column, not a band under it',
+          app.contents_canvas.winfo_height() >= app.gal_canvas.winfo_height() - 2,
+          (app.contents_canvas.winfo_height(), app.gal_canvas.winfo_height()))
+    app.select_folder(None); root.update()
+
+    print('\n-- a scrolling grid grows its tiles with the window instead of adding columns forever')
+    probe_win = tk.Toplevel(root)
+    probe_win.geometry('1200x700')
+    grid = zui.ScrollGrid(probe_win, lambda parent, item, size: tk.Label(parent, width=1, height=1),
+                          tile_target=190)
+    grid.pack(fill='both', expand=True)
+    probe_win.update(); time.sleep(0.2); probe_win.update()
+    cols, tile = grid._metrics()
+    check('a wide window gets large tiles', tile >= 150, (cols, tile))
+    check('and the row of them fills the width',
+          cols * (tile + grid.pad) >= grid.canvas.winfo_width() - 2 * grid.pad,
+          (cols, tile, grid.canvas.winfo_width()))
+    probe_win.geometry('700x600')
+    probe_win.update(); time.sleep(0.3); probe_win.update()
+    cols2, tile2 = grid._metrics()
+    check('a narrower window uses fewer, not smaller, columns', cols2 <= cols and tile2 <= tile,
+          (cols, tile, cols2, tile2))
+    probe_win.destroy()
 
     print('\n-- the wheel goes to the list under the pointer, not to whatever has focus')
     app.select_folder(None); root.update()
@@ -1665,31 +1779,40 @@ def main():
             if app._plan:
                 break
             time.sleep(0.05)
-    app.select_folder(None); root.update(); time.sleep(0.1)
+    # The real fixture yields one or two folders, which never overflow a tall window, so the retention property would
+    # pass without being exercised. Clone the folders to make the list genuinely longer, then restore.
+    real_groups = list(app._plan['groups'])
+    app._plan['groups'] = real_groups * 24
+    app._folder_shown = len(app._plan['groups'])
+    app.select_folder(None); app.refresh_gallery(); root.update(); time.sleep(0.15)
     app.gal_canvas.update_idletasks()
     app.gal_canvas.yview_moveto(0.35); root.update(); time.sleep(0.1)
     pos_before = app.gal_canvas.yview()[0]
-    check('the folder list can be scrolled in the first place', pos_before > 0.0, pos_before)
+    # the *fraction* moves whenever the viewport or the content changes height - which opening a folder does now that
+    # the pane takes width - so the property "keeps its place" is measured in pixels
+    offset_before = app.gal_canvas.canvasy(0)
+    check('the folder list can be scrolled in the first place', pos_before > 0.0,
+          (pos_before, len(app.recent.winfo_children())))
     folder0 = 0
     app.select_folder(folder0); root.update(); time.sleep(0.1)
     app.contents_canvas.update_idletasks()
-    pos_after_open = app.gal_canvas.yview()[0]
-    check('opening a folder leaves the list where it was', abs(pos_after_open - pos_before) < 0.02,
-          '%r -> %r' % (pos_before, pos_after_open))
+    pos_after_open = app.gal_canvas.canvasy(0)
+    check('opening a folder leaves the list where it was', abs(pos_after_open - offset_before) <= 8,
+          '%r -> %r px' % (offset_before, pos_after_open))
     cells = [c for c in app.contents.winfo_children() if c.winfo_class() == 'TFrame']
     if cells:
         target = cells[0].winfo_children()[0]
         target.event_generate('<Button-1>', x=3, y=3)
         root.update(); time.sleep(0.15)
-        pos_after_click = app.gal_canvas.yview()[0]
+        pos_after_click = app.gal_canvas.canvasy(0)
         check('and a click on a picture inside it does not move it either',
-              abs(pos_after_click - pos_before) < 0.02, '%r -> %r' % (pos_before, pos_after_click))
+              abs(pos_after_click - offset_before) <= 8, '%r -> %r px' % (offset_before, pos_after_click))
         check('while the picture really was selected', bool(app._current), app._current)
     # a rebuild for another reason keeps the place too
     app.refresh_gallery(); root.update(); time.sleep(0.1)
     check('a rebuild of the strip keeps its scroll position',
-          abs(app.gal_canvas.yview()[0] - pos_before) < 0.02,
-          '%r -> %r' % (pos_before, app.gal_canvas.yview()[0]))
+          abs(app.gal_canvas.canvasy(0) - offset_before) <= 8,
+          '%r -> %r px' % (offset_before, app.gal_canvas.canvasy(0)))
     # switching folders does start the new pane at the top
     app.select_folder(0); root.update(); time.sleep(0.1)
     app.contents_canvas.yview_moveto(0.5); root.update(); time.sleep(0.05)
@@ -1700,7 +1823,10 @@ def main():
               app.contents_canvas.yview()[0])
     else:
         check('a different folder starts at the top', True)
-    app.select_folder(None); root.update()
+    app.select_folder(None)
+    app._plan['groups'] = real_groups                   # the clones were only for the scroll test
+    app._folder_shown = zui.BATCH_FOLDERS
+    app.refresh_gallery(); root.update()
 
     print('\n-- infinite scrolling: reaching the bottom appends the next batch')
     app.select_folder(None); root.update()

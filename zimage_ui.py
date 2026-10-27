@@ -48,6 +48,173 @@ import zimage_gen as zg
 from rephrase import cycle_period, has_synonyms, rephrase_text
 
 
+# --------------------------------------------------------------------------- the host's own colours
+
+
+def _hex(rgb):
+    return '#%02x%02x%02x' % tuple(int(v) for v in rgb)
+
+
+def _mix(a, b, t):
+    """Blend two '#rrggbb' colours; used only where Windows offers no colour of its own."""
+    pa = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    pb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return _hex(pa[i] + (pb[i] - pa[i]) * t for i in range(3))
+
+
+def _registry_value(path, name, default=None):
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except Exception:
+        return default
+
+
+class Theme:
+    """The colours the user already chose, instead of colours invented here.
+
+    Three sources, in order of authority:
+
+    * **Tk's system colour names** - `SystemWindow`, `SystemButtonFace`, `SystemWindowText`, `SystemGrayText`,
+      `SystemHighlight`. On Windows these are the real `GetSysColor` values, so they follow the user's classic colour
+      settings *and* high-contrast themes; that is the whole reason to use them instead of hex literals.
+    * **`AppsUseLightTheme`** under `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize` - dark mode
+      is not a colour, it is a mode, and Windows reports it nowhere else. Without it the app is a light island on a dark
+      desktop, which is the most common complaint about Win32 and Tk applications.
+    * **The DWM accent** (`HKCU\\Software\\Microsoft\\Windows\\DWM\\AccentColor`, stored as AABBGGRR) for selection,
+      focus and the A/B overlay.
+
+    What Windows does not provide - a backdrop behind a photo, a hover tone - is *derived* from the window colour, so it
+    tracks light/dark and contrast themes instead of becoming a second palette that drifts.
+    """
+
+    SYS = (('window', 'SystemWindow'), ('surface', 'SystemButtonFace'), ('text', 'SystemWindowText'),
+           ('muted', 'SystemGrayText'), ('accent', 'SystemHighlight'), ('on_accent', 'SystemHighlightText'))
+
+    LIGHT = {'window': '#ffffff', 'surface': '#f0f0f0', 'text': '#000000', 'muted': '#6d6d6d',
+             'accent': '#0a84ff', 'on_accent': '#ffffff'}
+    DARK = {'window': '#202020', 'surface': '#2b2b2b', 'text': '#f2f2f2', 'muted': '#a8a8a8',
+            'accent': '#4cc2ff', 'on_accent': '#101010'}
+    NEUTRAL = ('window', 'surface', 'text', 'muted')
+
+    def __init__(self, root):
+        self.root = root
+        self.dark = self._dark_mode()
+        base = dict(self.DARK if self.dark else self.LIGHT)
+        for name, sysname in self.SYS:
+            found = self._system(sysname)
+            if found:
+                base[name] = found
+        if self.dark:
+            # the system *classic* colours stay light on a dark desktop, so the mode wins for the neutrals
+            for name in self.NEUTRAL:
+                base[name] = self.DARK[name]
+        accent = self._accent()
+        if accent:
+            base['accent'] = accent
+        self.colours = base
+        self.window = base['window']
+        self.surface = base['surface']
+        self.text = base['text']
+        self.muted = base['muted']
+        self.accent = base['accent']
+        self.on_accent = base['on_accent']
+        self.field = _mix(self.window, self.text, 0.06)
+        self.border = _mix(self.window, self.text, 0.22)
+        self.hover = _mix(self.surface, self.text, 0.10)
+        self.sheet_bg = _mix(self.window, self.text, 0.10)     # behind a contact sheet's thumbnails
+        self.tooltip_bg = _mix(self.window, '#3a3a3a' if self.dark else '#ffffe0', 0.9)
+        self.win_mark = '#9be2b4' if self.dark else '#1a6b2a'
+        self.error = '#ff7b72' if self.dark else '#c0392b'
+
+    # -- where the values come from
+    def _system(self, name):
+        """Tk maps these names to GetSysColor on Windows, so they are the system's own values."""
+        try:
+            return _hex(v // 257 for v in self.root.winfo_rgb(name))
+        except Exception:
+            return None
+
+    def _dark_mode(self):
+        value = _registry_value(r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+                                'AppsUseLightTheme', 1)
+        try:
+            return int(value) == 0
+        except Exception:
+            return False
+
+    def _accent(self):
+        value = _registry_value(r'Software\Microsoft\Windows\DWM', 'AccentColor', None)
+        if value is None:
+            return None
+        try:
+            v = int(value)
+        except Exception:
+            return None
+        b, g, r = v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF      # stored as AABBGGRR
+        if max(r, g, b) < 24:
+            return None
+        return _hex((r, g, b))
+
+    # -- put them on the widgets
+    def apply(self):
+        style = ttk.Style()
+        if self.dark:
+            try:
+                style.theme_use('clam')      # the one bundled ttk theme whose colours can actually be set
+            except Exception:
+                pass
+            style.configure('.', background=self.window, foreground=self.text, fieldbackground=self.field,
+                            bordercolor=self.border, lightcolor=self.surface, darkcolor=self.border,
+                            troughcolor=self.surface, selectbackground=self.accent, selectforeground=self.on_accent)
+            for name in ('TFrame', 'TLabel', 'TCheckbutton', 'TRadiobutton', 'TLabelframe'):
+                style.configure(name, background=self.window, foreground=self.text)
+            # clam pads buttons much wider than the vista theme does, and the action bar then needs more width than
+            # the picture column has; these are the vista-ish metrics, not a new look
+            style.configure('TButton', background=self.surface, foreground=self.text, bordercolor=self.border,
+                            padding=(4, 2), width=-4)
+            style.configure('TCombobox', padding=(2, 1))
+            style.configure('TSpinbox', padding=(2, 1))
+            style.map('TButton', background=[('active', self.hover)], foreground=[('disabled', self.muted)])
+            for name in ('TEntry', 'TCombobox', 'TSpinbox'):
+                style.configure(name, fieldbackground=self.field, foreground=self.text,
+                                background=self.surface, arrowcolor=self.text)
+            # a readonly combobox draws its field from the *state map*, not from fieldbackground, which is why the
+            # first dark pass still showed white boxes with invisible values
+            style.map('TCombobox',
+                      fieldbackground=[('readonly', self.field), ('disabled', self.surface)],
+                      foreground=[('readonly', self.text)],
+                      background=[('readonly', self.surface), ('active', self.hover)],
+                      selectbackground=[('readonly', self.field)], selectforeground=[('readonly', self.text)],
+                      arrowcolor=[('readonly', self.text)])
+            # the dropdown list is a classic tk Listbox, which no ttk style reaches
+            for pattern, value in (('*TCombobox*Listbox.background', self.field),
+                                   ('*TCombobox*Listbox.foreground', self.text),
+                                   ('*TCombobox*Listbox.selectBackground', self.accent),
+                                   ('*TCombobox*Listbox.selectForeground', self.on_accent)):
+                self.root.option_add(pattern, value)
+        else:
+            try:
+                style.theme_use('vista')
+            except Exception:
+                pass
+        self.dark_titlebar()
+
+    def dark_titlebar(self):
+        """The Win32 title bar does not follow dark mode by itself; DWMWA_USE_IMMERSIVE_DARK_MODE tells DWM to."""
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            value = ctypes.c_int(1 if self.dark else 0)
+            for attribute in (20, 19):        # 20 on Win10 2004+, 19 on 1809-1909
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), attribute,
+                                                           ctypes.byref(value), ctypes.sizeof(value))
+            return True
+        except Exception:
+            return False
+
+
 # --------------------------------------------------------------------------- websocket (text frames only)
 
 
@@ -166,7 +333,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise')
+                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders')
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -220,7 +387,9 @@ THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
 RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
-CONTENTS_W = 236     # width of the open-folder pane beside the folder list
+CONTENTS_W = 300     # requested width of the open-folder pane beside the folder list; it grows with the column
+STRIP_TILE_MIN = 96  # a tile never shrinks below this: the row count follows the width, the tile follows the row
+FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
 BATCH_TILES = 21     # strip pictures added per scroll to the bottom
 BATCH_FOLDERS = 12   # folder tiles added per scroll
 BATCH_CONTENTS = 24  # pictures added per scroll inside the open folder
@@ -573,6 +742,7 @@ class ActionButton(tk.Button):
 
 
 class Tooltip:
+    BG, FG = '#ffffe0', '#222'        # replaced with the window's own colours once the palette is known
     """A one-line explanation shown under a control on hover.
 
     Delayed so that sweeping the mouse across the window does not flash a dozen bubbles, and destroyed on leave so no
@@ -607,7 +777,7 @@ class Tooltip:
         tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)
         tip.wm_geometry('+%d+%d' % (x, y))
-        tk.Label(tip, text=self.text, background='#ffffe0', foreground='#222', relief='solid', bd=1,
+        tk.Label(tip, text=self.text, background=Tooltip.BG, foreground=Tooltip.FG, relief='solid', bd=1,
                  font=('Segoe UI', 9), justify='left', wraplength=340, padx=7, pady=5).pack()
         self._tip = tip
 
@@ -619,6 +789,156 @@ class Tooltip:
             except Exception:
                 pass
             self._tip = None
+
+
+class ScrollGrid(ttk.Frame):
+    """A scrolling grid of square tiles that fills whatever width it is given.
+
+    Both full-screen views need the same thing - every picture, and every prompt folder - so the grid is written once.
+    What it adds over the fixed six-column list it replaces:
+
+    * **columns from the live width**, and the tile *grows* to fill that width, so a maximised window shows big tiles
+      instead of six small ones and a band of empty space;
+    * **reflow on resize**, debounced, so dragging the window edge does not re-encode every thumbnail;
+    * **the wheel scrolls the grid under the pointer**, bound on the tiles themselves because on Windows the wheel
+      follows focus, not the pointer (the lesson from the strip, 2026-10-27);
+    * **infinite scrolling**: `batch` tiles are laid out at a time and the next batch is appended at the bottom.
+    """
+
+    def __init__(self, master, make_tile, caption=None, batch=60, tile_min=STRIP_TILE_MIN, pad=6,
+                 background=None, tile_target=180, muted=None):
+        super().__init__(master)
+        # colours come from the caller (the window's Theme), so a grid built by a test still works
+        background = background or (ttk.Style().lookup('TFrame', 'background') or '#f4f4f5')
+        self.muted = muted or (ttk.Style().lookup('TLabel', 'foreground') or '#555')
+        self.background = background
+        self.make_tile = make_tile       # (parent, item, size) -> Label, click already bound by the caller
+        self.caption = caption           # (item) -> str or ''
+        self.batch = batch
+        self.tile_min = tile_min
+        self.tile_target = tile_target   # what a tile *wants* to be; the grid grows tiles towards it before adding
+        self.pad = pad
+        self.items = []
+        self.shown = 0
+        self.tile = 0
+        self.cols = 0
+        self.cells = {}                  # item key -> the tile Label, so selection can be painted
+        self._photos = {}                # (key, tile size) -> PhotoImage
+        self._resize_job = None
+
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, background=background)
+        self.bar = ttk.Scrollbar(self, orient='vertical', command=self._on_bar)
+        self.canvas.configure(yscrollcommand=self._on_scroll)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        self.bar.grid(row=0, column=1, sticky='ns')
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.inner = ttk.Frame(self.canvas)
+        self._window = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
+        self.canvas.bind('<Configure>', self._on_configure)
+        self.inner.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
+        for w in (self.canvas, self.inner):
+            w.bind('<MouseWheel>', self._wheel)
+        self.bind('<Map>', lambda e: self.after(60, self._apply_resize))
+
+    # -- public
+    def set_items(self, items):
+        """items: [{'key', 'path', 'label', ...}] - the caller keeps whatever else it needs in the dict."""
+        self.items = list(items)
+        self.shown = min(self.batch, len(self.items))
+        self.cells = {}
+        self._photos = {}
+        self._layout(rebuild=True)
+        self.canvas.yview_moveto(0)
+        # the first layout often runs before the window has its final width (a zoomed Toplevel reports its old size for
+        # a frame or two), so ask again once the geometry settles
+        self.after(80, self._apply_resize)
+
+    def set_shown(self, n):
+        if n != self.shown:
+            self.shown = max(0, min(int(n), len(self.items)))
+            self._layout(rebuild=True)
+
+    # -- layout
+    def _metrics(self):
+        """Columns from the width, and a tile that grows to fill it.
+
+        The first version derived the column count *and* the tile from `tile_min`, which converges: more width bought
+        more columns, every column stayed at the 96 px floor, and a 1560 px window showed eight small tiles with a
+        gutter. Column count now aims at `tile_target`, capped so a tile never falls below `tile_min`; the leftover
+        width goes into the tile.
+        """
+        width = self.canvas.winfo_width()
+        if width <= 1:
+            width = self.winfo_toplevel().winfo_width() or 900
+        widest = max(1, int((width - self.pad) // (self.tile_min + self.pad)))
+        cols = min(widest, max(1, int(round(width / float(self.tile_target)))))
+        tile = max(self.tile_min, (width - self.pad) // cols - self.pad)
+        return cols, tile
+
+    def _layout(self, rebuild=False):
+        cols, tile = self._metrics()
+        if not rebuild and (cols, tile) == (self.cols, self.tile):
+            return
+        self.cols, self.tile = cols, tile
+        for w in self.inner.winfo_children():
+            w.destroy()
+        self.cells = {}
+        for i, item in enumerate(self.items[:self.shown]):
+            cell = ttk.Frame(self.inner)
+            cell.grid(row=i // cols, column=i % cols, padx=self.pad // 2, pady=self.pad // 2, sticky='n')
+            lab = self.make_tile(cell, item, tile)
+            lab.pack()
+            self._bind_wheel(lab)
+            text = self.caption(item) if self.caption else ''
+            if text:
+                cap = tk.Label(cell, text=text, font=('Segoe UI', 8), foreground=self.muted,
+                               background=self.background, wraplength=max(80, tile - 8), justify='center')
+                cap.pack()
+                self._bind_wheel(cap)
+            self.cells[item['key']] = lab
+        self.canvas.itemconfigure(self._window, width=self.canvas.winfo_width())
+        self.root_after_scrollregion()
+
+    def root_after_scrollregion(self):
+        box = self.inner.bbox('all')
+        if box:
+            self.canvas.configure(scrollregion=box)
+
+    def _bind_wheel(self, widget):
+        widget.bind('<MouseWheel>', self._wheel)
+
+    # -- events
+    def _on_configure(self, event=None):
+        if self._resize_job:
+            try:
+                self.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.after(120, self._apply_resize)
+
+    def _apply_resize(self):
+        self._resize_job = None
+        self._layout(rebuild=True)
+        self.canvas.itemconfigure(self._window, width=self.canvas.winfo_width())
+
+    def _wheel(self, event):
+        self.canvas.yview_scroll(int(-event.delta / 120), 'units')
+        return 'break'
+
+    def _on_bar(self, *args):
+        self.canvas.yview(*args)
+        self._maybe_more()
+
+    def _on_scroll(self, first, last):
+        self.bar.set(first, last)
+        if float(last) >= 0.995:
+            self._maybe_more()
+
+    def _maybe_more(self):
+        if self.shown >= len(self.items):
+            return
+        self.set_shown(self.shown + self.batch)
 
 
 class App:
@@ -664,10 +984,15 @@ class App:
         self._draw = None             # (x0, y0, w, h) of the drawn image on the canvas
 
         root.title('Z-Image — prompt and picture')
+        # the host's colours, read before any widget is built so nothing is painted twice
+        self.theme = Theme(root)
+        self.theme.apply()
+        Tooltip.BG, Tooltip.FG = self.theme.tooltip_bg, self.theme.text
         try:
             root.state('zoomed')   # fill the screen: prompt left, picture right
         except Exception:
             root.geometry('1180x720')
+        root.after(150, self._ensure_maximized)
         # gallery + prompt column + picture: the controls need ~1200 before the picture column can hold its buttons
         root.minsize(1200, 700)
         root.columnconfigure(0, weight=0, minsize=210)
@@ -677,12 +1002,12 @@ class App:
 
         # ---- left: prompt + controls
         # ---- far left: the most recent images as thumbnails
-        plate = ttk.Style().lookup('TFrame', 'background') or '#f0f0f0'
+        plate = ttk.Style().lookup('TFrame', 'background') or self.theme.surface
         gal = ttk.Frame(root, padding=(10, 10, 4, 10))
         gal.grid(row=0, column=0, sticky='nsew')
         self.gal = gal
         gal.columnconfigure(0, weight=1)
-        self.group_var = tk.BooleanVar(value=False)
+        self.group_var = tk.BooleanVar(value=bool(self._settings.get('folders', True)))
         self._plan = None                 # the grouping plan, when computed
         self._active_folder = None        # index into self._plan['groups'], or None for everything
         self._grouping = False
@@ -712,13 +1037,20 @@ class App:
         # the open folder's pictures get their own pane beside the folder list, so the list never has to disappear
         self.contents_holder = ttk.Frame(gal)
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
+        # the pane is a second column of pictures: give it the column's spare width instead of a fixed 236 px
+        gal.columnconfigure(2, weight=1)
         self.contents_canvas = tk.Canvas(self.contents_holder, highlightthickness=0, borderwidth=0,
                                          background=plate, width=CONTENTS_W)
         self.contents_canvas.grid(row=0, column=0, sticky='nsew')
         self.contents_bar = ttk.Scrollbar(self.contents_holder, orient='vertical',
                                           command=self.contents_canvas.yview)
         self.contents_bar.grid(row=0, column=1, sticky='ns')
+        # the pane must stretch with the row, not sit at the canvas's requested 7 cm height (the folder list did, and
+        # the pictures were clipped to a two-row band under a much taller column)
+        self.contents_holder.rowconfigure(0, weight=1)
+        self.contents_holder.columnconfigure(0, weight=1)
         self.contents_canvas.configure(yscrollcommand=self.contents_bar.set)
+        self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
         self.contents.bind('<Configure>', self._on_contents_resize)
@@ -758,39 +1090,47 @@ class App:
 
         btns = ttk.Frame(gal)
         btns.grid(row=3, column=0, columnspan=2, sticky='ew')     # above the strip: buttons are never clipped
-        self.more_btn = ttk.Button(btns, text='View All', command=self.open_all)
-        self.more_btn.pack(fill='x')
-        self.refresh_btn = ttk.Button(btns, text='Refresh', command=self.refresh_gallery)
-        self.refresh_btn.pack(fill='x', pady=(3, 0))
-        self.folder_btn = ttk.Button(btns, text='Open folder', command=self.open_folder)
-        self.folder_btn.pack(fill='x', pady=(3, 0))
+        # Four rows instead of eight full-width ones. The column is barely two folder tiles wide, so one stacked button
+        # per action cost ~180 px of picture height for no information; pairing them costs half of that.
+        toprow = ttk.Frame(btns)
+        toprow.pack(fill='x')
+        self.more_btn = ttk.Button(toprow, text='View All', command=self.open_all)
+        self.more_btn.pack(side='left', fill='x', expand=True)
+        self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked)
+        self.folders_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+
+        toolrow = ttk.Frame(btns)
+        toolrow.pack(fill='x', pady=(3, 0))
+        self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery)
+        self.refresh_btn.pack(side='left')
+        self.log_btn = ttk.Button(toolrow, text='Run log', command=self.show_run_log)
+        self.log_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.folder_btn = ttk.Button(toolrow, text='Open dir', command=self.open_folder)
+        self.folder_btn.pack(side='left', fill='x', expand=True)
+        self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False))
+        self.collapse_btn.pack(side='left', padx=(3, 0))
 
         selrow = ttk.Frame(btns)
-        selrow.pack(fill='x', pady=(6, 0))
-        self.sel_all_btn = ttk.Button(selrow, text='Select all', command=self.select_all)
-        self.sel_all_btn.pack(side='left', fill='x', expand=True)
-        self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
-        self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.star_btn = ttk.Button(btns, text='\u2605 Star', command=self.toggle_star)
-        self.star_btn.pack(fill='x', pady=(6, 0))
-        sortrow = ttk.Frame(btns)
-        sortrow.pack(fill='x', pady=(6, 0))
-        ttk.Label(sortrow, text='order', foreground='#666').pack(side='left')
+        selrow.pack(fill='x', pady=(3, 0))
+        ttk.Label(selrow, text='order', foreground=self.theme.muted).pack(side='left')
         # wins travel with the picture, so "Wins" is a stable order across folders and restarts
         self.sort_var = tk.StringVar(value='Recent')
-        self.sort_cb = ttk.Combobox(sortrow, state='readonly', width=8, values=['Recent', 'Wins'],
+        self.sort_cb = ttk.Combobox(selrow, state='readonly', width=7, values=['Recent', 'Wins'],
                                     textvariable=self.sort_var)
-        self.sort_cb.pack(side='left', padx=(4, 0))
+        self.sort_cb.pack(side='left', padx=(3, 0))
         self.sort_cb.bind('<<ComboboxSelected>>', lambda e: self._resort())
-        self.log_btn = ttk.Button(btns, text='Run log', command=self.show_run_log)
-        self.log_btn.pack(fill='x', pady=(3, 0))
-        self.collapse_btn = ttk.Button(btns, text='Hide gallery \u00ab', command=lambda: self.set_sidebar(False))
-        self.collapse_btn.pack(fill='x', pady=(6, 0))
+        self.star_btn = ttk.Button(selrow, text='\u2605', width=3, command=self.toggle_star)
+        self.star_btn.pack(side='left', padx=(3, 0))
+        self.sel_all_btn = ttk.Button(selrow, text='All', width=4, command=self.select_all)
+        self.sel_all_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
+        self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
 
-        self.sel_label = ttk.Label(btns, text='', foreground='#2a6df4')
-        self.sel_label.pack(anchor='w', pady=(3, 0))
-        ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
-                  foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
+        self.sel_label = ttk.Label(btns, text='', foreground=self.theme.accent)
+        self.sel_label.pack(anchor='w', pady=(2, 0))
+        self.hint_label = ttk.Label(btns, text='ctrl+click adds \u00b7 shift ranges \u00b7 Del \u00b7 Ctrl+A',
+                                    foreground=self.theme.muted, font=('Segoe UI', 8), justify='left')
+        self.hint_label.pack(anchor='w')
         gal.rowconfigure(3, weight=0)   # the buttons, fixed height
         gal.rowconfigure(4, weight=1)   # the strip takes whatever is left
         self._strip_cols_seen = None
@@ -809,7 +1149,11 @@ class App:
         ttk.Label(left, text='Prompt  (Enter generates · Shift+Enter adds a line · Ctrl+\u2191/\u2193 recalls)'
                   ).grid(row=0, column=0, sticky='w')
         # a tall minimum height here pushes the rows below it off the bottom of the window once Advanced opens
-        self.text = tk.Text(left, wrap='word', width=48, height=7, undo=True, font=('Segoe UI', 10))
+        self.text = tk.Text(left, wrap='word', width=48, height=7, undo=True, font=('Segoe UI', 10),
+                            background=self.theme.field, foreground=self.theme.text,
+                            insertbackground=self.theme.text, selectbackground=self.theme.accent,
+                            selectforeground=self.theme.on_accent, highlightthickness=1,
+                            highlightbackground=self.theme.border, relief='flat')
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
@@ -907,7 +1251,7 @@ class App:
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
         ttk.Label(self.base_row, text='base:').pack(side='left')
         # a fixed character width, so a long file name cannot change the column's width
-        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground='#555',
+        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground=self.theme.muted,
                                     width=24, anchor='w')
         self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
@@ -967,7 +1311,7 @@ class App:
                                     disabledforeground='#c9e6d2', relief='flat', bd=0,
                                     height=2, cursor='hand2', takefocus=True)
         self.gen_btn.grid(row=11, column=0, sticky='ew', pady=(0, 0))
-        self.last_label = ttk.Label(left, text='', foreground='#555', anchor='center')
+        self.last_label = ttk.Label(left, text='', foreground=self.theme.muted, anchor='center')
         self.last_label.grid(row=12, column=0, sticky='ew', pady=(6, 0))
 
         self.advanced = ttk.Frame(left)
@@ -983,7 +1327,7 @@ class App:
                                      textvariable=self.seed_step_var)
         self.seed_step.pack(side='left', padx=(4, 4))
         ttk.Label(adv_step, text='added per tile: 1 = seed, seed+1, seed+2 ...',
-                  foreground='#666').pack(side='left')
+                  foreground=self.theme.muted).pack(side='left')
 
         adv_sweep = ttk.Frame(self.advanced)
         adv_sweep.pack(fill='x', pady=(4, 0))
@@ -995,7 +1339,7 @@ class App:
         self.sweep_values = tk.StringVar(value='')
         ttk.Entry(adv_sweep, textvariable=self.sweep_values, width=14).pack(side='left')
         ttk.Label(adv_sweep, text='e.g. 1,2,3 or 1..4x6 (blank = spread over the tiles)',
-                  foreground='#666').pack(side='left', padx=(4, 0))
+                  foreground=self.theme.muted).pack(side='left', padx=(4, 0))
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
@@ -1009,7 +1353,10 @@ class App:
         adv2 = ttk.Frame(self.advanced)
         adv2.pack(fill='x', pady=(4, 0))
         ttk.Label(adv2, text='negative').pack(side='left', anchor='n')
-        self.negative = tk.Text(adv2, height=2, width=42, wrap='word', font=('Segoe UI', 9))
+        self.negative = tk.Text(adv2, height=2, width=42, wrap='word', font=('Segoe UI', 9),
+                                background=self.theme.field, foreground=self.theme.text,
+                                insertbackground=self.theme.text, relief='flat', highlightthickness=1,
+                                highlightbackground=self.theme.border)
         self.negative.pack(side='left', padx=(4, 0), fill='x', expand=True)
         if not (self._settings.get('advanced') or False):
             self.advanced.grid_remove()
@@ -1017,26 +1364,26 @@ class App:
         # ---- middle: progress (sits under the button, above the status line)
         # the banner answers the only question that matters before pressing Enter
         # wraplength caps the requested width, so a long file name can never widen this column
-        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground='#1a1a1a',
+        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground=self.theme.text,
                                 wraplength=396, justify='left')
         self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
         self._tip(self.banner, 'What the next Generate will do, with the base file name in full.')
-        self.ticks = ttk.Label(left, text='', foreground='#2a6df4', font=('Consolas', 10))
+        self.ticks = ttk.Label(left, text='', foreground=self.theme.accent, font=('Consolas', 10))
         self.ticks.grid(row=4, column=0, sticky='w')
 
         self.bar = ttk.Progressbar(left, mode='determinate', maximum=1.0)
         self.bar.grid(row=5, column=0, sticky='ew', pady=(4, 2))
         self.bar.grid_remove()
-        self.status = ttk.Label(left, text='starting…', foreground='#555')
+        self.status = ttk.Label(left, text='starting…', foreground=self.theme.muted)
         self.status.grid(row=6, column=0, sticky='w')
-        self.hint = ttk.Label(left, text='', foreground='#555', wraplength=430, justify='left',
+        self.hint = ttk.Label(left, text='', foreground=self.theme.muted, wraplength=430, justify='left',
                               font=('Segoe UI', 9))
         self.hint.grid(row=7, column=0, sticky='w', pady=(4, 0))
 
         self.starters = ttk.Frame(left)
         self.starters.grid(row=7, column=0, sticky='w', pady=(4, 0))
         ttk.Label(self.starters, text='Nothing generated yet. Try one of these:',
-                  foreground='#555').pack(anchor='w')
+                  foreground=self.theme.muted).pack(anchor='w')
         for label, prompt in STARTER_PROMPTS:
             b = ttk.Button(self.starters, text=label, width=9,
                            command=lambda p=prompt: self.use_starter(p))
@@ -1049,7 +1396,7 @@ class App:
         right.grid(row=0, column=2, sticky='nsew')
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
-        self.canvas = tk.Canvas(right, background='#f4f4f5', highlightthickness=0)
+        self.canvas = tk.Canvas(right, background=self.theme.window, highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
@@ -1065,7 +1412,7 @@ class App:
         self.graph_btn.pack(side='left', padx=(6, 0))
         self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
         self.describe_btn.pack(side='left', padx=(6, 0))
-        self.copy_status = ttk.Label(tools, text='', foreground='#555')
+        self.copy_status = ttk.Label(tools, text='', foreground=self.theme.muted)
         self.copy_status.pack(side='left', padx=(8, 0))
         # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
         self.actions = ttk.Frame(right)
@@ -1111,7 +1458,7 @@ class App:
         for label, idx in ((u'\u25c0', 0), (u'\u25b2', 1), (u'\u25b6', 2), (u'\u25bc', 3)):
             b = ttk.Button(act3, text=label, width=2, command=lambda i=idx: self.add_pad(i))
             b.pack(side='left', padx=(2, 0))
-        self.pad_label = ttk.Label(act3, text='', foreground='#2a6df4')
+        self.pad_label = ttk.Label(act3, text='', foreground=self.theme.accent)
         self.pad_label.pack(side='left', padx=(6, 0))
         self.pin_btn = ttk.Button(act3, text='pin', command=self.pin_current, state='disabled')
         self.pin_btn.pack(side='left', padx=(8, 0))
@@ -1154,6 +1501,26 @@ class App:
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
+        # Folders are the default view. Grouping reads a sidecar per picture, so it waits for the window to exist and
+        # for the first paint instead of running during construction.
+        if self.group_var.get():
+            self.root.after(200, lambda: self.toggle_groups(True) if not self._plan else None)
+
+    def _ensure_maximized(self):
+        """Ask again once the window is mapped.
+
+        `state('zoomed')` before the window is mapped is silently ignored on some Tk/Windows combinations, and a later
+        `minsize` can un-maximise it; so the state is confirmed and, failing that, the window is placed on the work area.
+        """
+        try:
+            if self.root.state() != 'zoomed':
+                self.root.state('zoomed')
+        except Exception:
+            pass
+        try:
+            self.theme.dark_titlebar()      # the title bar is only real once the window exists
+        except Exception:
+            pass
 
     # -- gallery: thumbnails -------------------------------------------------
     def _scan(self):
@@ -1252,6 +1619,8 @@ class App:
         """Turn the prompt folders on: compute them in the background, oldest first, and touch nothing on disk."""
         want = bool(self.group_var.get()) if on is None else bool(on)
         self.group_var.set(want)
+        self._settings['folders'] = want
+        save_settings(self._settings)
         if not want:
             self._plan, self._active_folder, self._grouping = None, None, False
             self.folder_bar.grid_remove()
@@ -1261,6 +1630,13 @@ class App:
         self.folder_bar.grid()
         self._render_folder_bar()
         threading.Thread(target=self._compute_groups, daemon=True).start()
+
+    def _folders_clicked(self):
+        """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
+        if self._plan:
+            self.open_folder_browser()
+        else:
+            self.toggle_groups(True)
 
     def _compute_groups(self):
         """Background: prompts only, no images decoded, no model, no file written."""
@@ -1293,31 +1669,123 @@ class App:
                                  plan.get('seconds') or 0, len(plan['recent'])))
 
     def _render_folder_bar(self):
-        """One compact selector instead of a row of chips.
+        """A folder *button*, not a dropdown: it names what is open and it opens the full-screen folder browser.
 
-        The chips were a layout bug: eight buttons with folder names demanded ~1,330 px, and because a grid column is
-        given at least the width its children request, the gallery column grew to that width and squeezed the picture
-        pane and the prompt column to nothing (seen in a 2560-px-wide screenshot, 2026-10-27). A readonly combobox has
-        a fixed width the column can live with, and the full list is still one click away in `more...`.
+        The dropdown was the wrong shape twice over. It hid every folder but one, in a column too narrow to show the
+        names even when opened, and the "..." list beside it was a Treeview of text in a picture application. The
+        browser it opens is the same shape as View All - tiles that fill the window, wheel scrolling, infinite
+        scrolling - so there is one interaction to learn, and the strip no longer has to double as the folder index.
         """
         for w in self.folder_bar.winfo_children():
             w.destroy()
         if self._grouping:
-            ttk.Label(self.folder_bar, text='grouping prompts\u2026', foreground='#666').pack(side='left')
+            ttk.Label(self.folder_bar, text='grouping prompts\u2026', foreground=self.theme.muted).pack(side='left')
             return
         if not self._plan:
             return
         self._folder_choices = [None] + list(range(len(self._plan['groups'])))
-        self.folder_cb = ttk.Combobox(self.folder_bar, state='readonly', width=20,
-                                      values=[self._folder_text(i) for i in self._folder_choices])
-        self.folder_cb.current(0 if self._active_folder is None else self._folder_choices.index(self._active_folder))
-        self.folder_cb.pack(side='left')
-        self.folder_cb.bind('<<ComboboxSelected>>', self._on_folder_pick)
-        if self._active_folder is not None:
-            ttk.Button(self.folder_bar, text='\u2039 folders', width=9,
-                       command=lambda: self.select_folder(None)).pack(side='left', padx=(3, 0))
+        name = 'All folders' if self._active_folder is None else self._folder_text(self._active_folder)
+        self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s \u25b8' % name, width=17,
+                                          command=self.open_folder_browser)
+        self.folder_pick_btn.pack(side='left')
         ttk.Button(self.folder_bar, text='A/B', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
-        ttk.Button(self.folder_bar, text='\u2026', width=2, command=self.show_folders).pack(side='left', padx=(2, 0))
+
+    # -- the full-screen folder browser -------------------------------------------------------------
+    def open_folder_browser(self):
+        """Every folder, full screen: 4-up tiles on the left, the open folder's pictures in a grid on the right.
+
+        Same mechanism as View All (ScrollGrid), so both scale to the window and scroll the same way.
+        """
+        if not self._plan:
+            self.hint.configure(text='turn folders on first - grouping takes a second')
+            return
+        existing = getattr(self, '_folder_win', None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
+        from PIL import ImageTk
+
+        win = tk.Toplevel(self.root)
+        self._folder_win = win
+        win.title('Prompt folders (%d)' % len(self._plan['groups']))
+        try:
+            win.state('zoomed')
+        except Exception:
+            win.geometry('1200x800')
+
+        head = ttk.Frame(win)
+        head.pack(side='top', fill='x', padx=8, pady=(8, 4))
+        chosen = ttk.Label(head, text='', foreground='#222')
+        chosen.pack(side='left')
+        count = ttk.Label(head, text='', foreground=self.theme.muted)
+        count.pack(side='left', padx=(10, 0))
+        ttk.Button(head, text='A/B review', command=lambda: self.review_start()).pack(side='right', padx=(6, 0))
+        ttk.Button(head, text='Close', command=self._close_folder_browser).pack(side='right')
+
+        body = ttk.Frame(win)
+        body.pack(fill='both', expand=True, padx=8, pady=(0, 8))
+        body.columnconfigure(0, weight=0, minsize=300)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        def folder_tile(parent, item, size):
+            photo = ImageTk.PhotoImage(self._folder_sheet(item['group'], size))
+            lab = tk.Label(parent, image=photo, bd=1, relief='flat', cursor='hand2', background=self.theme.sheet_bg)
+            lab.image = photo
+            lab.bind('<Button-1>', lambda e, i=item['index']: pick(i))
+            return lab
+
+        def picture_tile(parent, item, size):
+            path = item['path']
+            tp = thumb_for(path)
+            if not tp:
+                return tk.Label(parent, text=path.name[:18], width=12, height=6,
+                                background=self.theme.window, foreground=self.theme.muted)
+            try:
+                with Image.open(tp) as im:
+                    im.thumbnail((size, size), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(im)
+            except Exception:
+                return tk.Label(parent, text='?', width=6)
+            lab = self._tile_widget(parent, path, photo, browser=True)
+            lab.image = photo
+            return lab
+
+        def folder_caption(item):
+            group = item['group']
+            return '%s\n%d pictures' % (group.get('title') or group['label'], len(group['items']))
+
+        left = ScrollGrid(body, folder_tile, caption=folder_caption, batch=40, tile_target=150,
+                          background=self.theme.window, muted=self.theme.muted)
+        left.grid(row=0, column=0, sticky='nsew')
+        right = ScrollGrid(body, picture_tile, caption=lambda item: item['path'].name[:26], batch=80,
+                           tile_target=190, background=self.theme.window, muted=self.theme.muted)
+        right.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
+
+        def pick(index):
+            self.select_folder(index)
+            chosen.configure(text='All pictures' if index is None else self._folder_text(index))
+            paths = self._all_files() if index is None else [
+                Path(r['path']) for r in self._plan['groups'][index]['items']]
+            right.set_items([{'key': p, 'path': p} for p in paths])
+            count.configure(text='%d picture%s' % (len(paths), '' if len(paths) == 1 else 's'))
+
+        everything = {'label': 'All pictures', 'title': 'All pictures',
+                      'items': [{'path': str(p)} for p in self._all_files()]}
+        items = [{'key': 'all', 'index': None, 'group': everything}]
+        for i, g in enumerate(self._plan['groups']):
+            items.append({'key': str(i), 'index': i, 'group': g})
+        left.set_items(items)
+        pick(self._active_folder)
+        win.protocol('WM_DELETE_WINDOW', self._close_folder_browser)
+
+    def _close_folder_browser(self):
+        win = getattr(self, '_folder_win', None)
+        self._folder_win = None
+        if win is not None and win.winfo_exists():
+            win.destroy()
 
     def _folder_text(self, index):
         """Short label for the selector: the folder's name and size, or All with the full picture count."""
@@ -1333,54 +1801,28 @@ class App:
         cut = label[:16].rsplit(' ', 1)[0] if len(label) > 16 else label
         return '%s\u2026 (%d)' % (cut or label[:16], len(g['items'])) if len(label) > 16 else '%s (%d)' % (label, len(g['items']))
 
-    def _on_folder_pick(self, event=None):
-        pos = self.folder_cb.current()
-        self.select_folder(self._folder_choices[pos] if 0 <= pos < len(self._folder_choices) else None)
 
     def select_folder(self, index):
         self._active_folder = index
+        # With a folder open the gallery column is two columns of pictures, so it is allowed to claim the empty space
+        # the picture pane leaves; with no folder open it goes back to hugging its content.
+        try:
+            self.root.columnconfigure(0, weight=1 if index is not None else 0)
+        except Exception:
+            pass
         self._content_shown = BATCH_CONTENTS
         self._render_contents()
         try:
             self.contents_canvas.yview_moveto(0)
         except Exception:
             pass
-        if getattr(self, 'folder_cb', None) is not None and self._plan:
+        if getattr(self, 'folder_pick_btn', None) is not None and self._plan:
             try:
-                if index is None:
-                    self.folder_cb.set(self._folder_text(None))
-                else:
-                    self.folder_cb.set(self._folder_text(index))
+                name = 'All folders' if index is None else self._folder_text(index)
+                self.folder_pick_btn.configure(text='%s \u25b8' % name)
             except Exception:
                 pass
         self.refresh_gallery()
-
-    def show_folders(self):
-        """Every folder in a list, since the bar only has room for the biggest few."""
-        if not self._plan:
-            return
-        win = tk.Toplevel(self.root)
-        win.title('Prompt folders (%d)' % len(self._plan['groups']))
-        win.geometry('560x420')
-        box = ttk.Treeview(win, columns=('n', 'oldest'), show='tree headings', height=18)
-        box.heading('#0', text='folder')
-        box.heading('n', text='pictures')
-        box.heading('oldest', text='oldest')
-        box.column('#0', width=340)
-        box.column('n', width=70, anchor='e')
-        box.column('oldest', width=120)
-        for i, g in enumerate(self._plan['groups']):
-            box.insert('', 'end', iid=str(i), text=g['label'], values=(len(g['items']), g['oldest'][:16]))
-        box.pack(fill='both', expand=True, padx=8, pady=8)
-
-        def open_row(_=None):
-            sel = box.selection()
-            if sel:
-                self.select_folder(int(sel[0]))
-                win.destroy()
-        box.bind('<Double-1>', open_row)
-        ttk.Button(win, text='Show', command=open_row).pack(pady=(0, 8))
-
 
     # -- paired A/B review of one folder --------------------------------------------------------------
     def review_start(self, index=None):
@@ -1425,12 +1867,12 @@ class App:
             win.state('zoomed')
         except Exception:
             win.geometry('%dx%d+0+0' % (self.root.winfo_screenwidth(), self.root.winfo_screenheight()))
-        win.configure(background='#111')
+        win.configure(background=_mix('#000000', self.theme.window, 0.35))
         win.columnconfigure(0, weight=1)
         win.columnconfigure(1, weight=1)
         win.rowconfigure(0, weight=1)
-        left_lbl = tk.Label(win, background='#111', foreground='#ddd', compound='center')
-        right_lbl = tk.Label(win, background='#111', foreground='#ddd', compound='center')
+        left_lbl = tk.Label(win, background=_mix('#000000', self.theme.window, 0.35), foreground='#ddd', compound='center')
+        right_lbl = tk.Label(win, background=_mix('#000000', self.theme.window, 0.35), foreground='#ddd', compound='center')
         left_lbl.grid(row=0, column=0, sticky='nsew', padx=(6, 3), pady=6)
         right_lbl.grid(row=0, column=1, sticky='nsew', padx=(3, 6), pady=6)
         for lbl in (left_lbl, right_lbl):
@@ -1671,19 +2113,22 @@ class App:
                 and not self.search_var.get().strip() and not self.starred_only.get())
 
     def _folder_sheet(self, group, size):
-        """A 3x3 contact sheet of a folder's first nine pictures, built from the thumbnail cache.
+        """A 2x2 contact sheet of a folder's first four pictures, built from the thumbnail cache.
 
-        One PhotoImage per folder instead of nine keeps a 60-folder view cheap, and the sheet is memoised so scrolling or
-        a redraw does not re-compose it.
+        Four rather than nine because the tile has to sit two-up in the first column: a nine-up sheet demanded ~270 px
+        and left room for one folder per row. One PhotoImage per folder instead of four keeps a 60-folder view cheap,
+        and the sheet is memoised so scrolling or a redraw does not re-compose it.
         """
         from PIL import Image as _I
-        key = (group['label'], len(group['items']), size, group['items'][0]['path'] if group['items'] else '')
+        head = tuple(r['path'] for r in group['items'][:FOLDER_CELLS])
+        key = (group['label'], len(group['items']), size, head)
         hit = self._sheets.get(key)
         if hit is not None:
             return hit
-        cell = size // 3
-        sheet = _I.new('RGB', (size, size), '#1b1b1b')
-        paths = [r['path'] for r in group['items'][:9]]
+        side = 2 if FOLDER_CELLS == 4 else 3
+        cell = size // side
+        sheet = _I.new('RGB', (size, size), self.theme.sheet_bg)
+        paths = list(head)
         thumbs = thumbs_for(paths)
         for i, path in enumerate(paths):
             tp = thumbs.get(path)
@@ -1693,8 +2138,8 @@ class App:
                 with _I.open(tp) as im:
                     im = im.convert('RGB')
                     im.thumbnail((cell - 2, cell - 2), _I.LANCZOS)
-                    sheet.paste(im, ((i % 3) * cell + (cell - im.width) // 2,
-                                     (i // 3) * cell + (cell - im.height) // 2))
+                    sheet.paste(im, ((i % side) * cell + (cell - im.width) // 2,
+                                     (i // side) * cell + (cell - im.height) // 2))
             except Exception:
                 continue
         self._sheets[key] = sheet
@@ -1705,7 +2150,8 @@ class App:
     def _render_contents(self):
         """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click."""
         from PIL import ImageTk
-        if self._active_folder is None or not self._plan:
+        if self._active_folder is None or not self._plan or self._active_folder >= len(self._plan['groups']):
+            self._active_folder = None
             self.contents_holder.grid_remove()
             return
         group = self._plan['groups'][self._active_folder]
@@ -1715,7 +2161,12 @@ class App:
         for w in self.contents.winfo_children():
             w.destroy()
         self._content_widgets = {}
-        cols = max(1, (CONTENTS_W - 12) // (RECENT_PX + 6))
+        width = self.contents_canvas.winfo_width()
+        if width <= 1:
+            width = CONTENTS_W
+        # three per row is the floor the screen asks for; wider pane, more columns, bigger tiles either way
+        cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
+        tile_px = max(48, (width - 8) // cols - 6)
         items = list(group['items'])
         if self._sort_wins():
             import pair_rank
@@ -1729,7 +2180,7 @@ class App:
                 continue
             try:
                 with Image.open(tp) as im:
-                    im.thumbnail((RECENT_PX, RECENT_PX), Image.LANCZOS)
+                    im.thumbnail((tile_px, tile_px), Image.LANCZOS)
                     photo = ImageTk.PhotoImage(im)
             except Exception:
                 continue
@@ -1743,7 +2194,7 @@ class App:
             except Exception:
                 mark = ''
             if mark:
-                ttk.Label(cell, text=mark, font=('Segoe UI', 7), foreground='#1a6b2a').pack()
+                ttk.Label(cell, text=mark, font=('Segoe UI', 7), foreground=self.theme.win_mark).pack()
             self._content_widgets[Path(row['path'])] = lab
         self._rebuilding = False
         self.root.after_idle(self._on_contents_resize)
@@ -1759,6 +2210,13 @@ class App:
     def _on_contents_resize(self, event=None):
         if getattr(self, '_rebuilding', False):
             return
+        width = self.contents_canvas.winfo_width()
+        cols = max(3, int((max(width, 1) - 8) // (STRIP_TILE_MIN + 6)))
+        if cols != getattr(self, '_contents_cols_seen', None):
+            self._contents_cols_seen = cols
+            if getattr(self, '_content_widgets', None):
+                self._render_contents()      # the pane is three-up at this width; reflow to fill it
+                return
         box = self.contents_canvas.bbox('all')
         if box:
             self.contents_canvas.configure(scrollregion=box)
@@ -1797,40 +2255,58 @@ class App:
             self._render_contents()
 
     def _render_folder_tiles(self):
-        """Large tiles: a 9-up thumbnail, the folder's full name wrapped, and how many pictures it holds."""
+        """Folder tiles, two per row: a 4-up (2x2) sheet, the full name wrapped, and the picture count.
+
+        Two per row is the point of the 4-up sheet - at 3x3 one tile needed ~270 px and the column held exactly one,
+        which is what the 2026-10-27 screenshot showed. The tile width is derived from the column, so both tiles always
+        fill it instead of leaving a gutter.
+        """
         from PIL import ImageTk
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
         width = max(190, self.gal_canvas.winfo_width() - 10)
-        sheet_px = max(150, min(width, 300))
+        cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
+        sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
-            tile = ttk.Frame(self.recent, padding=(2, 4))
-            tile.pack(fill='x', padx=2, pady=3)
+            tile = ttk.Frame(self.recent, padding=(2, 3))
+            tile.grid(row=index // cols, column=index % cols, padx=2, pady=2, sticky='n')
             photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px))
-            pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background='#1b1b1b')
+            pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background=self.theme.sheet_bg)
             pic.image = photo
             pic.pack()
             title = tk.Label(tile, text=group.get('title') or group['label'], wraplength=sheet_px - 4,
-                             justify='left',
-                             anchor='w', font=('Segoe UI', 8), foreground='#333')
+                             justify='left', anchor='w', font=('Segoe UI', 8),
+                             foreground=self.theme.text, background=self.theme.window)
             title.pack(fill='x', pady=(3, 0))
             meta = tk.Label(tile, text='%d pictures' % len(group['items']), anchor='w',
-                            font=('Segoe UI', 8), foreground='#777')
+                            font=('Segoe UI', 8), foreground=self.theme.muted,
+                            background=self.theme.window)
             meta.pack(fill='x')
             for w in (tile, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self.select_folder(i))
         self.root.after_idle(self._on_strip_resize)
 
-    def _strip_cols(self):
-        """How many tiles fit across the strip right now (it was a fixed 3, which wasted a wide window)."""
+    def _strip_metrics(self):
+        """Columns and tile size for the strip, from the width it actually has.
+
+        The strip used to paint fixed 92 px tiles and take as many columns as fitted, which wasted the leftover width
+        on a wide column. Now the column count follows the width and the tile *grows* into what is left, so the list
+        uses the whole column instead of leaving a gutter.
+        """
         try:
             w = self.gal_canvas.winfo_width()
         except Exception:
             w = 0
         if w <= 1:
             w = RECENT_COLS * (RECENT_PX + 8)
-        return max(1, w // (RECENT_PX + 6))
+        pad = 4
+        cols = max(1, int((w - pad) // (STRIP_TILE_MIN + pad)))
+        tile = max(STRIP_TILE_MIN, (w - pad) // cols - pad)
+        return cols, tile
+
+    def _strip_cols(self):
+        return self._strip_metrics()[0]
 
     def refresh_gallery(self, select=None):
         strip_pos = self._scroll_pos(self.gal_canvas)
@@ -1875,7 +2351,7 @@ class App:
             self._render_folder_tiles()
             return
         self.gal_title.configure(text=label)
-        cols = self._strip_cols()
+        cols, tile_px = self._strip_metrics()
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
@@ -1887,7 +2363,7 @@ class App:
             try:
                 from PIL import ImageTk
                 im = Image.open(tp)
-                im.thumbnail((RECENT_PX, RECENT_PX), Image.LANCZOS)
+                im.thumbnail((tile_px, tile_px), Image.LANCZOS)
                 ph = ImageTk.PhotoImage(im)
             except Exception:
                 continue
@@ -1916,9 +2392,9 @@ class App:
 
     def _apply_strip_resize(self):
         self._strip_job = None
-        cols = self._strip_cols()
-        if cols != getattr(self, '_strip_cols_seen', None):
-            self._strip_cols_seen = cols
+        cols, tile = self._strip_metrics()
+        if (cols, tile) != getattr(self, '_strip_cols_seen', None):
+            self._strip_cols_seen = (cols, tile)
             if self._tile_widgets:
                 self.root.after_idle(self.refresh_gallery)   # the tile grid follows the width
                 return
@@ -2638,8 +3114,8 @@ class App:
 
     def _paint(self):
         """Colour the selection ring and the base-image border without rebuilding thumbnails."""
-        ring = '#2a6df4'
-        plate = ttk.Style().lookup('TFrame', 'background') or '#f0f0f0'
+        ring = self.theme.accent
+        plate = ttk.Style().lookup('TFrame', 'background') or self.theme.surface
         base_name = self.base_path.name if self.base_path else None
         seen = {}
         seen.update(self._tile_widgets)
@@ -2871,54 +3347,45 @@ class App:
         only.pack(side='left')
         ttk.Button(head, text='\u2605 Star selected', command=lambda: (self.toggle_star(), render())).pack(
             side='left', padx=(8, 0))
-        count = ttk.Label(head, text='', foreground='#555')
+        count = ttk.Label(head, text='', foreground=self.theme.muted)
         count.pack(side='left', padx=(10, 0))
 
         foot = ttk.Frame(win)
         foot.pack(side='bottom', fill='x', pady=6, padx=8)
-        bar = ttk.Scrollbar(win, orient='vertical')
-        bar.pack(side='right', fill='y')
-        canvas = tk.Canvas(win, highlightthickness=0, background='#f4f4f5', yscrollcommand=bar.set)
-        canvas.pack(side='left', fill='both', expand=True)
-        bar.configure(command=canvas.yview)
-        inner = ttk.Frame(canvas)
-        canvas.create_window((0, 0), window=inner, anchor='nw')
-        inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        wheel = lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units')
-        for w in (canvas, inner):
-            w.bind('<MouseWheel>', wheel)
-
-        cols = 6
         self._all_thumbs = {}
         self._all_widgets = {}
         self._browser_files = []
 
+        def make_tile(parent, item, size):
+            path = item['path']
+            tp = thumb_for(path)
+            if not tp:
+                return tk.Label(parent, text=path.name[:12], width=8, height=4,
+                                background=self.theme.window, foreground=self.theme.muted)
+            try:
+                with Image.open(tp) as im:
+                    im.thumbnail((size, size), Image.LANCZOS)
+                    ph = ImageTk.PhotoImage(im)
+            except Exception:
+                return tk.Label(parent, text='?', width=4)
+            self._all_thumbs[path] = ph
+            lab = self._tile_widget(parent, path, ph, browser=True)
+            lab.image = ph
+            self._all_widgets[Path(path)] = lab
+            return lab
+
+        # One grid, shared with the folder browser: columns follow the window, the tile grows to fill it, the wheel
+        # scrolls under the pointer, and the next batch is appended at the bottom instead of laying out the lot.
+        grid = ScrollGrid(win, make_tile, caption=lambda item: item['path'].name[:26], batch=90,
+                          tile_target=190, background=self.theme.window, muted=self.theme.muted)
+        grid.pack(side='top', fill='both', expand=True, padx=8, pady=(4, 0))
+
         def render(*_):
-            for w in inner.winfo_children():
-                w.destroy()
-            self._all_widgets = {}
             files = self._visible_files()
             self._browser_files = list(files)
+            self._all_widgets = {}
             count.configure(text='%d image%s shown' % (len(files), '' if len(files) == 1 else 's'))
-            for i, p in enumerate(files):
-                tp = thumb_for(p)
-                if not tp:
-                    continue
-                try:
-                    ph = ImageTk.PhotoImage(Image.open(tp))
-                except Exception:
-                    continue
-                self._all_thumbs[p] = ph
-                cell = tk.Frame(inner)
-                cell.grid(row=i // cols, column=i % cols, padx=3, pady=3)
-                lab = self._tile_widget(cell, p, ph, browser=True)
-                lab.configure(width=tp and 0)
-                lab.pack()
-                self._all_widgets[Path(p)] = lab
-                cap = tk.Label(cell, text=p.name[:24], font=('Segoe UI', 7), foreground='#555')
-                cap.pack()
-                cap.bind('<Button-1>', lambda e, q=p: self._on_tile_click(e, q, browser=True))
-            canvas.yview_moveto(0)
+            grid.set_items([{'key': Path(p), 'path': Path(p)} for p in files])
             self._paint()
 
         def close_browser():
@@ -3010,7 +3477,7 @@ class App:
             return None
         x0, y0 = self._crop_start
         if self._crop_item is None:
-            self._crop_item = self.canvas.create_rectangle(x0, y0, event.x, event.y, outline='#2a6df4',
+            self._crop_item = self.canvas.create_rectangle(x0, y0, event.x, event.y, outline=self.theme.accent,
                                                            width=2, dash=(4, 3))
         else:
             self.canvas.coords(self._crop_item, x0, y0, event.x, event.y)
@@ -3258,10 +3725,10 @@ class App:
         if not hasattr(self, 'banner'):
             return
         if self.base_path is None:
-            mode, colour = 'TEXT → IMAGE', '#1a1a1a'
+            mode, colour = 'TEXT → IMAGE', self.theme.text
         else:
             mode = 'EDIT %s at %.2f' % (self._short_name(self.base_path.name), self.denoise.get())
-            colour = '#2a6df4'
+            colour = self.theme.accent
         n = self._batch()
         what = 'one image' if n == 1 else '%d tiles' % n
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
@@ -3272,7 +3739,7 @@ class App:
             vram = None
         vram_text = '   ·   VRAM ≈ %.1f/%.1f GiB' % (vram / 1024.0, VRAM_TOTAL_MIB / 1024.0) if vram else ''
         if vram and vram > VRAM_TOTAL_MIB - 400:
-            colour = '#c0392b'
+            colour = self.theme.error
         self.banner.configure(text='%s   ·   %s · %s steps · %s · %s px · %s   ·   '
                                    'style %s   ·   seed %s%s%s'
                                    % (mode, model, self.steps_var.get(), self.sampler_var.get(),
@@ -3904,14 +4371,22 @@ def main(argv):
     ap.add_argument('--auto', action='store_true', help='generate once as soon as the server is ready')
     args = ap.parse_args(argv)
 
+    # Per-monitor DPI awareness, before the window exists. Without it Windows scales the finished window as a bitmap,
+    # so text and thumbnails go soft on every display whose scale factor is not 100 %.
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)          # PROCESS_PER_MONITOR_DPI_AWARE
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
     engine = Engine(args.port, autostart=not args.no_autostart, progress=not args.no_progress)
     engine.start()
 
     root = tk.Tk()
-    try:
-        ttk.Style().theme_use('vista')
-    except Exception:
-        pass
     app = App(root, engine, args)
     try:
         root.mainloop()
