@@ -1521,13 +1521,56 @@ def main():
         check('and the tile says how many pictures it holds',
               meta['text'].endswith('pictures'), meta['text'])
         check('the title uses the small font', '8' in str(title['font']), title['font'])
+        before = len(app.recent.winfo_children())
         tiles[1].winfo_children()[0].event_generate('<Button-1>')
         root.update(); time.sleep(0.2)
         check('clicking a tile opens that folder', app._active_folder == 1, app._active_folder)
-        check('and the strip switches to the pictures', not app.recent.winfo_children()
-              or len(app.recent.winfo_children()) != len(app._plan['groups']))
+        check('the folder list stays visible while a folder is open',
+              len(app.recent.winfo_children()) == before, (len(app.recent.winfo_children()), before))
+        check('and the pictures appear in their own pane', bool(app.contents.winfo_children())
+              and app.contents_holder.winfo_manager() != '', app.contents_holder.winfo_manager())
+        check('the pane holds exactly that folder\'s pictures',
+              len(app._content_widgets) == min(len(app._plan['groups'][1]['items']), app._content_shown),
+              (len(app._content_widgets), len(app._plan['groups'][1]['items'])))
         app.select_folder(None); root.update()
-        check('going back returns to the tiles', len(app.recent.winfo_children()) == len(app._plan['groups']))
+        check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
+        check('the folder list is still there', len(app.recent.winfo_children()) == before)
+
+    print('\n-- infinite scrolling: reaching the bottom appends the next batch')
+    app.select_folder(None); root.update()
+    if app._folders_view_active():
+        first = len(app.recent.winfo_children())
+        app.gal_canvas.yview_moveto(1.0); root.update()
+        app._maybe_more('strip'); root.update()
+        check('the folder list grows when scrolled to the end',
+              len(app.recent.winfo_children()) > first or first >= len(app._plan['groups']),
+              (first, len(app.recent.winfo_children()), len(app._plan['groups'])))
+        check('the title reports how many of the folders are on screen',
+              'Folders (' in app.gal_title['text'], app.gal_title['text'])
+        group_items = len(app._plan['groups'][0]['items'])
+        app.select_folder(0); root.update()
+        shown = len(app._content_widgets)
+        app.contents_canvas.yview_moveto(1.0); root.update()
+        app._maybe_more('contents'); root.update()
+        check('the contents pane grows too', len(app._content_widgets) >= shown,
+              (shown, len(app._content_widgets), group_items))
+        app.select_folder(None); root.update()
+    # the pictures view grows as well
+    app.toggle_groups(False); root.update()
+    batch = len(app._tile_widgets)
+    app._shown = batch + 100
+    app.refresh_gallery(); root.update()
+    check('the pictures list grows with the same mechanism',
+          len(app._tile_widgets) > batch or batch == len(app._files),
+          (batch, len(app._tile_widgets), len(app._files)))
+    app._shown = 18
+    app.toggle_groups(True)
+    for _ in range(80):
+        app._poll(); root.update()
+        if app._plan:
+            break
+        time.sleep(0.05)
+    root.update()
 
     print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
     import pair_review as prv

@@ -220,6 +220,10 @@ THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
 RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
+CONTENTS_W = 236     # width of the open-folder pane beside the folder list
+BATCH_TILES = 21     # strip pictures added per scroll to the bottom
+BATCH_FOLDERS = 12   # folder tiles added per scroll
+BATCH_CONTENTS = 24  # pictures added per scroll inside the open folder
 FILTER_CAP = 200     # while a search is active the strip is a result list, not a recency window
 
 #  Peaks measured on this box with nvidia-smi at 0.25 s (12,227 MiB total). Steps and hires barely move them; batch
@@ -704,6 +708,22 @@ class App:
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = ttk.Frame(gal)
         holder.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        # the open folder's pictures get their own pane beside the folder list, so the list never has to disappear
+        self.contents_holder = ttk.Frame(gal)
+        self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
+        self.contents_canvas = tk.Canvas(self.contents_holder, highlightthickness=0, borderwidth=0,
+                                         background=plate, width=CONTENTS_W)
+        self.contents_canvas.grid(row=0, column=0, sticky='nsew')
+        self.contents_bar = ttk.Scrollbar(self.contents_holder, orient='vertical',
+                                          command=self.contents_canvas.yview)
+        self.contents_bar.grid(row=0, column=1, sticky='ns')
+        self.contents_canvas.configure(yscrollcommand=self.contents_bar.set)
+        self.contents = ttk.Frame(self.contents_canvas)
+        self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
+        self.contents.bind('<Configure>', self._on_contents_resize)
+        self.contents_canvas.bind('<Configure>', self._on_contents_resize)
+        self.contents_canvas.bind('<MouseWheel>', self._on_contents_wheel)
+        self.contents_holder.grid_remove()
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
         # width the canvas to the grid, or tk's default width clips the last column
@@ -718,6 +738,7 @@ class App:
         self.recent.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<Configure>', self._on_strip_resize)
         self.gal_canvas.bind('<MouseWheel>', self._on_gallery_wheel)
+        self.gal_bar.configure(command=self._on_strip_scrollbar)
         self.gal_canvas.configure(takefocus=1)
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1)),
@@ -726,6 +747,9 @@ class App:
         self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
         for c in range(RECENT_COLS + 12):
             self.recent.columnconfigure(c, weight=0)
+        self._shown = RECENT_N            # how many strip pictures are on screen (grows as you scroll)
+        self._folder_shown = BATCH_FOLDERS
+        self._content_shown = BATCH_CONTENTS
         self._sheets = {}                 # folder label -> composed 3x3 contact sheet
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
@@ -1247,6 +1271,8 @@ class App:
             self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
 
     def _apply_plan(self, plan):
+        self._folder_shown = BATCH_FOLDERS
+        self._shown = RECENT_N
         self._sheets = {}
         self._plan = plan
         self._grouping = False
@@ -1305,6 +1331,8 @@ class App:
 
     def select_folder(self, index):
         self._active_folder = index
+        self._content_shown = BATCH_CONTENTS
+        self._render_contents()
         if getattr(self, 'folder_cb', None) is not None and self._plan:
             try:
                 if index is None:
@@ -1540,7 +1568,6 @@ class App:
     def _folders_view_active(self):
         """The strip lists folders when grouping is on, nothing is selected and nothing is filtered."""
         return (bool(self._plan) and not getattr(self, '_grouping', False)
-                and self._active_folder is None
                 and not self.search_var.get().strip() and not self.starred_only.get())
 
     def _folder_sheet(self, group, size):
@@ -1575,6 +1602,80 @@ class App:
             self._sheets.clear()
         return sheet
 
+    def _render_contents(self):
+        """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click."""
+        from PIL import ImageTk
+        if self._active_folder is None or not self._plan:
+            self.contents_holder.grid_remove()
+            return
+        group = self._plan['groups'][self._active_folder]
+        self.contents_holder.grid()
+        for w in self.contents.winfo_children():
+            w.destroy()
+        self._content_widgets = {}
+        cols = max(1, (CONTENTS_W - 12) // (RECENT_PX + 6))
+        thumbs = thumbs_for([r['path'] for r in group['items']])
+        for i, row in enumerate(group['items'][:self._content_shown]):
+            tp = thumbs.get(row['path'])
+            if not tp:
+                continue
+            try:
+                with Image.open(tp) as im:
+                    im.thumbnail((RECENT_PX, RECENT_PX), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(im)
+            except Exception:
+                continue
+            lab = self._tile_widget(self.contents, row['path'], photo)
+            lab.grid(row=i // cols, column=i % cols, padx=1, pady=1)
+            self._content_widgets[Path(row['path'])] = lab
+        self.contents_canvas.yview_moveto(0)
+
+    def _on_strip_scrollbar(self, *args):
+        self.gal_canvas.yview(*args)
+        self._maybe_more('strip')
+
+    def _on_contents_resize(self, event=None):
+        box = self.contents_canvas.bbox('all')
+        if box:
+            self.contents_canvas.configure(scrollregion=box)
+        self.contents_canvas.itemconfigure(self._contents_item, width=self.contents_canvas.winfo_width())
+        box = self.contents_canvas.bbox('all')
+        need = bool(box) and (box[3] - box[1]) > self.contents_canvas.winfo_height() + 1
+        if need:
+            self.contents_bar.grid()
+        else:
+            self.contents_bar.grid_remove()
+
+    def _on_contents_wheel(self, event):
+        self.contents_canvas.yview_scroll(int(-event.delta / 120), 'units')
+        self._maybe_more('contents')
+
+    def _maybe_more(self, which):
+        """Infinite scrolling: at the bottom of a list, append the next batch."""
+        if which == 'strip':
+            low, high = self.gal_canvas.yview()
+            if high < 0.995:
+                return
+            if self._folders_view_active():
+                if self._folder_shown >= len(self._plan['groups']):
+                    return
+                self._folder_shown += BATCH_FOLDERS
+                self._render_folder_tiles()
+            else:
+                if self._shown >= len(self._files):
+                    return
+                self._shown += BATCH_TILES
+                self.refresh_gallery()
+        else:
+            low, high = self.contents_canvas.yview()
+            if high < 0.995 or self._active_folder is None:
+                return
+            group = self._plan['groups'][self._active_folder]
+            if self._content_shown >= len(group['items']):
+                return
+            self._content_shown += BATCH_CONTENTS
+            self._render_contents()
+
     def _render_folder_tiles(self):
         """Large tiles: a 9-up thumbnail, the folder's full name wrapped, and how many pictures it holds."""
         from PIL import ImageTk
@@ -1583,7 +1684,7 @@ class App:
         self._tile_widgets = {}
         width = max(190, self.gal_canvas.winfo_width() - 10)
         sheet_px = max(150, min(width, 300))
-        for index, group in enumerate(self._plan['groups']):
+        for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             tile = ttk.Frame(self.recent, padding=(2, 4))
             tile.pack(fill='x', padx=2, pady=3)
             photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px))
@@ -1620,21 +1721,24 @@ class App:
         self._files = files
         # a search turns the strip into a result list, so it shows matches from the whole folder, not 18 of them
         filtering = bool(self.search_var.get().strip()) or bool(self.starred_only.get())
-        cap = FILTER_CAP if filtering else RECENT_N
+        cap = FILTER_CAP if filtering else max(RECENT_N, min(len(files), self._shown))
         recent = files[:cap]
         if filtering:
             label = 'Matches (%d of %d)' % (len(recent), len(files))
         else:
-            label = ('Recent (%d)' % len(recent) if len(files) <= RECENT_N
-                     else 'Recent (%d of %d)' % (RECENT_N, len(files)))
+            label = ('Recent (%d)' % len(recent) if len(recent) >= len(files)
+                     else 'Recent (%d of %d)' % (len(recent), len(files)))
         if self._favorites:
             label += '  \u00b7  %d \u2605' % len(self._favorites)
         needle = self.search_var.get().strip()
         if needle:
             label += '  \u00b7  \u201c%s\u201d' % needle
         if self._folders_view_active():
-            self.gal_title.configure(text='Folders (%d)  \u00b7  %d pictures'
-                                     % (len(self._plan['groups']), sum(len(g['items']) for g in self._plan['groups'])))
+            total = len(self._plan['groups'])
+            shown = min(total, self._folder_shown)
+            self.gal_title.configure(text='Folders (%d%s)  \u00b7  %d pictures'
+                                     % (shown, '' if shown >= total else ' of %d' % total,
+                                        sum(len(g['items']) for g in self._plan['groups'])))
             self._render_folder_tiles()
             return
         self.gal_title.configure(text=label)
@@ -2306,6 +2410,7 @@ class App:
 
     def _on_gallery_wheel(self, event):
         self.gal_canvas.yview_scroll(int(-event.delta / 120), 'units')
+        self._maybe_more('strip')
         return 'break'
 
     # -- gallery: selection --------------------------------------------------
