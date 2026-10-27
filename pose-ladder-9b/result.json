@@ -1,0 +1,526 @@
+{
+ "character": "full body studio photograph of a young woman with short red hair and freckles, wearing a green wool coat and black boots, standing upright facing the camera, plain white background",
+ "instruction": "the same young woman with short red hair and freckles, wearing the same green wool coat and black boots, now sitting on a wooden chair, legs bent, same face, plain white background",
+ "other_character": "full body studio photograph of an elderly bearded man in a navy business suit and brown shoes, wearing glasses, standing upright facing the camera, plain white background",
+ "seed": 4242,
+ "size": 512,
+ "base": {
+  "file": "20261024-100904_512x512_seed4242.png",
+  "sha256_16": "50e1a4524e013094",
+  "prompt": "full body studio photograph of a young woman with short red hair and freckles, wearing a green wool coat and black boots, standing upright facing the camera, plain white background",
+  "model": "z-image turbo"
+ },
+ "judge": "local:qwen3-vl:4b",
+ "judge_questions": {
+  "same_character": "Does this photograph show a young woman with short red hair, wearing a long green coat?",
+  "sitting": "Is the person in this photograph seated on a chair?",
+  "standing_check": "Is the person in this photograph standing upright on both feet?",
+  "identity_pair": "This image has two panels side by side, the left panel is the original and the right panel is the edit. Is the person in the right panel the same individual as the person in the left panel - same face and the same green wool coat?"
+ },
+ "summary": {
+  "judge": "local:qwen3-vl:4b",
+  "idle_vram_mib": 4117,
+  "vram_after_mib": 1072,
+  "peak_vram_mib": 11890,
+  "controls": {
+   "passed": 9,
+   "n": 9,
+   "rows": [
+    {
+     "id": "sitting_on_standing_base",
+     "expected": false,
+     "answer": false,
+     "ok": true,
+     "seconds": 6.5,
+     "question": "Is the person in this photograph seated on a chair?",
+     "raw": "no",
+     "channel": "response",
+     "image": "20261024-100904_512x512_seed4242.png"
+    },
+    {
+     "id": "sitting_on_standing_other",
+     "expected": false,
+     "answer": false,
+     "ok": true,
+     "seconds": 1.0,
+     "question": "Is the person in this photograph seated on a chair?",
+     "raw": "no",
+     "channel": "response",
+     "image": "other-character_512x512_seed777.png"
+    },
+    {
+     "id": "sitting_on_seated_control",
+     "expected": true,
+     "answer": true,
+     "ok": true,
+     "seconds": 4.4,
+     "question": "Is the person in this photograph seated on a chair?",
+     "raw": "yes",
+     "channel": "response",
+     "image": "seated-control_512x512_seed778.png"
+    },
+    {
+     "id": "standing_on_standing_base",
+     "expected": true,
+     "answer": true,
+     "ok": true,
+     "seconds": 0.5,
+     "question": "Is the person in this photograph standing upright on both feet?",
+     "raw": "yes",
+     "channel": "response",
+     "image": "20261024-100904_512x512_seed4242.png"
+    },
+    {
+     "id": "standing_on_seated_control",
+     "expected": false,
+     "answer": false,
+     "ok": true,
+     "seconds": 4.0,
+     "question": "Is the person in this photograph standing upright on both feet?",
+     "raw": "no",
+     "channel": "response",
+     "image": "seated-control_512x512_seed778.png"
+    },
+    {
+     "id": "same_attributes_on_base",
+     "expected": true,
+     "answer": true,
+     "ok": true,
+     "seconds": 0.7,
+     "question": "Does this photograph show a young woman with short red hair, wearing a long green coat?",
+     "raw": "yes",
+     "channel": "response",
+     "image": "20261024-100904_512x512_seed4242.png"
+    },
+    {
+     "id": "same_attributes_on_other",
+     "expected": false,
+     "answer": false,
+     "ok": true,
+     "seconds": 0.5,
+     "question": "Does this photograph show a young woman with short red hair, wearing a long green coat?",
+     "raw": "no",
+     "channel": "response",
+     "image": "other-character_512x512_seed777.png"
+    },
+    {
+     "id": "pair_base_vs_base",
+     "expected": true,
+     "answer": true,
+     "ok": true,
+     "seconds": 6.6,
+     "question": "This image has two panels side by side, the left panel is the original and the right panel is the edit. Is the person in the right panel the same individual as the person in the left panel - same face and the same green wool coat?",
+     "raw": "yes",
+     "channel": "response",
+     "image": "pair-base-vs-base.png"
+    },
+    {
+     "id": "pair_base_vs_other",
+     "expected": false,
+     "answer": false,
+     "ok": true,
+     "seconds": 4.0,
+     "question": "This image has two panels side by side, the left panel is the original and the right panel is the edit. Is the person in the right panel the same individual as the person in the left panel - same face and the same green wool coat?",
+     "raw": "no",
+     "channel": "response",
+     "image": "pair-base-vs-other.png"
+    }
+   ]
+  }
+ },
+ "rows": [
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.4,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 12.2,
+   "gen_seconds": 12.2,
+   "pixel_delta": 7.46,
+   "same_character": true,
+   "sitting": false,
+   "standing_check": true,
+   "pose_checks_agree": true,
+   "works": false,
+   "identity_pair": true,
+   "works_strict": false,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 32.3,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": false,
+    "standing_check": true,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 15.0,
+     "sitting": 0.3,
+     "standing_check": 0.4,
+     "identity_pair": 16.6
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "no",
+     "standing_check": "yes",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 32.3
+   },
+   "vram_gen_peak_mib": 5508,
+   "vram_judge_peak_mib": 11890,
+   "vram_peak_mib": 11890,
+   "image": "pose-ladder-9b\\flux2-klein_d0.40\\20261027-112028_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.55,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 12.8,
+   "gen_seconds": 12.8,
+   "pixel_delta": 9.43,
+   "same_character": true,
+   "sitting": false,
+   "standing_check": true,
+   "pose_checks_agree": true,
+   "works": false,
+   "identity_pair": true,
+   "works_strict": false,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 11.5,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": false,
+    "standing_check": true,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 5.0,
+     "sitting": 0.3,
+     "standing_check": 4.2,
+     "identity_pair": 2.0
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "no",
+     "standing_check": "yes",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 11.5
+   },
+   "vram_gen_peak_mib": 5351,
+   "vram_judge_peak_mib": 11825,
+   "vram_peak_mib": 11825,
+   "image": "pose-ladder-9b\\flux2-klein_d0.55\\20261027-112113_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.7,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 13.4,
+   "gen_seconds": 13.4,
+   "pixel_delta": 32.63,
+   "same_character": true,
+   "sitting": true,
+   "standing_check": false,
+   "pose_checks_agree": true,
+   "works": true,
+   "identity_pair": true,
+   "works_strict": true,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 19.8,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": true,
+    "standing_check": false,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 12.2,
+     "sitting": 3.8,
+     "standing_check": 1.5,
+     "identity_pair": 2.3
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "yes",
+     "standing_check": "no",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 19.8
+   },
+   "vram_gen_peak_mib": 5482,
+   "vram_judge_peak_mib": 11760,
+   "vram_peak_mib": 11760,
+   "image": "pose-ladder-9b\\flux2-klein_d0.70\\20261027-112137_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein",
+   "denoise": 0.85,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 7.6,
+   "gen_seconds": 7.6,
+   "pixel_delta": 45.54,
+   "same_character": true,
+   "sitting": true,
+   "standing_check": false,
+   "pose_checks_agree": true,
+   "works": true,
+   "identity_pair": true,
+   "works_strict": true,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 5.1,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": true,
+    "standing_check": false,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 3.5,
+     "sitting": 0.2,
+     "standing_check": 0.4,
+     "identity_pair": 1.0
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "yes",
+     "standing_check": "no",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 5.1
+   },
+   "vram_gen_peak_mib": 5033,
+   "vram_judge_peak_mib": 9652,
+   "vram_peak_mib": 9652,
+   "image": "pose-ladder-9b\\flux2-klein_d0.85\\20261027-112210_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein 9b uncensored",
+   "denoise": 0.4,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 22.8,
+   "gen_seconds": 22.8,
+   "pixel_delta": 5.69,
+   "same_character": true,
+   "sitting": false,
+   "standing_check": true,
+   "pose_checks_agree": true,
+   "works": false,
+   "identity_pair": true,
+   "works_strict": false,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 5.3,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": false,
+    "standing_check": true,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 3.9,
+     "sitting": 0.3,
+     "standing_check": 0.3,
+     "identity_pair": 0.8
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "no",
+     "standing_check": "yes",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 5.3
+   },
+   "vram_gen_peak_mib": 8247,
+   "vram_judge_peak_mib": 9881,
+   "vram_peak_mib": 9881,
+   "image": "pose-ladder-9b\\flux2-klein-9b-uncensored_d0.40\\20261027-112223_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein 9b uncensored",
+   "denoise": 0.55,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 36.2,
+   "gen_seconds": 36.2,
+   "pixel_delta": 7.82,
+   "same_character": false,
+   "sitting": false,
+   "standing_check": true,
+   "pose_checks_agree": true,
+   "works": false,
+   "identity_pair": true,
+   "works_strict": false,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 6.5,
+   "judge_raw": {
+    "same_character": false,
+    "sitting": false,
+    "standing_check": true,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 4.2,
+     "sitting": 0.4,
+     "standing_check": 0.5,
+     "identity_pair": 1.4
+    },
+    "raw": {
+     "same_character": "no",
+     "sitting": "no",
+     "standing_check": "yes",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 6.5
+   },
+   "vram_gen_peak_mib": 8393,
+   "vram_judge_peak_mib": 9929,
+   "vram_peak_mib": 9929,
+   "image": "pose-ladder-9b\\flux2-klein-9b-uncensored_d0.55\\20261027-112251_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein 9b uncensored",
+   "denoise": 0.7,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 38.8,
+   "gen_seconds": 38.8,
+   "pixel_delta": 33.4,
+   "same_character": true,
+   "sitting": true,
+   "standing_check": false,
+   "pose_checks_agree": true,
+   "works": true,
+   "identity_pair": true,
+   "works_strict": true,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 4.9,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": true,
+    "standing_check": false,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 3.3,
+     "sitting": 0.3,
+     "standing_check": 0.4,
+     "identity_pair": 0.9
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "yes",
+     "standing_check": "no",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 4.9
+   },
+   "vram_gen_peak_mib": 8240,
+   "vram_judge_peak_mib": 9821,
+   "vram_peak_mib": 9821,
+   "image": "pose-ladder-9b\\flux2-klein-9b-uncensored_d0.70\\20261027-112334_512x512_seed4242.png"
+  },
+  {
+   "profile": "flux2 klein 9b uncensored",
+   "denoise": 0.85,
+   "size": 512,
+   "seed": 4242,
+   "seconds": 38.8,
+   "gen_seconds": 38.8,
+   "pixel_delta": 43.84,
+   "same_character": true,
+   "sitting": true,
+   "standing_check": false,
+   "pose_checks_agree": true,
+   "works": true,
+   "identity_pair": true,
+   "works_strict": true,
+   "judge": "local:qwen3-vl:4b",
+   "judge_seconds": 4.9,
+   "judge_raw": {
+    "same_character": true,
+    "sitting": true,
+    "standing_check": false,
+    "identity_pair": true,
+    "pose_checks_agree": true,
+    "seconds": {
+     "same_character": 3.3,
+     "sitting": 0.3,
+     "standing_check": 0.4,
+     "identity_pair": 0.9
+    },
+    "raw": {
+     "same_character": "yes",
+     "sitting": "yes",
+     "standing_check": "no",
+     "identity_pair": "yes"
+    },
+    "channel": {
+     "same_character": "response",
+     "sitting": "response",
+     "standing_check": "response",
+     "identity_pair": "response"
+    },
+    "judge": "local:qwen3-vl:4b",
+    "total_seconds": 4.9
+   },
+   "vram_gen_peak_mib": 8208,
+   "vram_judge_peak_mib": 9821,
+   "vram_peak_mib": 9821,
+   "image": "pose-ladder-9b\\flux2-klein-9b-uncensored_d0.85\\20261027-112418_512x512_seed4242.png"
+  }
+ ],
+ "created": "2026-10-27T11:25:02"
+}

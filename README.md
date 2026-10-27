@@ -263,7 +263,11 @@ CLI equivalent: `python video.py --still <png> --grid 16:9 --frames 81 --prompt 
 - **Label binding inside a diagram is unsolved**, and it is a content failure rather than a prompt-wording failure: a
   tree's leaves carry the prompt's own numbers instead of 1..7 at every density. A LoRA trained on our own corpus is
   the untried lever.
-- **The 9B has never been pose-profed**, so the 0.70 denoise threshold is a 4B/dev/z-image result applied by analogy.
+- **The 9B has now been pose-profed, and it did not move the threshold.** On the local judge, with the 2026-10-24 base
+  image reused byte-identical, `flux2 klein 9b uncensored` works at denoise **0.70** and above - the same cells as the
+  4B - at 3-5x the wall time and ~3 GiB more VRAM, and the face question could not separate the two models at all. The
+  threshold reads as a property of the denoise rather than of the model. One seed per cell, 512 px only, no bracket
+  between 0.55 and 0.70 ([POSE-LADDER-9B-2026-10-27.md](POSE-LADDER-9B-2026-10-27.md)).
 - **Blender (method D) was never run**, and no animated asset has been scored.
 - **Two dimensions the prompts ask for are recorded as unmeasurable**, not passed: dimension arrows on blueprints,
   and lane semantics (a connector proves it spans the divider, not that it means what the diagram claims).
@@ -429,11 +433,13 @@ touches into `.prompt-backups/`. It kept the user's edited words that had landed
 hint says what switching costs ("the first image loads that checkpoint, about 10-30 s"). Six profiles, each verified
 against ComfyUI's own node list:
 
-**The defaults are the measured pose combo: flux2 klein at strength 0.70.** That pairing is the only one in the sweep
-that both seated the figure and kept her face from denoise 0.70 upward, at 7-8 s and 5.7 GiB - lighter than the
-previous default (z-image, 6.7 GiB) and quicker to edit. The trade-off is honest: for pure text-to-image z-image turbo
-is still the faster choice (5.6 s against ~8 s), so it is one click away in the model picker. Both are remembered per
-install; strength is on the slider and persisted alongside the model.
+**The defaults are the measured pose combo: flux2 klein at strength 0.70.** That pairing both seats the figure and keeps
+her face from denoise 0.70 upward, at 8-13 s and 5.0-5.5 GiB - lighter than the previous default (z-image, 6.7 GiB) and
+quicker to edit, and re-measured 2026-10-27 on the local judge with the 9B alongside it: the 9B works at the same
+threshold for 3-5x the time and ~3 GiB more
+([POSE-LADDER-9B-2026-10-27.md](POSE-LADDER-9B-2026-10-27.md)). The trade-off is honest: for pure text-to-image z-image
+turbo is still the faster choice (5.6 s against ~8 s), so it is one click away in the model picker. Both are remembered
+per install; strength is on the slider and persisted alongside the model.
 
 | profile | weights | encoder | measured at 256 px, 4 steps |
 |---|---|---|---|
@@ -598,27 +604,51 @@ to `%TEMP%\variety-images` because they are large. Re-run with:
 
 ## Can an instruction change the pose without changing the character? (`pose_probe.py`)
 
-One standing character, one instruction ("now sitting on a wooden chair, same face, same green coat"), swept across four
-checkpoints and four denoise values. Two things must both hold, so each cell is judged on both: a vision model
-(deepseek-flash) is shown the original and the edit and asked whether the character is the same and whether the figure is
-seated. `S` = same character, `P` = seated, `SP` = both.
+One standing character, one instruction ("now sitting on a wooden chair, same face, same green coat"), swept across
+denoise values. Two things must both hold, so each cell is judged on both: a vision model answers whether the character
+is still there and whether the figure is seated. `S` = same character, `P` = seated, `SP` = both.
+
+The judge is now **local** (`--judge local`, the default): `qwen3-vl:4b` answers three short questions - the
+character's attributes still present, seated, standing - with the pose asked in both directions so a contradiction is
+recorded rather than resolved, plus a two-panel face comparison kept apart as a separate signal. **No figure study
+leaves the machine**; `--judge cloud` still reaches `deepseek-flash` for comparison with the 2026-10-24 run. The judge
+is re-calibrated inside every run (`--controls`, **9/9** on 2026-10-27: standing base, generated seated reference,
+generated different character), because inheriting a calibration is how an instrument drifts.
 
 | model | 0.40 | 0.55 | 0.70 | 0.85 | works | s/image |
+|---|---|---|---|---|---|---|
+| **flux2 klein (4B)** | S | S | **SP** | **SP** | **2/4** | 8-13 |
+| flux2 klein 9B uncensored | S | . | **SP** | **SP** | 2/4 | 23-39 |
+
+**The 9B threshold is 0.70 - the same as the 4B's**, now measured with one judge instead of compared across two. Both
+models leave her standing at 0.40 and 0.55 and seat her at 0.70, and the pixel distance at the crossing is the same
+to within 0.8 (**32.63** for the 4B, **33.40** for the 9B), so the threshold reads as **a property of the denoise, not
+of the model**: below it the prompt's object arrives - chairs appear behind a figure still on her feet - and above it
+the pose follows. The 9B costs **3-5x the wall time and ~3 GiB more VRAM** for that same verdict, and the face-only
+question answered "same face" for all four 0.70/0.85 renders of **both** models, so it bought **no measurable identity
+headroom**. Peak with the judge and a model both resident: **11,890 MiB of 12,227**. The full table, the two
+calibration errors that had to be fixed first, and the caveats in
+[POSE-LADDER-9B-2026-10-27.md](POSE-LADDER-9B-2026-10-27.md); result in `pose-ladder-9b/result.json`.
+
+**Practical answer: flux2 klein at denoise 0.70** - unchanged, and now a same-instrument result. Reproduction:
+`python pose_probe.py --profiles "flux2 klein" "flux2 klein 9b uncensored" --out pose-ladder-9b`. Caveats: one seed per
+cell, one instruction, one character, 512 px only, and no bracket between 0.55 and 0.70 - so 0.70 is the lowest *tested*
+working value, not the located transition. The identity half of "works" is the weak half: read a working cell as "the
+coat and hair survived and she is seated", not "the face is identical", because the face visibly drifts at 0.85 and the
+judge does not call it a different person.
+
+The 2026-10-24 cloud-judged sweep is kept below as the record it is; `flux1 dev` and `flux1 schnell` have since been
+deleted from the models, so that table is no longer reproducible here.
+
+| model (cloud judge) | 0.40 | 0.55 | 0.70 | 0.85 | works | s/image |
 |---|---|---|---|---|---|---|
 | z-image turbo | S | S | . | **SP** | 1/4 | 8 |
 | flux1 schnell | S | S | S | P | 0/4 | 13 |
 | **flux2 klein** | S | S | **SP** | **SP** | **2/4** | **8** |
 | flux1 dev | S | S | **SP** | **SP** | 2/4 | 33 |
 
-The finding is a **threshold, not a ranking**: below ~0.70 every model keeps the character and leaves her standing - the
-sheet shows chairs appearing behind a figure still on her feet, because the prompt's object arrives and the pose does not.
-Above the threshold the pose changes and identity starts to go; the threshold sits at 0.85 for z-image, 0.70 for flux2
-klein and flux1 dev, and for flux1 schnell no value in the sweep both seated her and kept her (0.85 seats her, with a
-different face).
-
-**Practical answer: flux2 klein at denoise 0.70** - the same verdict as flux1 dev at a quarter of the time (8 s against
-33 s). Reproduction: `python pose_probe.py`. Caveats: one seed per cell, one instruction, one character, and a cloud judge
-- a repeat with three seeds per cell is the next step before treating 0.70 as exact.
+That run put the threshold at 0.85 for z-image, 0.70 for flux2 klein and flux1 dev, and found no value for flux1
+schnell that both seated her and kept her.
 
 For this job properly, the right tool is an instruction-editing checkpoint (FLUX.1 Kontext [dev], Qwen-Image-Edit) or
 ControlNet/OpenPose conditioning, none of which is installed here; Kontext quantised is ~6-12 GiB against a 12 GiB card.

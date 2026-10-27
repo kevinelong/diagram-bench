@@ -1,0 +1,73 @@
+{
+ "question": "Ignore the clothes, the pose and the background. Is the face in the right panel the same person's face as the face in the left panel?",
+ "judge": "qwen3-vl:4b",
+ "base": "20261024-100904_512x512_seed4242.png",
+ "rows": [
+  {
+   "id": "control_same_image",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "20261024-100904_512x512_seed4242.png",
+   "answer": true,
+   "expected": true,
+   "ok": true,
+   "seconds": 4.2,
+   "channel": "response",
+   "raw": "yes"
+  },
+  {
+   "id": "control_different_person",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "other-character_512x512_seed777.png",
+   "answer": false,
+   "expected": false,
+   "ok": true,
+   "seconds": 1.8,
+   "channel": "response",
+   "raw": "no"
+  },
+  {
+   "id": "4b_d0.70",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "20261027-112137_512x512_seed4242.png",
+   "answer": true,
+   "expected": null,
+   "ok": null,
+   "seconds": 5.7,
+   "channel": "response",
+   "raw": "yes"
+  },
+  {
+   "id": "4b_d0.85",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "20261027-112210_512x512_seed4242.png",
+   "answer": true,
+   "expected": null,
+   "ok": null,
+   "seconds": 3.3,
+   "channel": "response",
+   "raw": "yes"
+  },
+  {
+   "id": "9b_d0.70",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "20261027-112334_512x512_seed4242.png",
+   "answer": true,
+   "expected": null,
+   "ok": null,
+   "seconds": 5.3,
+   "channel": "response",
+   "raw": "yes"
+  },
+  {
+   "id": "9b_d0.85",
+   "left": "20261024-100904_512x512_seed4242.png",
+   "right": "20261027-112418_512x512_seed4242.png",
+   "answer": true,
+   "expected": null,
+   "ok": null,
+   "seconds": 3.6,
+   "channel": "response",
+   "raw": "yes"
+  }
+ ]
+}

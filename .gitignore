@@ -8,6 +8,7 @@ kicad/*.kicad_pro
 
 # generated image folders from the probe tools
 pose-probe/*/
+pose-ladder-9b/*/
 pose-probe-smoke/
 variety/*/
 
