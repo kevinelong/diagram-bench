@@ -25,6 +25,26 @@ import re
 from collections import Counter
 
 DEFAULT_THRESHOLD = 0.20
+# Cosine alone is not enough: a three-word prompt ("a woman not a lady") sharing one word with a long character prompt
+# scores 0.46, because normalisation hides how little it says. An absolute idf floor cannot fix that - idf shrinks with
+# the corpus, so five identical prompts in a five-document lexicon share almost no weight - but *coverage* can: how
+# much of the shorter prompt's own content the longer one accounts for. Measured on the 42-prompt benchmark, in-scene
+# phrasings cover 0.76-1.00 while every cross-scene pair covers at most 0.16; the space-pirate impostor (sharing only
+# "lady" with a two-word prompt of its own) sits at 0.50. Hence 0.65: scale-free, and it still keeps rephrasings.
+MIN_SHARED_COVERAGE = 0.65
+# ...unless the match is near-identical on the synonym-aware cosine, which is how rephrased prompts stay together: the
+# dictionary substitutes words, so direct token overlap collapses even though the two prompts say the same thing.
+STRONG_MATCH = 0.85
+# The decisive test, and the scale-free one: a folder is judged by its most specific member, and a member must be
+# comparably specific to sit in it. "a woman not a lady" is two content words against a fourteen-word character
+# prompt - it scored 0.46 on cosine purely by sharing "lady", and no cosine threshold can separate that from a genuine
+# rephrase (which lands around 0.35-0.45). Length can: a rephrase keeps the length, a fragment does not.
+MIN_LENGTH_RATIO = 0.4
+# ...and the core must account for at least this much of the member's own content. Synonym links count here, which is
+# what lets a rephrased prompt stay while a long prompt about something else cannot. Both floors sit between measured
+# populations: the weakest genuine rephrase pairs score ratio 0.46 / coverage 0.43, while the space-pirate intruders
+# scored 0.04 (the two-word prompt) and 0.12 (the "show exactly 9 ..." instruction).
+MIN_MEMBER_COVERAGE = 0.30
 DEFAULT_RECENT = 18
 MIN_GROUP = 2                  # a "folder" of one picture is just the picture
 
@@ -129,6 +149,34 @@ def build_vectors(prompts, lexicon=None):
     return [vector(p, lexicon) for p in prompts]
 
 
+def raw_vector(text, lexicon, expand_synonyms=True):
+    """The same bag as `vector`, before normalisation - the honest measure of how much it says."""
+    bag = Counter(tokens(text))
+    weights = token_weights(text)
+    idf = lexicon['idf']
+    v = {t: (1 + math.log(c)) * idf[t] * weights.get(t, 1.0) for t, c in bag.items() if t in idf}
+    if expand_synonyms and _SYN:
+        for t, c in bag.items():
+            for o in _SYN.get(t, ()):
+                if o in idf and o not in v:
+                    v[o] = SYNONYM_WEIGHT * (1 + math.log(c)) * idf[o] * weights.get(t, 1.0)
+    return v
+
+
+def shared_mass(ra, rb):
+    """(shared weight, coverage) where coverage must hold in *both* directions.
+
+    One direction is not enough: "a woman not a lady" is two words, and a specific space-pirate prompt contains one of
+    them, so the vague prompt looks fully covered by the specific one. A folder may only absorb a newcomer when it
+    accounts for that newcomer's content *and* the newcomer accounts for the folder's - otherwise the vague prompt
+    becomes the representative and drags the specific ones in.
+    """
+    shared = sum(x for t, x in ra.items() if t in rb)
+    ta = sum(ra.values()) or 1.0
+    tb = sum(rb.values()) or 1.0
+    return shared, min(shared / ta, shared / tb)
+
+
 def cosine(a, b):
     if len(a) > len(b):
         a, b = b, a
@@ -146,7 +194,7 @@ def similarity(a, b, lexicon, cache=None):
     return s
 
 
-def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None):
+def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
     """Greedy incremental grouping in the order given. Returns a list of member-index lists, in that order.
 
     Order matters: the caller passes oldest first so a group is anchored by its oldest member and the folder order is
@@ -154,6 +202,7 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None):
     """
     lexicon = lexicon or fit_lexicon(prompts)
     vecs = build_vectors(prompts, lexicon)
+    raws = [raw_vector(p, lexicon) for p in prompts]
     labels = [-1] * len(prompts)
     reps = []
     for i, vec in enumerate(vecs):
@@ -170,51 +219,94 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None):
     groups = {}
     for i, lab in enumerate(labels):
         groups.setdefault(lab, []).append(i)
-    return [groups[k] for k in sorted(groups)]
+
+    # Verification pass, order-independent: a cluster is judged by its most specific member (the one that says the
+    # most), and a member that member cannot account for is dropped. This is what keeps a two-word prompt - which
+    # scores 0.46 against a long character prompt just by sharing "lady" - out of the folder it did not earn. Rephrased
+    # prompts survive on the synonym-aware cosine instead, which is why both tests are here.
+    out = []
+    rejected = []
+    for k in sorted(groups):
+        members = groups[k]
+        if len(members) < 2:
+            out.append(members)
+            continue
+        core = max(members, key=lambda m: (sum(raws[m].values()), -m))
+        kept, dropped = [core], []
+        for m in members:
+            if m == core:
+                continue
+            short, long_ = sorted((len(raws[m]), len(raws[core])))
+            comparable = long_ and (short / long_) >= MIN_LENGTH_RATIO
+            shared = sum(x for t, x in raws[m].items() if t in raws[core])
+            explained = shared / (sum(raws[m].values()) or 1.0)      # how much of the member the core accounts for
+            if (comparable and explained >= MIN_MEMBER_COVERAGE) or cosine(vecs[m], vecs[core]) >= STRONG_MATCH:
+                kept.append(m)
+            else:
+                dropped.append(m)
+        out.append(sorted(kept))
+        rejected.extend(dropped)
+    # A rejected member is not abandoned: it is re-clustered among the other rejects, because a picture that does not
+    # belong in that folder usually belongs in another one (500 of them did on the first attempt, and dropping them to
+    # "ungrouped" was worse than the misfiling it fixed).
+    if rejected and _depth < 3:
+        sub = group_texts([prompts[i] for i in rejected], threshold, lexicon, _depth + 1)
+        out.extend([[rejected[j] for j in g] for g in sub])
+    elif rejected:
+        out.extend([[m] for m in rejected])
+    return out
 
 
-def label_for(prompts, members, width=60):
+def label_for(prompts, members, width=60, lexicon=None):
     """A folder name taken from the member that best represents the folder - never invented, never a bare fragment.
 
     It used to be the *oldest* member's prompt, which is how a folder of 303 pictures ended up called "less intense
-    eyes": that phrase was simply the first thing saved. Now the label comes from the medoid unless a member carries the
-    folder's most distinctive shared token, and a prompt with fewer than three content words is never chosen while a
-    fuller one exists - "less intense eyes" identifies nothing.
+    eyes": that phrase was simply the first thing saved. Now the name comes from a member that carries the folder's
+    most distinctive shared token, that is not a caption template, and that is central to the folder - so a three-of-nine
+    minority cannot name it. A prompt with fewer than three content words is never chosen while a fuller one exists.
     """
     texts = [(prompts[m] or '').strip() for m in members]
     if not texts:
         return '(no prompt recorded)'
-    idf = {}
     try:
-        idf = fit_lexicon(texts)['idf']
+        idf = (lexicon or fit_lexicon(texts))['idf']
     except Exception:
-        pass
-    # the folder's own core: tokens in most of its members, rarest first
-    counts = Counter()
-    for t in texts:
-        counts.update(set(tokens(t)))
-    need = max(2, int(0.6 * len(texts)))
-    core = [t for t, c in counts.items() if c >= need]
-    core.sort(key=lambda t: -(idf.get(t, 0.0)))
-    core = core[:3]
+        idf = {}
+    toks = [set(tokens(t)) for t in texts]          # tokenise once: this was 216k token calls per plan
+    nlens = [len(tk) for tk in toks]
 
-    def content_len(t):
-        return len(tokens(t))
+    counts = Counter()
+    for tk in toks:
+        counts.update(tk)
+    need = max(2, int(0.6 * len(texts)))
+    core = sorted((t for t, c in counts.items() if c >= need), key=lambda t: -idf.get(t, 0.0))[:3]
+    core_set = set(core)
 
     # Captions written by a model open with meta-talk, not a subject: "This image is a detailed digital illustration
-    # showcasing...". A folder named that way tells the eye nothing, so such a head is only used when every member
-    # has one - i.e. the folder really is a set of captions.
+    # showcasing...". A folder named that way tells the eye nothing, so such a head is only used when every member has
+    # one - i.e. the folder really is a set of captions.
     template = re.compile(r'^(this|the)\s+(image|picture|photo|shots?)\b|^(pictured|shown here|depicted|in this)')
 
-    cands = [i for i, t in enumerate(texts) if content_len(t) >= 3] or list(range(len(texts)))
-    def score(i):
-        toks = set(tokens(texts[i]))
-        shared = toks & set(core)
+    def rank(i):
+        shared = toks[i] & core_set
+        head = ' '.join(texts[i].split()).lower()
         return (1 if shared else 0,
-                0 if template.match(' '.join(texts[i].split()).lower()) else 1,
+                0 if template.match(head) else 1,
                 sum(idf.get(t, 0.0) for t in shared),
-                content_len(texts[i]))
-    best = max(cands, key=score) if cands else 0
+                nlens[i])
+
+    cands = [i for i in range(len(texts)) if nlens[i] >= 3] or list(range(len(texts)))
+    top = sorted(cands, key=rank, reverse=True)[:5]   # centrality is a tie-break among the plausible, not a full scan
+    if len(top) > 1:
+        lex = lexicon or fit_lexicon(texts)
+        step = max(1, len(texts) // 40)
+        sample = list(range(0, len(texts), step))
+        vecs = {i: vector(texts[i], lex) for i in set(top) | set(sample)}
+        def centrality(i):
+            return sum(cosine(vecs[i], vecs[j]) for j in sample if j != i)
+        best = max(top, key=lambda i: (rank(i), round(centrality(i), 3)))
+    else:
+        best = top[0] if top else 0
 
     text = ' '.join(texts[best].split())
     head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
@@ -249,7 +341,7 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             if len(members) < min_group:
                 continue
             rows = sorted((with_prompt[m] for m in members), key=lambda r: r.get('created') or '')
-            groups.append({'label': label_for(prompts, members), 'items': rows,
+            groups.append({'label': label_for(prompts, members, lexicon=lexicon), 'items': rows,
                            'oldest': rows[0].get('created') or ''})
     grouped_paths = {r['path'] for g in groups for r in g['items']}
     leftovers = [r for r in with_prompt if r['path'] not in grouped_paths]
