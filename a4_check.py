@@ -27,10 +27,11 @@ import argparse
 import json
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from winproc import run as run_hidden      # a console child of a GUI app steals focus; headless Chrome included
 
 BROWSERS = (r'C:/Program Files/Google/Chrome/Application/chrome.exe',
             r'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -162,7 +163,7 @@ def rasterise(svg, png, width=1024):
     cmd = [browser, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=%d,1400' % width,
            '--screenshot=%s' % png, wrapper.as_uri()]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=120)
+        run_hidden(cmd, capture_output=True, timeout=120)
     except Exception as e:
         return False, '%s: %s' % (type(e).__name__, e)
     ok = png.is_file() and png.stat().st_size > 0
