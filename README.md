@@ -224,29 +224,29 @@ folded - nothing can be said about it.
 oldest member's opening sentence, elided - never invented, and occasionally a fragment, which is the honest cost of
 naming a folder from a 70-token prompt.
 
-## Paired A/B review: culling a folder by choosing between two pictures
+## Folders: one selector, and a strip that keeps its place
 
-**A/B review…** in the folder bar pairs up the pictures of the selected folder **most visually similar first** and shows
-each pair full screen, left and right, with three decisions: **Delete left (1)**, **Keep both (2)**, **Delete right (3)**,
-and **Stop (Esc)**. Every decision advances to the next pair; deleting sends the picture, its sidecar and its thumbnail to
-the Recycle Bin through the same path the gallery's Delete uses.
+`folders` groups the gallery by prompt, and a **readonly selector** in the gallery column picks one:
+`All (1810)`, `less intense eyes\u2026 (303)`, and so on; `A/B` reviews the selected folder, `\u2026` opens the full folder
+list with search.
 
-| piece | how it works |
-|---|---|
-| pairing | a **dHash** (64 bits) per picture, taken from the thumbnail cache, then greedy disjoint pairing by Hamming distance - the closest pair first, no picture used twice |
-| why visual and not prompt | this is the complement of `group_prompts.py`: *within* one prompt folder the takes are prompt-identical, so only the pixels can order them, and near-duplicates are exactly the pairs a person has to choose between |
-| progress | every decision is written to `~/.local/zimage-ui/review/<key>.json`, keyed by the folder's sorted member names, so a 340-pair set survives being closed and resumed |
-| hashes | cached in the same folder (`<key>-hashes.json`) so re-opening a big folder does not re-hash it |
+**This replaced a row of chips, because the chips broke the window.** Eight buttons carrying folder names asked for
+about 1,330 px, and a grid column is always given at least the width its children request - so at 2560 px wide the
+gallery column grew to 1,330 px and squeezed the prompt column and the picture pane to nothing (screenshot,
+2026-10-27). Two further defects showed up in the same shot and are fixed and pinned by tests:
 
-**Measured:** the biggest real prompt folder (303 pictures) hashes and pairs in a few seconds from thumbnails, first
-distances in single digits, and no picture appears in two pairs. Tested in `test_pairs.py` (23 checks: hash stability,
-pairing order, disjointness, the three decisions, save/reload, an unreadable file, two blank pictures that legitimately
-pair, store reuse, and a read-only run over the real gallery's biggest folder) and in `test_gallery_ui.py` (the window
-opens, shows two pictures, delete recycles the right file *and its sidecar*, keep deletes nothing, stop saves, reopening
-resumes at the right pair or reports the folder finished).
+- the **strip and the whole button panel were gridded into the same cell** (`row=3` twice), so they drew over each
+  other: buttons across the middle of the tiles, and a stray tile row peeking out under the hints;
+- the strip's tiles were a **fixed three columns** whatever the width.
 
-**What it does not do:** it never decides for you, never deletes anything without a decision, and never groups by
-content - the labels and the similarity are pixels and filenames, nothing else.
+Now the order in the gallery column is title, search, selector, buttons, strip, with the strip as the one flexible row,
+so the buttons can never be pushed past the bottom edge; a resize re-flows the tile grid to the columns that actually
+fit; and `test_gallery_ui.py` asserts that no two widgets share a grid cell in the gallery or prompt column, that the
+buttons sit above the strip and inside the window, and that the selector offers every folder with names capped at 26
+characters.
+
+Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
+pane 846 px - the picture keeps the majority, which it did not before.
 
 ## Where the evidence lives
 

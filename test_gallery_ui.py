@@ -1025,9 +1025,9 @@ def main():
     app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % srv.server_port
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
     app.enhance_prompt()
-    for _ in range(80):
+    for _ in range(200):
         app._poll(); root.update(); time.sleep(0.05)
-        if 'rewritten' in app.hint['text']:
+        if 'vector fox' in app.text.get('1.0', 'end'):
             break
     check('a local model rewrites the prompt', 'vector fox' in app.text.get('1.0', 'end'),
           app.text.get('1.0', 'end').strip())
@@ -1047,10 +1047,11 @@ def main():
     threading.Thread(target=vsrv.serve_forever, daemon=True).start()
     app._settings['llm_url'] = 'http://127.0.0.1:%d/v1' % vsrv.server_port
     app.select_file(app._files[0]); root.update()
+    app.text.delete('1.0', 'end')       # a stale hint or a stale prompt must not make this pass or fail early
     app.describe()
     for _ in range(300):        # a local round trip, but give it a real window rather than 4 s of luck
         app._poll(); root.update(); time.sleep(0.02)
-        if 'written from the picture' in app.hint['text']:
+        if 'fox sitting on a log' in app.text.get('1.0', 'end'):
             break
     check('describe writes a prompt from the image', 'fox sitting on a log' in app.text.get('1.0', 'end'),
           app.text.get('1.0', 'end').strip()[:40])
@@ -1438,6 +1439,54 @@ def main():
     app.toggle_groups(False)
     check('turning folders off drops the plan', app._plan is None and not app.folder_bar.winfo_ismapped())
     app.refresh_gallery(); root.update()
+
+    print('\n-- the folder selector and the column layout (regressions from the 2026-10-27 screenshot)')
+    if not app._plan:                      # the earlier folder test turned grouping off
+        app.toggle_groups(True)
+        for _ in range(80):
+            app._poll(); root.update()
+            if app._plan:
+                break
+            time.sleep(0.05)
+    vals = list(app.folder_cb['values'] or [])
+    check('the selector offers All plus every folder', len(vals) == len(app._plan['groups']) + 1, len(vals))
+    check('All carries the gallery total, singletons included',
+          vals[0] == 'All (%d)' % len(app._all_files()), (vals[0], len(app._all_files())))
+    longest = max(len(v) for v in vals)
+    check('no selector entry is longer than 26 characters', longest <= 26, longest)
+    target = max(range(len(app._plan['groups'])), key=lambda i: len(app._plan['groups'][i]['items']))
+    app.folder_cb.current(target + 1)
+    app._on_folder_pick(); root.update()
+    check('picking a folder in the selector filters the strip',
+          app._active_folder == target and len(app._files) == len(app._plan['groups'][target]['items']),
+          '%r but %d files visible' % (app.gal_title['text'], len(app._files)))
+    app.folder_cb.current(0); app._on_folder_pick(); root.update()
+    check('picking All clears the filter', app._active_folder is None, app._active_folder)
+
+    def cells(frame):
+        seen = {}
+        for w in frame.winfo_children():
+            info = w.grid_info()
+            if not info:
+                continue
+            row, col = int(info['row']), int(info['column'])
+            for cc in range(col, col + int(info.get('columnspan', 1))):
+                seen.setdefault((row, cc), []).append(str(w))
+        return {k: v for k, v in seen.items() if len(v) > 1}
+
+    for frame, name in ((app.gal, 'gallery column'), (app.text.master, 'prompt column')):
+        check('no two widgets share a grid cell in the %s' % name, not cells(frame), cells(frame))
+    strip_top = app.gal_canvas.winfo_rooty()
+    btn_frame = [w for w in app.gal.winfo_children() if w.winfo_class() == 'TFrame'
+                 and any(str(c).endswith('.more_btn') or c.winfo_class() == 'TButton' for c in w.winfo_children())]
+    check('the buttons sit above the strip and are not clipped',
+          bool(btn_frame) and btn_frame[0].winfo_rooty() + btn_frame[0].winfo_height() <= strip_top + 1,
+          (btn_frame[0].winfo_rooty() + btn_frame[0].winfo_height() if btn_frame else None, strip_top))
+    check('and they fit inside the window',
+          bool(btn_frame) and btn_frame[0].winfo_rooty() + btn_frame[0].winfo_height()
+          <= root.winfo_rooty() + root.winfo_height(),
+          (btn_frame[0].winfo_rooty() + btn_frame[0].winfo_height() if btn_frame else None,
+           root.winfo_rooty() + root.winfo_height()))
 
     print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
     import pair_review as prv

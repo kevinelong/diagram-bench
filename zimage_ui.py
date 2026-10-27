@@ -215,7 +215,7 @@ def save_settings(data):
 THUMB_DIR = '.thumbs'
 THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
-RECENT_COLS = 3
+RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 FILTER_CAP = 200     # while a search is active the strip is a result list, not a recency window
 
@@ -697,10 +697,10 @@ class App:
         self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
         self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
                                          command=self.toggle_groups)
-        self.group_chk.pack(side='right')
+        self.group_chk.pack(side='left', padx=(8, 0))
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = ttk.Frame(gal)
-        holder.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        holder.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
         # width the canvas to the grid, or tk's default width clips the last column
@@ -721,7 +721,7 @@ class App:
                         ('<space>', self._nav_toggle_key), ('<Return>', self._nav_open_key)):
             self.gal_canvas.bind(seq, fn)
         self.recent.bind('<MouseWheel>', self._on_gallery_wheel)
-        for c in range(RECENT_COLS):
+        for c in range(RECENT_COLS + 12):
             self.recent.columnconfigure(c, weight=0)
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
@@ -730,7 +730,7 @@ class App:
         self._anchor = None               # shift-click range starts here
 
         btns = ttk.Frame(gal)
-        btns.grid(row=3, column=0, columnspan=2, sticky='ew')
+        btns.grid(row=3, column=0, columnspan=2, sticky='ew')     # above the strip: buttons are never clipped
         self.more_btn = ttk.Button(btns, text='View All', command=self.open_all)
         self.more_btn.pack(fill='x')
         self.refresh_btn = ttk.Button(btns, text='Refresh', command=self.refresh_gallery)
@@ -755,7 +755,9 @@ class App:
         self.sel_label.pack(anchor='w', pady=(3, 0))
         ttk.Label(btns, text='ctrl+click adds · shift+click ranges · Del / Ctrl+A / Esc',
                   foreground='#666', font=('Segoe UI', 8), justify='left').pack(anchor='w')
-        gal.rowconfigure(3, weight=1)   # the strip, below the folder bar
+        gal.rowconfigure(3, weight=0)   # the buttons, fixed height
+        gal.rowconfigure(4, weight=1)   # the strip takes whatever is left
+        self._strip_cols_seen = None
 
         self.rail = ttk.Frame(root, padding=(4, 12, 0, 10))
         self.rail.grid(row=0, column=0, sticky='ns')
@@ -1252,6 +1254,13 @@ class App:
                                  plan.get('seconds') or 0, len(plan['recent'])))
 
     def _render_folder_bar(self):
+        """One compact selector instead of a row of chips.
+
+        The chips were a layout bug: eight buttons with folder names demanded ~1,330 px, and because a grid column is
+        given at least the width its children request, the gallery column grew to that width and squeezed the picture
+        pane and the prompt column to nothing (seen in a 2560-px-wide screenshot, 2026-10-27). A readonly combobox has
+        a fixed width the column can live with, and the full list is still one click away in `more...`.
+        """
         for w in self.folder_bar.winfo_children():
             w.destroy()
         if self._grouping:
@@ -1259,21 +1268,43 @@ class App:
             return
         if not self._plan:
             return
-        top = sorted(range(len(self._plan['groups'])), key=lambda i: -len(self._plan['groups'][i]['items']))[:8]
-        b = ttk.Button(self.folder_bar, text='all (%d)' % sum(len(g['items']) for g in self._plan['groups']),
-                       command=lambda: self.select_folder(None))
-        b.pack(side='left')
-        ttk.Button(self.folder_bar, text='A/B review\u2026', command=self.review_start).pack(side='left', padx=(6, 0))
-        for i in top:
-            g = self._plan['groups'][i]
-            label = g['label'][:22] + ('\u2026' if len(g['label']) > 22 else '')
-            ttk.Button(self.folder_bar, text='%s (%d)' % (label, len(g['items'])),
-                       command=lambda k=i: self.select_folder(k)).pack(side='left', padx=(3, 0))
-        if len(self._plan['groups']) > len(top):
-            ttk.Button(self.folder_bar, text='more\u2026', command=self.show_folders).pack(side='left', padx=(3, 0))
+        self._folder_choices = [None] + list(range(len(self._plan['groups'])))
+        self.folder_cb = ttk.Combobox(self.folder_bar, state='readonly', width=20,
+                                      values=[self._folder_text(i) for i in self._folder_choices])
+        self.folder_cb.current(0 if self._active_folder is None else self._folder_choices.index(self._active_folder))
+        self.folder_cb.pack(side='left')
+        self.folder_cb.bind('<<ComboboxSelected>>', self._on_folder_pick)
+        ttk.Button(self.folder_bar, text='A/B', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
+        ttk.Button(self.folder_bar, text='\u2026', width=2, command=self.show_folders).pack(side='left', padx=(2, 0))
+
+    def _folder_text(self, index):
+        """Short label for the selector: the folder's name and size, or All with the full picture count."""
+        if index is None:
+            # the real gallery total, singletons included - the plan's groups cannot know about them
+            try:
+                total = len(self._all_files())
+            except Exception:
+                total = sum(len(g['items']) for g in self._plan['groups'])
+            return 'All (%d)' % total
+        g = self._plan['groups'][index]
+        label = g['label']
+        cut = label[:16].rsplit(' ', 1)[0] if len(label) > 16 else label
+        return '%s\u2026 (%d)' % (cut or label[:16], len(g['items'])) if len(label) > 16 else '%s (%d)' % (label, len(g['items']))
+
+    def _on_folder_pick(self, event=None):
+        pos = self.folder_cb.current()
+        self.select_folder(self._folder_choices[pos] if 0 <= pos < len(self._folder_choices) else None)
 
     def select_folder(self, index):
         self._active_folder = index
+        if getattr(self, 'folder_cb', None) is not None and self._plan:
+            try:
+                if index is None:
+                    self.folder_cb.set(self._folder_text(None))
+                else:
+                    self.folder_cb.set(self._folder_text(index))
+            except Exception:
+                pass
         self.refresh_gallery()
 
     def show_folders(self):
@@ -1467,6 +1498,16 @@ class App:
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
         return files
 
+    def _strip_cols(self):
+        """How many tiles fit across the strip right now (it was a fixed 3, which wasted a wide window)."""
+        try:
+            w = self.gal_canvas.winfo_width()
+        except Exception:
+            w = 0
+        if w <= 1:
+            w = RECENT_COLS * (RECENT_PX + 8)
+        return max(1, w // (RECENT_PX + 6))
+
     def refresh_gallery(self, select=None):
         everything = self._all_files()
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
@@ -1490,6 +1531,7 @@ class App:
         if needle:
             label += '  \u00b7  \u201c%s\u201d' % needle
         self.gal_title.configure(text=label)
+        cols = self._strip_cols()
         thumbs = thumbs_for(recent) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
@@ -1507,7 +1549,7 @@ class App:
                 continue
             self._thumbs[p] = ph
             lab = self._tile_widget(self.recent, p, ph)
-            lab.grid(row=i // RECENT_COLS, column=i % RECENT_COLS, padx=1, pady=1)
+            lab.grid(row=i // cols, column=i % cols, padx=1, pady=1)
             lab.bind('<MouseWheel>', self._on_gallery_wheel)
             self._tile_widgets[Path(p)] = lab
         if files:
@@ -1518,6 +1560,12 @@ class App:
 
     def _on_strip_resize(self, event=None):
         """Keep the scroll region current and show the scrollbar only when the strip overflows."""
+        cols = self._strip_cols()
+        if cols != getattr(self, '_strip_cols_seen', None):
+            self._strip_cols_seen = cols
+            if self._tile_widgets:
+                self.root.after_idle(self.refresh_gallery)   # the tile grid follows the width
+                return
         box = self.gal_canvas.bbox('all')
         if box:
             self.gal_canvas.configure(scrollregion=box)
@@ -1565,7 +1613,7 @@ class App:
             return 'break'
         cur = self.selected[-1] if self.selected else None
         i = order.index(cur) if cur in order else -1
-        new = 0 if i < 0 else max(0, min(len(order) - 1, i + dx + dy * RECENT_COLS))
+        new = 0 if i < 0 else max(0, min(len(order) - 1, i + dx + dy * self._strip_cols()))
         self.selected = [order[new]]
         self._anchor = order[new]
         self._paint()
