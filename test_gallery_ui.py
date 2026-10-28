@@ -55,6 +55,8 @@ class StubEngine:
         self.events = queue.Queue()
         self.events.put(('ready', None))    # the window starts busy and waits for this
         self.calls = []
+        self.cancels = 0
+        self.shutdowns = 0
         self.owned = False
 
     def generate(self, *a, **k):
@@ -66,10 +68,12 @@ class StubEngine:
         return True
 
     def cancel(self):
-        return 'stub: nothing to cancel'
+        self.cancels += 1
+        return 'interrupt sent'
 
     def shutdown(self):
-        return 'stub: nothing to stop'
+        self.shutdowns += 1
+        return 'stopped'
 
 
 def make_gallery(dirpath, n=14):
@@ -1956,6 +1960,41 @@ def main():
     check('and its file size on the same band', any(text.count(u) for u in ('k', 'M')), text)
     check('and the seed it was made with', 'seed' in text, text)
     app.select_folder(None); root.update()
+
+    print("\n-- closing while a render is running asks first, and interrupts it (2026-10-28)")
+    import zimage_ui as _zu
+    _root_close = tk.Tk()
+    _app_close = _zu.App(_root_close, StubEngine(), args)
+    _root_close.update()
+    _app_close.busy = True
+    _app_close._all_queue = ['flux2 klein 9b uncensored']
+    _asked = []
+    _real_ask = _zu.messagebox.askyesno
+    try:
+        _zu.messagebox.askyesno = lambda *a, **k: (_asked.append(a), False)[1]
+        _app_close.on_close()
+        check('saying no leaves the window open', bool(_root_close.winfo_exists()) and _app_close.busy)
+        check('and nothing was cancelled or shut down',
+              _app_close.engine.cancels == 0 and _app_close.engine.shutdowns == 0,
+              (_app_close.engine.cancels, _app_close.engine.shutdowns))
+        check('the question counts the running job and the queued one', '2 renders' in _asked[-1][1], _asked[-1][1])
+        _zu.messagebox.askyesno = lambda *a, **k: True
+        _app_close.on_close()
+        check('saying yes interrupts the prompt before shutting down',
+              _app_close.engine.cancels == 1 and _app_close.engine.shutdowns == 1,
+              (_app_close.engine.cancels, _app_close.engine.shutdowns))
+        check('and drops the rest of the ALL sweep', _app_close._all_queue is None, _app_close._all_queue)
+        try:
+            alive = bool(_root_close.winfo_exists())
+        except Exception:
+            alive = False
+        check('and the window is gone', not alive)
+    finally:
+        _zu.messagebox.askyesno = _real_ask
+        try:
+            _root_close.destroy()
+        except Exception:
+            pass
 
     print("\n-- the caption is asked for on the frame, and asked again once it exists (2026-10-28)")
     import ctypes as _ct

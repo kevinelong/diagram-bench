@@ -445,6 +445,11 @@ cosine **0.208** - 0.008 over the bar - while its true home scored **1.000**. Th
 the argmax over all folders: that render now appears only in its own folder (1.000), and the folder it had been
 mislabelled under no longer shows it.
 
+**Closing during a render asks first, and stops it.** `Engine.shutdown` stops the worker and the server this app started,
+but it does not interrupt the prompt - so attaching to a server you did not start (`--no-autostart`) and closing used to
+leave the render running on the card. The close handler now counts the running job plus anything queued behind an ALL
+sweep, asks, and on confirmation interrupts and clears the queue before shutting down.
+
 **The caption follows the same theme as the window.** `winfo_id()` is Tk's *client* child (`TkChild`); the caption
 belongs to its `TkTopLevel` parent, which does not exist until the window is mapped, and DWM rejects the child with
 `E_HANDLE`. So the frame is resolved with `GetAncestor(winfo_id(), GA_ROOT)` at call time, and the request is repeated

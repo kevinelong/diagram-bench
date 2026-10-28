@@ -5470,6 +5470,26 @@ class App:
             self._poll_id = None
 
     def on_close(self):
+        """Closing is a deliberate act: ask while a render is in flight, and interrupt it before the window goes.
+
+        `Engine.shutdown` stops the worker and, when this app started ComfyUI, the server - it does *not* interrupt the
+        prompt. Attached to a server we did not start (`--no-autostart`), closing therefore used to leave the render
+        running on the card with nothing on screen able to cancel it. So: confirm, cancel, then shut down.
+        """
+        pending = (1 + len(self._all_queue or [])) if getattr(self, 'busy', False) else 0
+        if pending and not messagebox.askyesno(
+            'Still working',
+            '%d render%s in flight.\n\nStop %s and close?' % (pending, '' if pending == 1 else 's',
+                                                              'it' if pending == 1 else 'them'),
+            parent=self.root,
+        ):
+            return
+        if self.busy:
+            self._all_queue = None
+            try:
+                print('close: %s' % self.engine.cancel())
+            except Exception as e:
+                print('close: cancel failed (%s: %s)' % (type(e).__name__, e))
         self._persist()
         if self._poll_id is not None:
             try:
