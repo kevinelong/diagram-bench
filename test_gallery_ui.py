@@ -1763,6 +1763,39 @@ def main():
           (cols, tile, cols2, tile2))
     probe_win.destroy()
 
+    print('\n-- Generate opens the folder the prompt will land in, but never yanks a folder being read (2026-10-27)')
+    if not (app._plan and app._plan['groups'] and app._plan.get('_lexicon')):
+        app.toggle_groups(True)
+        for _ in range(120):
+            app._poll(); root.update()
+            if app._plan and app._plan.get('_lexicon'):
+                break
+            time.sleep(0.05)
+    if app._plan and app._plan['groups']:
+        sample = app._plan['groups'][0]['items'][0]['prompt']
+        app.select_folder(None); root.update()
+        app.busy = False
+        app.text.delete('1.0', 'end')
+        app.text.insert('1.0', sample)
+        app.generate(); root.update(); time.sleep(0.2)
+        check('a prompt that matches a folder opens it from the All-folders state',
+              app._active_folder is not None and app._prediction is not None,
+              (app._active_folder, app._prediction))
+        check('and the prediction is shown beside the folder button',
+              any('\u2192' in str(w.cget('text')) for w in app.folder_bar.winfo_children()
+                  if w.winfo_class() == 'TLabel'),
+              [str(w.cget('text')) for w in app.folder_bar.winfo_children() if w.winfo_class() == 'TLabel'])
+        app.busy = False
+        app.select_folder(0); root.update()
+        before = app._active_folder
+        app.busy = False
+        app.generate(); root.update(); time.sleep(0.2)
+        check('a folder already open is not replaced', app._active_folder == before,
+              (before, app._active_folder))
+        app.busy = False
+    else:
+        check('fixture has a folder to predict into', False)
+
     print('\n-- a finished render re-groups, and the open folder survives it (2026-10-27)')
     if not (app._plan and app._plan['groups']):
         app.toggle_groups(True)

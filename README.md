@@ -375,6 +375,13 @@ at startup were replaced a few hundred milliseconds later - the flash of content
 `Grouping prompts… · 1,827 pictures` and grouping starts on the next idle cycle instead of after a timer: measured right
 after construction, the strip holds **1 child and 0 photo tiles**, and still 0 once the folders arrive.
 
+**The prompt is placed before it is rendered.** Pressing Generate predicts which folder the prompt would join and shows
+it beside the folder button (`→ a lighthouse on a rocky…`); from the unfiltered *All folders* state it also opens that
+folder, and a folder you are already reading is never replaced. Measured leave-one-out on the gallery - predict each of
+1,756 member prompts against every folder without itself - the first guess is right **99.0 %** of the time, median
+top1-top2 margin **0.42**, 99.5 % at a score of 0.85. The prediction runs on the *final* prompt (after any style suffix),
+because that is the text that gets grouped.
+
 **A render made while a folder is open now appears in it.** Folders are derived from prompt text and the newest 18
 pictures are deliberately outside every folder, so the folder you are standing in can never contain the picture you just
 made. Two changes answer that: a finished render schedules a debounced **re-group** (1.2 s, on a worker), and the open

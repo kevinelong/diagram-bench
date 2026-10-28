@@ -333,6 +333,22 @@ def main():
     check('a plan without a lexicon offers nothing rather than refitting',
           gp.live_append(plan['groups'][0], {}) == [])
 
+    print('\n-- a new prompt can be placed in a folder before it is rendered')
+    pood_a = 'a black medium size standard poodle on a leather couch in a craftsman home'
+    pood_b = 'artists watercolor rendering of a black medium size standard poodle, leather couch'
+    other = 'a lighthouse on a rocky coast at dusk'
+    lex = gp.fit_lexicon([pood_a, pood_b, other])
+    plan = {'groups': [{'label': 'poodles', 'items': [{'path': 'a', 'prompt': pood_a, 'created': '2026-10-01'}]},
+                       {'label': 'coast', 'items': [{'path': 'b', 'prompt': other, 'created': '2026-10-02'}]}],
+            'recent': [], 'ungrouped': [], 'threshold': gp.DEFAULT_THRESHOLD, '_lexicon': lex}
+    hit = gp.predict('the same poodle on a leather couch, oil on canvas', plan)
+    check('a variant is predicted into the right folder', hit is not None and hit['index'] == 0, hit)
+    check('and it reports its score and margin', hit and 0 < hit['score'] <= 1.0 and hit['margin'] >= 0.0, hit)
+    check('an unrelated prompt is not placed anywhere',
+          gp.predict('a satellite view of a coral reef', plan) is None)
+    check('an empty prompt is not placed', gp.predict('   ', plan) is None)
+    check('a plan with no lexicon predicts nothing', gp.predict(pood_a, {'groups': plan['groups']}) is None)
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 
