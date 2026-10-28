@@ -428,6 +428,17 @@ folder, and a folder you are already reading is never replaced. Measured leave-o
 top1-top2 margin **0.42**, 99.5 % at a score of 0.85. The prediction runs on the *final* prompt (after any style suffix),
 because that is the text that gets grouped.
 
+**A recent picture is shown by exactly one folder - the one it would join.** The live view used to ask every folder
+separately "would you accept this?" at the clustering's admission threshold, which is deliberately loose because
+clustering follows it with a verification pass the live view never had. Measured: each of the newest 18 pictures appeared
+in a mean of **4.4 folders**, one in **12 of 85**, and a render reported as miscategorised sat under "two adult women" at
+cosine **0.208** - 0.008 over the bar - while its true home scored **1.000**. The question is singular, so the rule is
+the argmax over all folders: that render now appears only in its own folder (1.000), and the folder it had been
+mislabelled under no longer shows it.
+
+**A folder is read newest-first.** The plan hands members over oldest-first so the folder order stays stable; the pane
+re-sorts them newest-first, which is also where a fresh render lands.
+
 **A render made while a folder is open appears in it *immediately*.** Two gaps were found and closed on 2026-10-28:
 the pane is drawn by `_render_contents`, which only `select_folder` called, so a re-group that changed the plan left the
 open folder's pane stale - the pictures only appeared after toggling folders or re-selecting the folder. It is now

@@ -2861,6 +2861,10 @@ class App:
         # newest first: a fresh render belongs at the top of the folder it just joined, and appending it after 200
         # members put it past the first batch, where paging could never reach it
         items = fresh_rows + items
+        if not self._sort_wins():
+            # newest on top: a folder is read from its most recent picture down, which is also where a fresh render
+            # lands. The plan hands members over oldest-first so the folder order stays stable; the pane re-sorts them.
+            items.sort(key=lambda r: r.get('created') or '', reverse=True)
         self._content_items = items
         if self._sort_wins():
             import pair_rank

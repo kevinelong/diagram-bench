@@ -1953,6 +1953,26 @@ def main():
     check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
 
+    print("\n-- a folder is read newest-first (2026-10-28)")
+    if app._plan and app._plan['groups']:
+        import group_prompts as _gp4
+        prompt = 'a black poodle on a leather couch'
+        members = [{'path': str(p), 'prompt': prompt, 'created': '2026-10-0%dT10:00:00' % (i + 1)}
+                   for i, p in enumerate(app._files[:4])]
+        lex4 = _gp4.fit_lexicon([prompt, 'a beach at dawn'])
+        saved_plan = app._plan
+        app._plan = {'groups': [{'label': 'poodles', 'title': 'poodles', 'items': members,
+                                 'oldest': members[0]['created']}],
+                     'recent': [], 'ungrouped': [], 'threshold': _gp4.DEFAULT_THRESHOLD,
+                     '_lexicon': lex4, 'seconds': 0.0}
+        app.select_folder(0); root.update(); time.sleep(0.15)
+        order = [Path(p).name for p in app._content_order]
+        check('the newest member is the first tile', bool(order) and order[0] == Path(members[-1]['path']).name,
+              (order[:2], [Path(m['path']).name for m in members]))
+        check('and the oldest is last', order and order[-1] == Path(members[0]['path']).name, order[-1:])
+        app._plan = saved_plan
+        app.select_folder(None); root.update()
+
     print("\n-- the arrows follow the list that was clicked, pane or strip (2026-10-28)")
     if app._plan and app._plan['groups']:
         app.select_folder(0); root.update(); time.sleep(0.2)

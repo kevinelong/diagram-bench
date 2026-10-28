@@ -517,35 +517,56 @@ def predict(text, plan, threshold=DEFAULT_THRESHOLD, margin=0.0):
             'margin': best - runner}
 
 
-def live_append(group, plan, threshold=None):
-    """Pictures that belong in `group` but are not members of it yet - newest first.
+def _group_vectors(plan, lexicon):
+    """Per-folder member vectors, computed once per plan and cached on it - the live view redraws on every selection."""
+    cached = plan.get('_group_vecs')
+    if cached is not None and len(cached) == len(plan.get('groups') or []):
+        return cached
+    out = [build_vectors([r.get('prompt') or '' for r in g['items']], lexicon) for g in plan.get('groups') or []]
+    plan['_group_vecs'] = out
+    return out
 
-    The newest `recent` pictures are deliberately excluded from grouping, so a render made *while looking at a folder*
-    never appears in it: the folder you are standing in is not history yet. This answers the narrow question instead -
-    which of the pictures outside every folder would this one accept? - without touching the plan's membership or the
-    disk. Matching is against the group's own members at the same rule the clustering uses.
+
+def live_append(group, plan, threshold=None):
+    """Pictures that would land in `group` but are not members of it yet - newest first.
+
+    The newest `recent` pictures are deliberately outside every folder, so a render made *while looking at a folder* is
+    not in it yet. This answers "which of the pictures outside every folder would land **here**" without touching the
+    plan's membership or the disk.
+
+    **A picture is shown by exactly one folder: the one it would actually join.** The first version asked every folder
+    separately "would you accept this?" at the clustering's admission threshold - which is deliberately loose, because
+    clustering follows it with a verification pass that the live view never had. Measured on this gallery: each of the
+    newest 18 pictures appeared in a mean of 4.4 folders, one in 12 of 85, and a render reported as miscategorised sat
+    under "two adult women" at cosine **0.208** - 0.008 over the bar - while its real home scored **1.000**. The question
+    a live view answers is singular, so the rule is now the argmax over all folders.
     """
     lexicon = plan.get('_lexicon')
     if not lexicon or not group.get('items'):
         return []
-    members = [r.get('prompt') or '' for r in group['items']]
-    member_vecs = build_vectors(members, lexicon)
+    groups = plan.get('groups') or []
+    try:
+        mine = groups.index(group)
+    except ValueError:
+        mine = next((i for i, g in enumerate(groups) if g.get('label') == group.get('label')), None)
+    if mine is None:
+        return []
+    vecs = _group_vectors(plan, lexicon)
     taken = {r['path'] for r in group['items']}
     candidates = [r for r in list(plan.get('recent') or []) + list(plan.get('ungrouped') or [])
                   if r.get('path') not in taken and (r.get('prompt') or '').strip()]
-    if not candidates:
+    if not candidates or not vecs:
         return []
-    # the same rule the clustering used, not the stricter core-merge floor: "would this folder have accepted it?"
-    # is the membership question, and a live view stricter than a folder would show nothing at all
     limit = (plan.get('threshold') or DEFAULT_THRESHOLD) if threshold is None else threshold
     hits = []
     for row in candidates:
         vec = vector(row['prompt'], lexicon)
-        if max((cosine(vec, mv) for mv in member_vecs), default=0.0) >= limit:
+        scores = [max((cosine(vec, mv) for mv in vs), default=0.0) for vs in vecs]
+        best = max(scores)
+        if best >= limit and scores.index(best) == mine:
             hits.append(row)
     hits.sort(key=lambda r: r.get('created') or '', reverse=True)
     return hits
-
 
 def self_test():
     """The three scenes from the brief plus controls, checked against known truth. No model, no disk."""
