@@ -309,6 +309,22 @@ projects through a fixed **perspective** view (so the fixture fits a homography 
 0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
 first answers are in [PIN-20261021.md](PIN-20261021.md).
 
+## What the existing gallery still says
+
+`retrospect.py` reads the gallery and its sidecars and reports everything the files on disk can still answer - integrity,
+history, the prompt corpus, the lineage, the folders scored retrospectively, and the blind spots. Its output is
+[RETROSPECT-2026-10-28.md](RETROSPECT-2026-10-28.md). Nothing is written to the gallery and no future field is assumed:
+
+```sh
+python retrospect.py --gallery C:/Users/kevin/Pictures/zimage-ui --out RETROSPECT-<date>.md
+```
+
+Headline: **699 of 1,905 renders (37 %) used steps above the model's distilled ceiling**; **55 % of the 421 base renders
+sit below denoise 0.75, where a "variation" is still closer to its parent than two unrelated pictures are**; 1,898
+prompts collapse to **238** distinct ones at 0.90 cosine; and **1,899 of 1,905** pictures can be re-run exactly from their
+own sidecar. What cannot be answered at all: sampler (never recorded), wins, rejections, per-render wall time and VRAM
+(clips only).
+
 ## The toolkit question, parked
 
 Whether Tk itself is the cause of the gallery's UI friction, and whether a native or browser-based shell would behave
