@@ -1641,11 +1641,11 @@ class App:
     def _all_files(self):
         return [p for p, _m in self._scan()]
 
-    def _tile_widget(self, parent, path, thumb, size=52, browser=False):
+    def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
         lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
         lab.image = thumb
         lab.path = path
-        lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser))
+        lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser, pane=pane))
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
             lab.bind(seq, fn)
@@ -2346,7 +2346,10 @@ class App:
 
     def _folders_view_active(self):
         """The strip lists folders when grouping is on, nothing is selected and nothing is filtered."""
-        return (bool(self._plan) and not getattr(self, '_grouping', False)
+        # The `_grouping` term is deliberately gone: during a re-group (1.2 s after every render) it made the strip paint
+        # the 18 recent pictures and flip back to folders - the "content that vanishes" flash removed at startup,
+        # reintroduced per render. While a plan exists, keep drawing folders; the placeholder covers "no plan yet".
+        return (bool(self._plan)
                 and not self.search_var.get().strip() and not self.starred_only.get())
 
     def _folder_sheet(self, group, size, gutter=None):
@@ -2414,10 +2417,15 @@ class App:
             fresh = _gp.live_append(group, self._plan) if self._plan else []
         except Exception:
             fresh = []
+        fresh_rows = []
         for row in fresh:
             row = dict(row)
             row['fresh'] = True
-            items.append(row)
+            fresh_rows.append(row)
+        # newest first: a fresh render belongs at the top of the folder it just joined, and appending it after 200
+        # members put it past the first batch, where paging could never reach it
+        items = fresh_rows + items
+        self._content_items = items
         if self._sort_wins():
             import pair_rank
             order = pair_rank.sort_by_wins([r['path'] for r in items])
@@ -2436,7 +2444,7 @@ class App:
                 continue
             cell = ttk.Frame(self.contents)
             cell.grid(row=i // cols, column=i % cols, padx=1, pady=1)
-            lab = self._tile_widget(cell, row['path'], photo)
+            lab = self._tile_widget(cell, row['path'], photo, pane=True)
             lab.pack()
             # the corner badge: how big this file is, on the three bands - tomato red 64 kB or less, amber between,
             # medium green 1 MB or more. A pixel font because at 8 px an antialiased face is unreadable.
@@ -2514,8 +2522,7 @@ class App:
             low, high = self.contents_canvas.yview()
             if high < 0.995 or self._active_folder is None:
                 return
-            group = self._plan['groups'][self._active_folder]
-            if self._content_shown >= len(group['items']):
+            if self._content_shown >= len(getattr(self, '_content_items', []) or []):
                 return
             self._content_shown += BATCH_CONTENTS
             self._render_contents()
@@ -2539,28 +2546,32 @@ class App:
             # sheet's own gutter, in the same colour), with the caption on an inverted bar. Strong enough to find at a
             # glance, quiet enough to sit in a grid of tiles.
             selected = (self._active_folder == index)
-            ink = self.theme.text if selected else self.theme.window
+            ink = self.theme.text if selected else self.theme.border
             plate = self.theme.text if selected else self.theme.sheet_bg
+            # A slide mount: one 1 px frame holds the sheet *and* its caption together, so a tile reads as one object
+            # instead of a picture with loose text under it. Every tile carries the frame - the border colour when idle,
+            # the text colour when open - and the tiles are spaced on both axes so they are separate objects, not a grid.
             tile = tk.Frame(self.recent, background=ink, padx=1, pady=1)
-            tile.grid(row=index // cols, column=index % cols, padx=2, pady=2, sticky='n')
-            body = tk.Frame(tile, background=self.theme.window)
+            tile.grid(row=index // cols, column=index % cols, padx=5, pady=5, sticky='n')
+            body = tk.Frame(tile, background=self.theme.window, padx=3, pady=3)
             body.pack(fill='both', expand=True)
             photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px, gutter=plate if selected else None))
             pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
+            # the count belongs to the image block, so it sits between the pictures and the name
+            meta = tk.Label(body, text='%d pictures' % len(group['items']), anchor='w',
+                            font=('Segoe UI', 7),
+                            foreground=self.theme.window if selected else self.theme.muted,
+                            background=self.theme.text if selected else self.theme.window)
+            meta.pack(fill='x', pady=(2, 0))
             full_title = group.get('title') or group['label']
-            title = tk.Label(body, text=shorten_title(full_title), wraplength=sheet_px - 4,
+            title = tk.Label(body, text=shorten_title(full_title), wraplength=sheet_px - 8,
                              justify='left', anchor='w', font=('Segoe UI', 8),
                              foreground=self.theme.window if selected else self.theme.text,
                              background=self.theme.text if selected else self.theme.window)
-            title.pack(fill='x', pady=(3, 0))
+            title.pack(fill='x', pady=(1, 0))
             self._tip(title, full_title)
-            meta = tk.Label(body, text='%d pictures' % len(group['items']), anchor='w',
-                            font=('Segoe UI', 8),
-                            foreground=self.theme.window if selected else self.theme.muted,
-                            background=self.theme.text if selected else self.theme.window)
-            meta.pack(fill='x')
             for w in (tile, body, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self.select_folder(i))
         self.root.after_idle(self._on_strip_resize)
@@ -2644,7 +2655,8 @@ class App:
                                      % (shown, '' if shown >= total else ' of %d' % total,
                                         sum(len(g['items']) for g in self._plan['groups'])))
             self._render_folder_tiles()
-            return
+            self._paint()          # the folders branch used to return without painting, so a pane click left the
+            return                 # action row disabled while `selected` held the path
         self.gal_title.configure(text=label)
         cols, tile_px = self._strip_metrics()
         thumbs = thumbs_for(recent) if recent else {}
@@ -3367,11 +3379,13 @@ class App:
     # -- gallery: selection --------------------------------------------------
     def _click_order(self):
         """The order shift-click ranges over: every file in the window that is currently shown."""
-        return [p for p in getattr(self, '_files', []) if p in self._tile_widgets or p in self._all_widgets]
+        shown = {**self._tile_widgets, **self._all_widgets, **getattr(self, '_content_widgets', {})}
+        return [p for p in getattr(self, '_files', []) if p in shown]
 
-    def _on_tile_click(self, event, path, browser=False):
+    def _on_tile_click(self, event, path, browser=False, pane=False):
         """Strip: a plain click looks at the image and restores its prompt, without arming an edit.
         Browser: a plain click only selects, so nothing closes under you.
+        Pane: as the strip, plus the folder list is brought back to the open folder when it had been scrolled away.
 
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
@@ -3406,6 +3420,11 @@ class App:
         else:
             self.selected = [path]
             self._anchor = path
+            if pane and self._active_folder is not None:
+                # working inside a folder scrolls the folder list somewhere else; selecting one of its pictures brings
+                # the folder you are in back into sight - and only when it is actually out of view (the tile refuses
+                # to move when it is already visible)
+                self._see_folder(self._active_folder)
             self.select_file(path)          # a click looks: only Use as Base, chain, or a mask arms an edit
             return                          # select_file rebuilds the grid, which paints it
         self._paint()
@@ -3418,6 +3437,7 @@ class App:
         seen = {}
         seen.update(self._tile_widgets)
         seen.update(self._all_widgets)
+        seen.update(getattr(self, '_content_widgets', {}))   # the folder pane's pictures are selections too
         for p, lab in seen.items():
             try:
                 sel = any(Path(p).name == Path(s).name for s in self.selected)

@@ -349,6 +349,27 @@ def main():
     check('an empty prompt is not placed', gp.predict('   ', plan) is None)
     check('a plan with no lexicon predicts nothing', gp.predict(pood_a, {'groups': plan['groups']}) is None)
 
+    print('\n-- one name being the opening of another is the same subject (2026-10-27)')
+    check('a shorter name matches the longer one it opens',
+          gp._names_the_same_thing('flow chart', 'flow chart with start, processing and finish nodes'))
+    check('and it does not care which side is longer',
+          gp._names_the_same_thing('hacker cyberdeck screen with red ocr font', 'hacker cyberdeck screen'))
+    check('different phrasing of the same subject is not a prefix match',
+          not gp._names_the_same_thing('steampunk cyberdeck',
+                                       'cyberdeck portable computer with keyboard and waterproof case'))
+    check('a single word is too weak to merge on', not gp._names_the_same_thing('comicbook', 'comicbook style'))
+    check('identical names are not a prefix pair', not gp._names_the_same_thing('flow chart', 'flow chart'))
+
+    print('\n-- merge: core similarity or a shared opening name')
+    texts = ['flow chart', 'flow chart with start, processing and finish nodes']
+    lex4 = gp.fit_lexicon(texts)
+    vecs4 = [gp.vector(x, lex4) for x in texts]
+    raws4 = [gp.raw_vector(x, lex4) for x in texts]
+    merged4 = gp._merge_close([[0], [1]], vecs4, raws4, prompts=texts)
+    check('the two flow-chart folders merge', len(merged4) == 1 and len(merged4[0]) == 2, merged4)
+    apart4 = gp._merge_close([[0], [1]], vecs4, raws4)          # no prompts: similarity only
+    check('without prompts the prefix rule cannot fire', len(apart4) == 2, apart4)
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

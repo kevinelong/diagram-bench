@@ -179,8 +179,9 @@ def main():
                   (sel.cget('background'), title.cget('background'), title.cget('foreground')))
             others = [w for w in tiles if w is not sel]
             if others:
-                check('and an unselected tile is not',
-                      str(others[0].cget('background')) == app.theme.window, others[0].cget('background'))
+                check('an unselected tile keeps the idle frame, not the inverted one',
+                      str(others[0].cget('background')) == app.theme.border,
+                      (others[0].cget('background'), app.theme.border))
         app._plan['groups'] = real_groups2
         app._folder_shown = zui.BATCH_FOLDERS
         app._regroup_soon = real_scheduler2
@@ -1723,7 +1724,10 @@ def main():
     if tiles:
         # a tile is now: outer frame (the 1 px selection line) -> body -> pic, title, meta
         body = tiles[0].winfo_children()[0]
-        pic, title, meta = body.winfo_children()[:3]
+        kids = body.winfo_children()
+        pic = kids[0]
+        meta = next(w for w in kids if str(w.cget('text')).endswith('pictures'))   # the count sits above the name
+        title = next(w for w in kids if w is not pic and w is not meta)
         check('each tile carries a contact sheet',
               pic.image is not None and pic.image.width() >= zui.STRIP_TILE_MIN,
               pic.image.width() if pic.image else None)
@@ -1897,6 +1901,95 @@ def main():
     check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
 
+    print("\n-- turning folders on with a picture selected opens that picture's folder (2026-10-27)")
+    app.toggle_groups(False); root.update(); time.sleep(0.1)
+    # Deterministic: the fixture's prompts differ only by a trailing number, which the membership rule correctly treats
+    # as a different subject, so the plan is supplied directly and `_apply_plan` asked to do its job.
+    pick = app._files[0]
+    click(app, pick); root.update()
+    check('the picture is selected in the flat list', bool(app.selected), app.selected[:1])
+    # a known prompt for the picked file, written now: earlier sections of this suite delete files, so the sidecar on
+    # disk can be stale by here and the test would then hinge on that
+    pick = Path(app._files[0])
+    pick_prompt = 'a red fox by a frozen lake, oil on canvas'
+    pick.with_suffix('.json').write_text(json.dumps({'prompt': pick_prompt}), encoding='utf-8')
+    import group_prompts as _gp2
+    other = app._files[min(3, len(app._files) - 1)]
+    app._active_folder = None
+    app._apply_plan({'groups': [{'label': 'match', 'title': 'match', 'oldest': '2026-10-01',
+                                 'items': [{'path': str(other), 'prompt': pick_prompt,
+                                            'created': '2026-10-01'}]}],
+                     'recent': [], 'ungrouped': [], 'threshold': _gp2.DEFAULT_THRESHOLD,
+                     '_lexicon': _gp2.fit_lexicon([pick_prompt, 'a beach at dawn']),
+                     'seconds': 0.0})
+    root.update(); time.sleep(0.25); root.update()
+    want = app._folder_holding(pick)
+    check('the folder that picture belongs to is opened',
+          want == 0 and app._active_folder == 0, (want, app._active_folder))
+    tiles = [w for w in app.recent.winfo_children() if w.grid_info()]
+    if app._active_folder is not None and app._active_folder < len(tiles):
+        top = tiles[app._active_folder].winfo_y()
+        view_top = app.gal_canvas.canvasy(0)
+        check('and it is scrolled into view rather than left below the fold',
+              view_top - 2 <= top <= view_top + app.gal_canvas.winfo_height(),
+              (top, view_top, app.gal_canvas.winfo_height()))
+    app.select_folder(None); root.update()
+
+    print("\n-- review regressions: actions in the pane, the fresh row, no flash while regrouping (2026-10-27)")
+    app.select_folder(0); root.update(); time.sleep(0.2)
+    pane_cells = [c for c in app.contents.winfo_children() if c.winfo_class() == 'TFrame']
+    if pane_cells:
+        target = pane_cells[0].winfo_children()[0]
+        target.event_generate('<Button-1>', x=3, y=3)
+        root.update(); time.sleep(0.15)
+        check('a picture clicked in the pane arms Delete...', str(app.del_btn['state']) == 'normal',
+              (str(app.del_btn['state']), len(app.selected)))
+        check('and reports the selection', 'selected' in app.sel_label['text'], app.sel_label['text'])
+        check('and wears the selection ring',
+              str(target.cget('highlightbackground')) == app.theme.accent,
+              (target.cget('highlightbackground'), app.theme.accent))
+    app.clear_selection(); root.update()
+    check('clearing the selection disables Delete... again', str(app.del_btn['state']) == 'disabled')
+    app.select_folder(None); root.update()
+    if app._plan and app._plan['groups']:
+        app._grouping = True
+        app.refresh_gallery(); root.update()
+        photo = [w for w in app.recent.winfo_children() if getattr(w, 'image', None) is not None]
+        check('no picture tiles appear while a re-group runs', not photo, len(photo))
+        app._grouping = False
+        app.refresh_gallery(); root.update()
+    if app._plan and app._plan['groups'] and app._plan['groups'][0]['items']:
+        prompt = 'a black poodle on a leather couch, watercolour'
+        import group_prompts as _gp
+        fresh_path = app._files[-1]                           # not a member: live_append skips paths already taken
+        members = [{'path': str(p), 'prompt': prompt, 'created': '2026-10-01'}
+                   for p in app._files[:-1][:30]]             # more than one batch, so paging is real
+        lex = _gp.fit_lexicon([prompt, 'something else entirely on a beach'])
+        saved = app._plan
+        fresh_row = {'path': str(fresh_path), 'prompt': prompt, 'created': '2026-10-27T23:59:59'}
+        app._plan = {'groups': [{'label': 'big', 'title': 'big', 'items': members,
+                                 'oldest': members[0].get('created') or ''}],
+                     'recent': [fresh_row], 'ungrouped': [], 'threshold': _gp.DEFAULT_THRESHOLD,
+                     '_lexicon': lex}
+        app._content_shown = zui.BATCH_CONTENTS
+        app.select_folder(0); root.update(); time.sleep(0.2)
+        keys = [str(p) for p in app._content_widgets]
+        check('the fresh picture renders first and is reachable',
+              bool(keys) and Path(keys[0]).name == Path(fresh_row['path']).name, keys[:2])
+        check('paging counts it, so the end of the list is reachable',
+              len(getattr(app, '_content_items', [])) >= len(members) + 1,
+              (len(getattr(app, '_content_items', [])), len(members)))
+        app._plan = saved
+        app.select_folder(None); root.update()
+    app.clear_selection(); root.update()
+    # this block clicked a picture, which displays it; the clip tests further down start from "nothing shown", so put the
+    # picture pane back to its initial state rather than leaving them to inherit it
+    app._current = None
+    app._img = None
+    app.canvas.delete('all')
+    app.busy = False                     # a clip test further down refuses to run while busy
+    root.update()
+
     print('\n-- the wheel goes to the list under the pointer, not to whatever has focus')
     app.select_folder(None); root.update()
     check('the folder list is the strip', app._wheel_owner(app.gal_canvas) == 'strip')
@@ -1986,19 +2079,42 @@ def main():
     check('opening a folder leaves the list where it was', abs(pos_after_open - offset_before) <= 8,
           '%r -> %r px' % (offset_before, pos_after_open))
     cells = [c for c in app.contents.winfo_children() if c.winfo_class() == 'TFrame']
-    if cells:
-        target = cells[0].winfo_children()[0]
-        target.event_generate('<Button-1>', x=3, y=3)
-        root.update(); time.sleep(0.15)
-        pos_after_click = app.gal_canvas.canvasy(0)
-        check('and a click on a picture inside it does not move it either',
-              abs(pos_after_click - offset_before) <= 8, '%r -> %r px' % (offset_before, pos_after_click))
+    tiles_now = [w for w in app.recent.winfo_children() if w.grid_info()]
+
+    def tile_in_view(index=0):
+        # re-read the tiles each call: a click rebuilds the strip, so a captured widget would be destroyed
+        live = [w for w in app.recent.winfo_children() if w.grid_info()]
+        if index >= len(live):
+            return False
+        top = live[index].winfo_y()
+        return app.gal_canvas.canvasy(0) - 2 <= top <= app.gal_canvas.canvasy(0) + app.gal_canvas.winfo_height()
+
+    if cells and tiles_now:
+        # the list is scrolled away from the open folder: a click in the pane must bring it back
+        scrolled_away = not tile_in_view()
+        cells[0].winfo_children()[0].event_generate('<Button-1>', x=3, y=3)
+        root.update(); time.sleep(0.3); root.update()
+        if scrolled_away:
+            live = [w for w in app.recent.winfo_children() if w.grid_info()]
+            check('a click on a picture brings the folder it belongs to back into view',
+                  tile_in_view(), (live[0].winfo_y() if live else None, app.gal_canvas.canvasy(0)))
+        # with the folder in view, the same click leaves the list exactly where it was
+        app.gal_canvas.yview_moveto(0.0); root.update(); time.sleep(0.2)
+        settled = app.gal_canvas.canvasy(0)
+        cells[0].winfo_children()[0].event_generate('<Button-1>', x=3, y=3)
+        root.update(); time.sleep(0.2)
+        check('a click on a picture leaves the list alone when the folder is already in view',
+              abs(app.gal_canvas.canvasy(0) - settled) <= 8,
+              '%r -> %r px' % (settled, app.gal_canvas.canvasy(0)))
         check('while the picture really was selected', bool(app._current), app._current)
-    # a rebuild for another reason keeps the place too
+    # a rebuild for another reason keeps the place too - measured from wherever the list is *now*, because the pane
+    # click above may legitimately have scrolled it (that is the recall behaviour)
+    app.gal_canvas.yview_moveto(0.35); root.update(); time.sleep(0.1)
+    offset_now = app.gal_canvas.canvasy(0)
     app.refresh_gallery(); root.update(); time.sleep(0.1)
     check('a rebuild of the strip keeps its scroll position',
-          abs(app.gal_canvas.canvasy(0) - offset_before) <= 8,
-          '%r -> %r px' % (offset_before, app.gal_canvas.canvasy(0)))
+          abs(app.gal_canvas.canvasy(0) - offset_now) <= 8,
+          '%r -> %r px' % (offset_now, app.gal_canvas.canvasy(0)))
     # switching folders does start the new pane at the top
     app.select_folder(0); root.update(); time.sleep(0.1)
     app.contents_canvas.yview_moveto(0.5); root.update(); time.sleep(0.05)
@@ -2167,9 +2283,14 @@ def main():
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
     app.clip_btn.invoke(); root.update()
+    # the precondition is set here rather than inherited: sections above display a picture, and `busy` may be set
+    app._current = None
+    app.busy = False
+    app.clip_btn.invoke(); root.update()
     check('with nothing shown it asks for a picture', 'show a picture first' in app.hint['text'], app.hint['text'])
     app.select_file(app._files[0]); root.update()
     app.engine.calls.clear()
+    app.busy = False
     app.clip_btn.invoke(); root.update()
     clip_calls = [c for c in app.engine.calls if c[0] == 'clip']
     check('with a picture it calls the video path', len(clip_calls) == 1, str(app.engine.calls[-1:]))

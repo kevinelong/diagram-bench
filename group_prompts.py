@@ -302,10 +302,10 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
         out.extend([[rejected[j] for j in g] for g in sub])
     elif rejected:
         out.extend([[m] for m in rejected])
-    return _merge_close(out, vecs, raws)
+    return _merge_close(out, vecs, raws, prompts=prompts)
 
 
-def _merge_close(groups, vecs, raws, floor=MEMBER_MATCH):
+def _merge_close(groups, vecs, raws, floor=MEMBER_MATCH, prompts=None):
     """Join clusters whose most specific members are near-identical, after clustering rather than during it.
 
     This is the fix for a measured defect: the anchor is the *oldest* member, and an oldest prompt is often the shortest
@@ -327,7 +327,8 @@ def _merge_close(groups, vecs, raws, floor=MEMBER_MATCH):
     for a in range(len(groups)):
         for b in range(a + 1, len(groups)):
             s = cosine(vecs[cores[a]], vecs[cores[b]])
-            if s >= floor:
+            same_name = prompts is not None and _names_the_same_thing(prompts[cores[a]], prompts[cores[b]])
+            if s >= floor or same_name:
                 pairs.append((s, a, b))
     if not pairs:
         return groups
@@ -348,6 +349,23 @@ def _merge_close(groups, vecs, raws, floor=MEMBER_MATCH):
     for i, g in enumerate(groups):
         merged.setdefault(find(i), []).extend(g)
     return [sorted(v) for v in merged.values()]
+
+
+def _names_the_same_thing(a, b, min_words=2):
+    """True when one prompt *is* the opening of the other, word for word.
+
+    A counter-case to the cosine floor, measured on the real gallery: "flow chart" (2 pictures) sat in its own folder
+    beside "flow chart with start, processing and finish nodes" (24) - core-to-core 0.67, just under the 0.70 merge
+    floor, although one name is literally the other with less detail. Six folder pairs in the gallery have that shape.
+    A word-prefix test is conservative where lowering the floor is not: it cannot merge "steampunk cyberdeck" with
+    "cyberdeck portable computer ... waterproof case" (0.69 by cosine, different phrasing), which a 0.65 floor would.
+    """
+    wa = [w for w in re.findall(r"[a-z][a-z'-]+", (a or '').lower()) if w not in STOP]
+    wb = [w for w in re.findall(r"[a-z][a-z'-]+", (b or '').lower()) if w not in STOP]
+    if len(wa) < min_words or len(wb) < min_words:
+        return False
+    short, long_ = (wa, wb) if len(wa) <= len(wb) else (wb, wa)
+    return len(short) < len(long_) and long_[:len(short)] == short
 
 
 def label_for(prompts, members, width=60, lexicon=None):

@@ -375,6 +375,20 @@ at startup were replaced a few hundred milliseconds later - the flash of content
 `Grouping prompts… · 1,827 pictures` and grouping starts on the next idle cycle instead of after a timer: measured right
 after construction, the strip holds **1 child and 0 photo tiles**, and still 0 once the folders arrive.
 
+**A name that is the opening of another name is the same subject.** Measured on the gallery: "flow chart" (2 pictures)
+sat in its own folder beside "flow chart with start, processing and finish nodes" (24) - core-to-core **0.67**, just
+under the 0.70 merge floor, although one name is literally the other with less detail. The same shape appeared for
+"hacker cyberdeck screen". So the merge pass now also fires when one folder's core prompt **is a word-prefix** of
+another's (at least two words, so a single word cannot merge anything), and it deliberately does *not* lower the floor:
+0.65 would also have merged "steampunk cyberdeck" with "cyberdeck portable computer ... waterproof case" (0.69 by
+cosine, different phrasing). Gallery effect: 91 -> **88 folders**, biggest 217 -> 205, mean intra 0.871 -> 0.858;
+`flow chart` becomes **one** folder of 26, the `hacker cyberdeck screen` pair merges (23 + 17), and the four genuinely
+different cyberdeck folders stay apart (10, 20, 37, 82).
+
+**Folder tiles are slide mounts**: one 1 px frame holds the sheet, the picture count and the name together, with the
+count between the pictures and the text and real spacing between tiles on both axes. The open one is drawn in reverse
+video.
+
 **The open folder is findable at a glance and is scrolled to.** It is drawn in **reverse video**: a 1 px line around
 the contact sheet and between its four pictures (the sheet's own gutter in the same colour) with the caption on an
 inverted bar. Opening a folder *automatically* - the one the prompt is predicted to join, or the one a selected picture
