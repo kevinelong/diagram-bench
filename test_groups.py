@@ -133,6 +133,14 @@ def test_a_stated_head_count_is_a_subject():
           gp.stated_count('three green lamps above two women') == 2,
           gp.stated_count('three green lamps above two women'))
     check('a prompt with no count states nothing', gp.stated_count('a black poodle on a leather couch') is None)
+    # measured: two 1,600-character prompts that never state a group size were read as three, because a numeral deep in
+    # the tail sat near a people noun. The head of the prompt is what counts.
+    long_prompt = ('Pictured are women. Each clothed in their own distinct traditional ethnic garb from their individual '
+                   'regions. All are sitting in a semicircle. ') + ('detail about the room and the light. ' * 20) +                   'Three of the women hold a glass.'
+    check('a numeral in the tail is not the group size', gp.stated_count(long_prompt) is None,
+          gp.stated_count(long_prompt))
+    check('a count in the head still reads', gp.stated_count('three women sit in a semicircle') == 3,
+          gp.stated_count('three women sit in a semicircle'))
     check('two different counts in one prompt is ambiguous, so it decides nothing',
           gp.stated_count('two women and three men in a hall') is None,
           gp.stated_count('two women and three men in a hall'))

@@ -462,6 +462,13 @@ PEOPLE_WORDS = ('adult', 'woman', 'women', 'man', 'men', 'people', 'person', 'pe
 _PREPOSITIONS = r'(?:above|behind|near|beside|by|on|in|at|with|from|under|over|across)\b'
 
 
+# A prompt states its cast near the front. Measured: two 1,600-character prompts that never state a group size
+# ("Pictured are women. Each clothed in ...") were being read as three, because a numeral deep in the tail sat within a
+# few words of a people noun. Beyond this many characters the phrase is about something else, so the prompt is treated
+# as stating nothing - which is not measured, rather than measured wrongly.
+COUNT_HEAD = 240
+
+
 def stated_count(prompt):
     """The single head count a prompt states, or None when it states several (ambiguous) or none.
 
@@ -475,6 +482,8 @@ def stated_count(prompt):
         pattern = r'\b%s\b\s+(?:(?!%s)\w+\s+){0,8}(?:%s)\b' % (word, _PREPOSITIONS, '|'.join(PEOPLE_WORDS))
         for match in re.finditer(pattern, low):
             found.append((match.start(), number))
+    # only what the head of the prompt says counts: a numeral in the tail is a different subject
+    found = [pair for pair in found if pair[0] < COUNT_HEAD]
     if not found:
         return None
     found.sort()
