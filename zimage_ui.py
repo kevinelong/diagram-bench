@@ -26,6 +26,7 @@ import math
 import os
 import queue
 import random
+import re
 import socket
 import struct
 import subprocess
@@ -529,6 +530,12 @@ SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'mode
 DEFAULT_MOTION = 'the subject stays coherent, natural slow camera push in, no warping'
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
+# Mediums a prompt can name for itself. A style suffix that names a different one competes with these, and the prompt
+# ends up asking for two things at once - "oil painting, cinematic still, anamorphic" - so Generate asks first.
+STYLE_CONFLICT_WORDS = ('oil painting', 'watercolour painting', 'watercolor painting', 'acrylic painting', 'painting',
+                        'photograph', 'photo', 'film still', 'film', 'sketch', 'drawing', 'illustration', 'anime',
+                        '3d render', 'vector icon')
+
 STYLES = {
     'none': '',
     'photo': 'photograph, natural light, shallow depth of field',
@@ -583,8 +590,11 @@ RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 CONTENTS_W = 300     # requested width of the open-folder pane beside the folder list; it grows with the column
 STRIP_TILE_MIN = 96  # a tile never shrinks below this: the row count follows the width, the tile follows the row
 FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
-FOLDER_DISTINCT = 8  # how many of 64 difference-hash bits count as a visibly different picture on a tile
-FOLDER_COLOUR = 24   # or a channel shift of this much between two quadrants: dHash alone cannot see colour
+# How different two pictures must be to share a tile. Raised from 8/24 after seeing sheets that were still four
+# near-copies while clearly different pictures sat further down the folder - the old bar was passed by small changes.
+FOLDER_DISTINCT = 16   # of 64 difference-hash bits
+FOLDER_COLOUR = 40     # or a channel shift of this much between two quadrants: dHash alone cannot see colour
+FOLDER_SCAN = 240      # how far back through a folder the walk may look for four that qualify
 BATCH_TILES = 21     # strip pictures added per scroll to the bottom
 BATCH_FOLDERS = 12   # folder tiles added per scroll
 BATCH_CONTENTS = 24  # pictures added per scroll inside the open folder
@@ -1444,8 +1454,12 @@ class App:
                                       command=self.toggle_options, style='Big.TButton')
         self.options_btn.pack(side='right')
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
-        holder = ttk.Frame(gal)
+        holder = self.strip_holder = ttk.Frame(gal)
         holder.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
+        # 'grouping prompts...' is a placeholder for the whole area, so it is placed in the viewport and centred in it -
+        # in the content flow it sat in the top-left corner of a large empty column, which read as a caption, not a state
+        self.grouping_badge = ttk.Label(holder, text='grouping prompts\u2026', foreground=self.theme.muted,
+                                        font=('Segoe UI', 18), anchor='center', justify='center')
         # the open folder's pictures get their own pane beside the folder list, so the list never has to disappear
         self.contents_holder = ttk.Frame(gal)
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
@@ -1595,6 +1609,8 @@ class App:
                             selectforeground=self.theme.on_accent, highlightthickness=1,
                             highlightbackground=self.theme.border, relief='flat')
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
+        # the medium words the style guard lights up: a muted amber, so it reads as "look here", not as an error
+        self.text.tag_configure('conflict', background='#6b4a12', foreground='#ffffff')
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
         # Ctrl+arrow, not plain arrows: in a multi-line prompt box Up/Down have to move the caret, which is what
@@ -3040,7 +3056,10 @@ class App:
             return cached
         want = FOLDER_CELLS
         kept, signatures = [], []
-        for row in reversed(items):
+        # Look past the newest handful when they are near-copies: with a higher bar the walk has to travel further into
+        # the history to find four that qualify, which is the point - a spreadsheet of four one-pixel variations is not
+        # a summary of the folder.
+        for row in reversed(items[-FOLDER_SCAN:] if len(items) > FOLDER_SCAN else items):
             signature = self._signature(row['path'])
             if signature is not None and all(self._different(signature, other) for other in signatures):
                 signatures.append(signature)
@@ -3141,8 +3160,10 @@ class App:
         self._content_items = items
         # the caption says which folder this is and how much is in it, so the column identifies itself
         title = (group.get('title') or group.get('label') or '').strip()
-        total = len(items)
-        caption = '%s  -  %d picture%s' % (title, total, '' if total == 1 else 's')
+        # members and live-view arrivals are two different numbers: the folder *has* N, and M of the newest pictures are
+        # being offered because they would join it. Adding them into one total read as if the folder held them.
+        members = max(len(items) - len(fresh_rows), 0)
+        caption = '%s  -  %d picture%s' % (title, members, '' if members == 1 else 's')
         if fresh_rows:
             caption += ', %d new' % len(fresh_rows)
         self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
@@ -3392,9 +3413,12 @@ class App:
             for w in self.recent.winfo_children():
                 w.destroy()
             self._tile_widgets = {}
-            ttk.Label(self.recent, text='grouping\u2026', foreground=self.theme.muted,
-                      font=('Segoe UI', 9)).grid(row=0, column=0, padx=6, pady=10, sticky='w')
+            if hasattr(self, 'grouping_badge'):
+                self.grouping_badge.configure(text='grouping %d pictures\u2026' % len(files))
+                self.grouping_badge.place(relx=0.5, rely=0.5, anchor='center')
             return
+        if hasattr(self, 'grouping_badge'):
+            self.grouping_badge.place_forget()
         if self._folders_view_active():
             total = len(self._plan['groups'])
             shown = min(total, self._folder_shown)
@@ -3756,6 +3780,86 @@ class App:
         if name in self._custom_styles:
             return self._custom_styles[name]
         return STYLES.get(name, '')
+
+    def style_conflicts(self, prompt, style_name):
+        """Character ranges in the prompt that name a medium the selected style also names - or another one.
+
+        Returns [] when no style is chosen, when the style's own suffix already says the word (a photo style with the
+        word "photo" is not a conflict, it is agreement), or when the prompt names no medium at all.
+        """
+        suffix = (self._style_suffix(style_name) or '').lower()
+        if not suffix:
+            return []
+        low = (prompt or '').lower()
+        found = []
+        for word in STYLE_CONFLICT_WORDS:
+            start = 0
+            while True:
+                at = low.find(word, start)
+                if at < 0:
+                    break
+                end = at + len(word)
+                whole_word = (at == 0 or not low[at - 1].isalnum()) and (end >= len(low) or not low[end].isalnum())
+                overlaps = any(a <= at < b for a, b in found)
+                if whole_word and not overlaps and word not in suffix:
+                    found.append((at, end))
+                start = end
+        return sorted(found)
+
+    def _mark_conflicts(self, spans, prompt=None):
+        """Light the words up in the prompt box itself, so "remove" is a visible promise, not an abstraction."""
+        if not hasattr(self, 'text'):
+            return
+        try:
+            self.text.tag_remove('conflict', '1.0', 'end')
+        except Exception:
+            return
+        source = prompt if prompt is not None else self.text.get('1.0', 'end').rstrip('\n')
+        for start, end in spans:
+            try:
+                self.text.tag_add('conflict', '1.0 + %dc' % start, '1.0 + %dc' % end)
+            except Exception:
+                pass
+        if spans:
+            self.text.see('1.0 + %dc' % spans[0][0])
+
+    def _strip_spans(self, prompt, spans):
+        """The prompt with those ranges taken out, and the punctuation they leave behind tidied."""
+        out = prompt
+        for start, end in sorted(spans, reverse=True):
+            out = out[:start] + out[end:]
+        out = re.sub(r'\s{2,}', ' ', out)
+        out = re.sub(r'\s+,', ',', out)
+        out = re.sub(r',\s*,', ',', out)
+        return out.strip(' ,')
+
+    def ask_style_conflict(self, style_name, prompt, spans):
+        """Remove, keep, or stop and edit. Modal: the caller needs the answer before it dispatches."""
+        words = sorted({prompt[a:b] for a, b in spans})
+        win = tk.Toplevel(self.root)
+        win.title('Style and prompt disagree')
+        win.transient(self.root)
+        ttk.Label(win, justify='left', wraplength=460,
+                  text=('The style "%s" is applied, and the prompt names %s.\n\n'
+                        'Both would be sent, so the picture would be asked to be two mediums at once.\n'
+                        'The words are highlighted in the prompt. What should happen?' %
+                        (style_name, ', '.join('"%s"' % w for w in words)))).pack(anchor='w', padx=14, pady=(14, 8))
+        choice = {'value': 'revise'}
+        row = ttk.Frame(win)
+        row.pack(fill='x', padx=14, pady=(4, 14))
+
+        def pick(value):
+            choice['value'] = value
+            win.destroy()
+
+        ttk.Button(row, text='Remove them and generate', command=lambda: pick('remove')).pack(side='left')
+        ttk.Button(row, text='Keep and generate', command=lambda: pick('keep')).pack(side='left', padx=(6, 0))
+        ttk.Button(row, text='Revise manually', command=lambda: pick('revise')).pack(side='left', padx=(6, 0))
+        win.protocol('WM_DELETE_WINDOW', lambda: pick('revise'))
+        win.grab_set()
+        win.focus_set()
+        self.root.wait_window(win)
+        return choice['value']
 
     def _apply_style(self, prompt, style_name):
         """Append the style suffix exactly once: a prompt that already ends with it is left alone.
@@ -5386,6 +5490,27 @@ class App:
             size = int(self.size_var.get())
         except ValueError:
             size = self.args.size
+
+        # a style suffix and a medium named in the prompt compete: ask before sending both
+        style_choice = None
+        if _prompt is None and not _force_single:
+            chosen_style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
+            spans = self.style_conflicts(prompt, chosen_style)
+            if spans:
+                self._mark_conflicts(spans, prompt)
+                style_choice = self.ask_style_conflict(chosen_style, prompt, spans)
+                if style_choice == 'revise':
+                    # stop here, leave the words lit, and put the caret where the edit has to happen
+                    self.text.focus_set()
+                    self.hint.configure(text='edit the prompt, then press Generate again')
+                    return
+                self._mark_conflicts([])
+                if style_choice == 'remove':
+                    removed = sorted({prompt[a:b] for a, b in spans})
+                    prompt = self._strip_spans(prompt, spans)
+                    self.text.delete('1.0', 'end')
+                    self.text.insert('1.0', prompt)
+                    self.hint.configure(text='removed %s from the prompt' % ', '.join(removed))
 
         # the action follows the selection: a painted mask means fill, any pad means expand
         mask_path, outpaint = None, None

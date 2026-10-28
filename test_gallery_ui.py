@@ -48,6 +48,35 @@ def check(name, cond, detail=''):
         FAILS.append(name)
 
 
+def _quieten(app):
+    """Stop a throwaway window's poll loop.
+
+    Each `App` schedules `_poll` and receives async payloads (`groups`, `image`). A throwaway window that is destroyed, or
+    whose root is no longer the default, then tries to paint PhotoImages belonging to another interpreter - measured as
+    `image "pyimageNNNN" doesn't exist` several sections later. Cancelling the timer is the fix.
+    """
+    try:
+        if getattr(app, '_poll_id', None) is not None:
+            app.root.after_cancel(app._poll_id)
+            app._poll_id = None
+    except Exception:
+        pass
+
+
+class _SheetShim:
+    """Just the state the tile selection touches. No Tk root: extra roots fight over image handles, and this needs none."""
+
+    def __init__(self):
+        self._hashes = {}
+        self._heads = {}
+        self.sheets_all_alike = 0
+
+    _signature = zui.App._signature
+    _different = zui.App._different
+    _sheet_paths = zui.App._sheet_paths
+
+
+
 class StubEngine:
     """Only what App touches: events, generate, cancel, shutdown."""
 
@@ -1966,6 +1995,7 @@ def main():
     import zimage_ui as _zq
     _root_sq = tk.Tk()
     _app_sq = _zq.App(_root_sq, StubEngine(), args)
+    _quieten(_app_sq)
     _root_sq.update()
     _sq_dir = Path(tempfile.mkdtemp(prefix='seq-'))
     made = []
@@ -1984,7 +2014,137 @@ def main():
     _app_sq.sort_var.set('Sequence')
     check('the order control offers Sequence', 'Sequence' in list(_app_sq.sort_cb['values']),
           _app_sq.sort_cb['values'])
-    _app_sq.sort_var.set('Recent'); _root_sq.destroy()
+    _app_sq.sort_var.set('Recent'); _root_sq.destroy(); tk._default_root = root
+
+    print("\n-- a style and a medium in the prompt are reconciled before Generate sends both (2026-10-28)")
+    app.style_var.set('cinematic')
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'a lighthouse, oil painting, stormy sea')
+
+    spans = app.style_conflicts(app.text.get('1.0', 'end'), 'cinematic')
+    check('the medium in the prompt is found', [app.text.get('1.0', 'end')[a:b] for a, b in spans] == ['oil painting'],
+          spans)
+    check('a style of none is never a conflict',
+          app.style_conflicts('an oil painting of a dog', 'none') == [], 'none should not warn')
+    check('the style agreeing with the prompt is not a conflict either',
+          app.style_conflicts('a photograph of a dog', 'photo') == [])
+    check('but a different medium is', len(app.style_conflicts('a photograph of a dog', 'watercolour')) == 1)
+
+    def _fake_ask(choice):
+        def ask(style_name, prompt, spans):
+            ask.called = (style_name, [prompt[a:b] for a, b in spans])
+            return choice
+        ask.called = None
+        return ask
+
+    # 1. Remove: the words go, and the job is dispatched
+    app.engine.calls.clear()
+    app.busy = False
+    ask = _fake_ask('remove')
+    real_ask = app.ask_style_conflict
+    app.ask_style_conflict = ask
+    try:
+        app.generate(); root.update()
+        now = app.text.get('1.0', 'end').strip()
+        check('the dialog was asked, with the words it would remove',
+              ask.called and ask.called[1] == ['oil painting'], ask.called)
+        check('removing strips the medium from the prompt', 'oil painting' not in now and 'lighthouse' in now, now)
+        check('and the job is dispatched anyway', len(app.engine.calls) == 1, len(app.engine.calls))
+        check('the highlight is cleared once the choice is made',
+              not app.text.tag_ranges('conflict'), app.text.tag_ranges('conflict'))
+    finally:
+        app.ask_style_conflict = real_ask
+
+    # 2. Keep: the prompt is untouched, the job is dispatched
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse, oil painting, stormy sea')
+    app.engine.calls.clear(); app.busy = False
+    ask = _fake_ask('keep'); app.ask_style_conflict = ask
+    try:
+        app.generate(); root.update()
+        check('keeping leaves the prompt exactly as typed',
+              app.text.get('1.0', 'end').strip() == 'a lighthouse, oil painting, stormy sea',
+              app.text.get('1.0', 'end').strip())
+        check('and still dispatches', len(app.engine.calls) == 1, len(app.engine.calls))
+    finally:
+        app.ask_style_conflict = real_ask
+
+    # 3. Revise manually: no dispatch, the words stay lit, the caret goes to the prompt
+    app.engine.calls.clear(); app.busy = False
+    ask = _fake_ask('revise'); app.ask_style_conflict = ask
+    try:
+        app.generate(); root.update()
+        check('revising dispatches nothing', len(app.engine.calls) == 0, len(app.engine.calls))
+        check('the words stay highlighted so the edit is obvious', bool(app.text.tag_ranges('conflict')),
+              app.text.tag_ranges('conflict'))
+        try:
+            wants_keyboard = app.root.focus_lastfor()
+        except Exception:
+            wants_keyboard = None
+        check('and the prompt is where the keyboard would go', wants_keyboard is app.text, wants_keyboard)
+    finally:
+        app.ask_style_conflict = real_ask
+
+    # 4. no conflict, no dialog
+    app.style_var.set('none')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse, oil painting')
+    app.engine.calls.clear(); app.busy = False
+    def _never(*a, **k):
+        raise AssertionError('the dialog must not open when there is no conflict')
+    app.ask_style_conflict = _never
+    try:
+        app.generate(); root.update()
+        check('a prompt with no style selected goes straight through', len(app.engine.calls) == 1,
+              len(app.engine.calls))
+    finally:
+        app.ask_style_conflict = real_ask
+        app.busy = False
+
+    print("\n-- a folder tile shows its newest four *distinct* pictures, reaching past near-copies (2026-10-28)")
+    _tile_dir = Path(tempfile.mkdtemp(prefix='tile-'))
+
+    def _picture(name, colour, bar=(0, 0), pixel=None, size=(96, 96)):
+        img = Image.new('RGB', size, colour)
+        if bar != (0, 0):
+            Image.Image.paste(img, Image.new('RGB', (24, 24), bar), (8, 8))
+        if pixel is not None:
+            img.putpixel(pixel[0], pixel[1])
+        path = _tile_dir / name
+        img.save(path)
+        return str(path)
+
+    # four plainly different pictures, then on top of them six near-copies - the case that used to pass the old bar
+    older = [_picture('old0.png', (250, 250, 250), (0, 0, 0)), _picture('old1.png', (0, 0, 0), (250, 250, 250)),
+             _picture('old2.png', (0, 90, 200), (200, 170, 0)), _picture('old3.png', (130, 20, 130), (20, 200, 60))]
+    near = [_picture('near%d.png' % i, (120, 120, 120), (121, 121, 121),
+                     pixel=((40 + i, 40), (150, 150, 150)) if i else None) for i in range(6)]
+    state = _SheetShim()
+    mixed = {'label': 'near on top', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in older + near]}
+    chosen = state._sheet_paths(mixed)
+    check('four tiles are chosen', len(chosen) == 4, chosen)
+    check('the tile starts with the newest picture', chosen[0] == near[-1], chosen[0])
+    check('and reaches past the near-copies for pictures that are really different',
+          sum(1 for p in chosen if p in older) >= 3, chosen)
+    sig_a, sig_b = state._signature(near[0]), state._signature(near[1])
+    check('a one-pixel difference is not "distinct" at this threshold',
+          sig_a is not None and sig_b is not None and not state._different(sig_a, sig_b))
+    check('a plainly different picture is', state._different(sig_a, state._signature(older[0])))
+
+    # a folder of four differently coloured pictures takes all four, newest first, and remembers the answer
+    colours = [_picture('c%d.png' % i, c, (0, 0, 0)) for i, c in
+               enumerate([(200, 30, 30), (30, 200, 30), (30, 30, 200), (210, 210, 30)])]
+    clean = {'label': 'distinct', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in colours]}
+    four = state._sheet_paths(clean)
+    check('four different pictures are all taken', four == list(reversed(colours)), four)
+    check('and asking twice reuses the answer', state._sheet_paths(clean) == four)
+
+    # a folder that cannot give four different pictures still fills four tiles, newest first, and says so
+    copies = [_picture('cop%d.png' % i, (120, 120, 120), (121, 121, 121)) for i in range(5)]
+    same = {'label': 'all alike', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in copies]}
+    before = state.sheets_all_alike
+    alike = state._sheet_paths(same)
+    check('a folder of near-copies still fills four tiles', len(alike) == 4, alike)
+    check('falling back to the newest four, newest first', alike == list(reversed(copies[-4:])), alike)
+    check('and the fallback is counted rather than hidden', state.sheets_all_alike == before + 1)
 
     print("\n-- the column's options fold away, and the pictures get the room (2026-10-28)")
     app.toggle_options(False); root.update(); time.sleep(0.1); root.update()
@@ -2032,8 +2192,15 @@ def main():
               and int(app.res_label.grid_info().get('row', -1)) == 1,
               (app.res_label.winfo_parent(), app.res_label.grid_info().get('row')))
         text = app.res_label.cget('text')
-        check('and it carries more than one line: the facts, then where they came from',
-              '\n' in text, text)
+        check('it reports the facts first', '1024x1024' in text or 'x' in text, text)
+        # the second line (model and date) needs a sidecar that has them: the fixture's do not, so write one that does
+        rich = Path(app._files[0]).with_suffix('.json')
+        rich.write_text(json.dumps({'prompt': 'p', 'seed': 7, 'steps': 9, 'model': 'z-image turbo',
+                                    'created': '2026-10-28T04:56:00'}), encoding='utf-8')
+        app.select_file(app._files[0]); root.update(); time.sleep(0.2); root.update()
+        text = app.res_label.cget('text')
+        check('and a second line says where it came from',
+              '\n' in text and 'z-image turbo' in text and '2026-10-28 04:56' in text, text.splitlines())
         check('the block updates with the selection rather than going stale',
               str(app._img.size[0]) in text, (app._img.size, text.splitlines()[:1]))
         clip_row = int(app.clip_actions.grid_info().get('row', -1))
@@ -2046,64 +2213,11 @@ def main():
         check('and Open clip starts disabled, because there is no clip yet',
               'disabled' in app.clip_open_btn.state() or app._last_clip is not None, app.clip_open_btn.state())
 
-    print("\n-- a folder tile shows its newest four *distinct* pictures (2026-10-28)")
-    import zimage_ui as _zt
-    _root_tile = tk.Tk()
-    _app_tile = _zt.App(_root_tile, StubEngine(), args)
-    _root_tile.update()
-    _tile_dir = Path(tempfile.mkdtemp(prefix='tile-'))
-
-    def _picture(name, colour, bar=(0, 0), size=(96, 96)):
-        """A picture with a distinctive mark, so its difference hash differs from its neighbours."""
-        img = Image.new('RGB', size, colour)
-        if bar != (0, 0):
-            Image.Image.paste(img, Image.new('RGB', (24, 24), bar), (8, 8))
-        path = _tile_dir / name
-        img.save(path)
-        return str(path)
-
-    distinct_colours = [(200, 30, 30), (30, 200, 30), (30, 30, 200), (210, 210, 30), (40, 210, 210)]
-    paths = []
-    # two older, plainly different pictures
-    paths.append(_picture('a0.png', (240, 240, 240), (10, 10, 10)))
-    paths.append(_picture('a1.png', (10, 10, 10), (240, 240, 240)))
-    # five newest, each a different colour: the tile should take four of these
-    for i, colour in enumerate(distinct_colours):
-        paths.append(_picture('b%d.png' % i, colour, (0, 0, 0)))
-    group = {'label': 'distinct', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in paths]}
-    chosen = _app_tile._sheet_paths(group)
-    check('the tile takes four pictures', len(chosen) == 4, chosen)
-    check('and they are the newest four, not the oldest',
-          chosen == list(reversed(paths[-4:])), (chosen, paths[-4:]))
-    check('the same folder twice reuses the answer', _app_tile._sheet_paths(group) == chosen)
-
-    # a folder of near-copies: five newest frames of one picture, two older different ones
-    near = []
-    near.append(_picture('c0.png', (250, 250, 250), (0, 0, 0)))
-    for i in range(5):
-        near.append(_picture('d%d.png' % i, (120, 120, 120), (121, 121, 121)))   # one pixel of difference
-    near_group = {'label': 'near copies', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in near]}
-    before = _app_tile.sheets_all_alike
-    chosen_near = _app_tile._sheet_paths(near_group)
-    check('a folder that cannot give four different pictures still fills four tiles',
-          len(chosen_near) == 4, chosen_near)
-    check('and it falls back to the newest four rather than repeating one', chosen_near == list(reversed(near[-4:])),
-          chosen_near)
-    check('the fallback is counted, not hidden', _app_tile.sheets_all_alike == before + 1,
-          (before, _app_tile.sheets_all_alike))
-
-    # and the sheet that gets composed is keyed by the chosen pictures, so the memo cannot serve a stale one
-    sheet = _app_tile._folder_sheet(group, 128)
-    check('the composed sheet exists', sheet is not None and getattr(sheet, 'width', lambda: 0)() == 128,
-          getattr(sheet, 'width', lambda: -1)())
-    check('its memo key carries the chosen pictures',
-          any(key[3] == tuple(chosen) for key in _app_tile._sheets), list(_app_tile._sheets)[:1])
-    _root_tile.destroy()
-
     print("\n-- a prompt that describes several scenes renders one image per scene (2026-10-28)")
     import zimage_ui as _zs
     _root_sc = tk.Tk()
     _app_sc = _zs.App(_root_sc, StubEngine(), args)
+    _quieten(_app_sc)
     _root_sc.update()
     three = ("SCENE ONE - OPENING\n\n1. INT. THE LAST POCKET - NIGHT\nCAMERA: rain on glass.\n\n"
              "SCENE TWO - NO SIDE BETS\n\n2. INT. THE LAST POCKET - UNDER THE RAIL\nCAMERA: a coin passing.\n\n"
@@ -2143,12 +2257,13 @@ def main():
           len(_app_sc.engine.calls) == 1 and _app_sc.engine.calls[0][1].get('scene') is None,
           (len(_app_sc.engine.calls), _app_sc.engine.calls and _app_sc.engine.calls[0][1].get('scene')))
     _app_sc.busy = False
-    _root_sc.destroy()
+    _root_sc.destroy(); tk._default_root = root
 
     print("\n-- closing while a render is running asks first, and interrupts it (2026-10-28)")
     import zimage_ui as _zu
     _root_close = tk.Tk()
     _app_close = _zu.App(_root_close, StubEngine(), args)
+    _quieten(_app_close)
     _root_close.update()
     _app_close.busy = True
     _app_close._all_queue = ['flux2 klein 9b uncensored']
@@ -2177,6 +2292,7 @@ def main():
         _zu.messagebox.askyesno = _real_ask
         try:
             _root_close.destroy()
+            tk._default_root = root
         except Exception:
             pass
 

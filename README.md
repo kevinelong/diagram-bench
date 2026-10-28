@@ -228,7 +228,15 @@ in one folder.
   scene in one folder.
 
 **What you see on load:** the newest 18 pictures stay **ungrouped and in date order** for immediate work, while the
-grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). **A stated head count is a subject.** "three very strong fit toned women" and "exactly six adult women sit
+grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). **Four tiles that are really different.** A folder tile shows its newest four pictures that are visibly different from each
+other: a 64-bit difference hash *and* a quadrant colour check, because a dHash alone cannot see that two pictures are
+different colours (the test proved it - four plainly different colours hashed identically). The bar was raised from
+8/64 bits and 24/255 colour to **16 and 40** after sheets were still four near-copies while clearly different pictures sat
+further down: measured, the minimum pairwise difference inside a tile went from a median of **14 to 17 bits** for the same
+cost (~7 ms per folder), and 7 more folders now honestly fall back to their newest four because they cannot produce four
+different pictures at all.
+
+**A stated head count is a subject.** "three very strong fit toned women" and "exactly six adult women sit
 cross-legged" are different pictures, and text similarity cannot see it because the count is one word among many. The
 count is read explicitly (`group_prompts.stated_count`, with the same rules the grader uses) and a cluster that holds two
 different counts is split before a label is chosen; members that state no count join the largest part rather than being
@@ -363,6 +371,23 @@ Two bugs in the *instrument* were found by that measurement before it could repo
 women. Each clothed in three layers" was being scored as three, and contact sheets (16 tiles of two figures = 32) were
 being scored as count failures. Both are fixed, and an ambiguous prompt (several different counts stated) now returns
 "not measured" instead of guessing.
+
+## A style and a medium in the prompt
+
+If a style is selected and the prompt already names a medium, Generate asks before sending both. The words are
+**highlighted in the prompt box** and a modal offers three ways out:
+
+| choice | what happens |
+|---|---|
+| **Remove them and generate** | the ranges are cut, the leftover punctuation tidied, and the job is dispatched |
+| **Keep and generate** | nothing changes and the job is dispatched |
+| **Revise manually** | nothing is dispatched, the highlights stay lit, and the keyboard goes to the prompt |
+
+Detection is deliberately narrow: it fires only when a style is set, only on whole words from a fixed list
+(`oil painting`, `watercolour painting`, `painting`, `photograph`, `photo`, `film still`, `film`, `sketch`, `drawing`,
+`illustration`, `anime`, `3d render`, `vector icon`), and **not** when the style's own suffix already says the word - a
+photo style with "photograph" in the prompt is agreement, not a conflict. Measured on the fixture: `a lighthouse, oil
+painting, stormy sea` with *cinematic* highlights `oil painting` only.
 
 ## The first column: what it is, and how it is set up
 
