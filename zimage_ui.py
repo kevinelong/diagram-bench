@@ -1569,6 +1569,10 @@ class App:
         self._update_banner()
         self._refresh_generate_label()
 
+        # Folders are the default view, so the picture strip painted here is replaced a few hundred milliseconds later:
+        # 18 thumbnails rendered only to be thrown away, and the flash of content that vanishes is exactly what was
+        # reported as confusing. Paint a grouping line instead and let `_apply_plan` draw the folders.
+        self._grouping = bool(self.group_var.get())      # a plan is coming, so the strip has nothing to draw yet
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
@@ -1587,7 +1591,7 @@ class App:
         # Folders are the default view. Grouping reads a sidecar per picture, so it waits for the window to exist and
         # for the first paint instead of running during construction.
         if self.group_var.get():
-            self.root.after(200, lambda: self.toggle_groups(True) if not self._plan else None)
+            self.root.after_idle(lambda: self.toggle_groups(True) if not self._plan else None)
 
     def _ensure_maximized(self):
         """Ask again once the window is mapped.
@@ -2486,6 +2490,16 @@ class App:
         needle = self.search_var.get().strip()
         if needle:
             label += '  \u00b7  \u201c%s\u201d' % needle
+        if getattr(self, '_grouping', False) and not self._plan and files:
+            # Folders are on and the plan is not in yet: say so in place of the pictures rather than painting 18
+            # thumbnails that are about to be replaced.
+            self.gal_title.configure(text='Grouping prompts\u2026  \u00b7  %d pictures' % len(files))
+            for w in self.recent.winfo_children():
+                w.destroy()
+            self._tile_widgets = {}
+            ttk.Label(self.recent, text='grouping\u2026', foreground=self.theme.muted,
+                      font=('Segoe UI', 9)).grid(row=0, column=0, padx=6, pady=10, sticky='w')
+            return
         if self._folders_view_active():
             total = len(self._plan['groups'])
             shown = min(total, self._folder_shown)

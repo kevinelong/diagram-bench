@@ -370,6 +370,11 @@ doing it as a *post-hoc* merge on every member is almost as bad (73). Comparing 
 specific member, the same one the verification pass uses - merges only the 7 genuinely duplicated pairs, costs 0.0 s, and
 leaves the mean intra-folder cosine *higher* than before. A plan over 1,783 prompts takes 2.4 s.
 
+**The strip no longer paints pictures it is about to replace.** Folders are the default view, so the 18 thumbnails drawn
+at startup were replaced a few hundred milliseconds later - the flash of content that vanishes. The first paint now shows
+`Grouping prompts… · 1,827 pictures` and grouping starts on the next idle cycle instead of after a timer: measured right
+after construction, the strip holds **1 child and 0 photo tiles**, and still 0 once the folders arrive.
+
 **A render made while a folder is open now appears in it.** Folders are derived from prompt text and the newest 18
 pictures are deliberately outside every folder, so the folder you are standing in can never contain the picture you just
 made. Two changes answer that: a finished render schedules a debounced **re-group** (1.2 s, on a worker), and the open

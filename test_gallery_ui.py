@@ -147,6 +147,20 @@ def main():
     root.update()
     shot(root, '01-start')
 
+    print('\n-- with folders on, the strip never paints the pictures it is about to replace (2026-10-27)')
+    # The state straight after construction: folders on, plan not in yet. Whatever the strip holds then must not be
+    # photo tiles - the 18 thumbnails rendered only to be replaced are the flash that was reported as confusing.
+    real_plan, real_grouping = app._plan, getattr(app, '_grouping', False)
+    app._plan = None
+    app._grouping = True
+    app.refresh_gallery()
+    root.update()
+    tiles = [w for w in app.recent.winfo_children() if getattr(w, 'image', None) is not None]
+    check('awaiting the plan, no photo tile is drawn', not tiles, len(tiles))
+    check('and the strip says what it is doing', 'Grouping' in app.gal_title['text'], app.gal_title['text'])
+    app._plan, app._grouping = real_plan, real_grouping
+    app.refresh_gallery(); root.update()
+
     print("\n-- the window takes the host size and colours (2026-10-27)")
     state = root.state()
     check('the window starts maximised', state == 'zoomed' or
@@ -1861,11 +1875,27 @@ def main():
         app._regroup_job = None
     real_scheduler = app._regroup_soon
     app._regroup_soon = lambda: None
+    # `_grouping` makes the strip draw its "grouping..." placeholder instead of tiles; this test needs the tiles
+    real_grouping = getattr(app, '_grouping', False)
+    app._grouping = False
     real_groups = list(app._plan['groups'])
     app._plan['groups'] = real_groups * 24
     app._folder_shown = len(app._plan['groups'])
     app.select_folder(None); app.refresh_gallery(); root.update(); time.sleep(0.15)
     app.gal_canvas.update_idletasks()
+    box = app.gal_canvas.bbox('all')
+    overflows = bool(box) and (box[3] - box[1]) > app.gal_canvas.winfo_height() + 1
+    if not overflows:
+        # a maximised window can still fit 48 tiles once they are small; clone until the list really overflows, because
+        # "keeps its scroll position" is not a testable property of a list that fits
+        app._plan['groups'] = real_groups * 96
+        app._folder_shown = len(app._plan['groups'])
+        app.refresh_gallery(); root.update(); time.sleep(0.2)
+        app.gal_canvas.update_idletasks()
+        box = app.gal_canvas.bbox('all')
+        overflows = bool(box) and (box[3] - box[1]) > app.gal_canvas.winfo_height() + 1
+    check('the folder list overflows, so retention is a real property here', overflows,
+          (box[3] - box[1]) if box else None)
     app.gal_canvas.yview_moveto(0.35); root.update(); time.sleep(0.1)
     pos_before = app.gal_canvas.yview()[0]
     # the *fraction* moves whenever the viewport or the content changes height - which opening a folder does now that
@@ -1906,6 +1936,7 @@ def main():
     app.select_folder(None)
     app._plan['groups'] = real_groups                   # the clones were only for the scroll test
     app._regroup_soon = real_scheduler
+    app._grouping = real_grouping
     app._folder_shown = zui.BATCH_FOLDERS
     app.refresh_gallery(); root.update()
 
