@@ -40,7 +40,16 @@ COUNT_SYSTEM = ('Count the people visible in the image. Reply with JSON only: {"
                 '"<8 words or fewer>"}. If you cannot tell, answer "unclear".')
 
 
-def _post(body, timeout=120):
+BUDGETS = (300, 900, 2400)     # a reasoning model can spend the whole budget thinking; measured, not assumed
+
+
+def _post(body, timeout=180):
+    """One call, returning (content, finish_reason).
+
+    `finish_reason` matters: with a reasoning model the content can come back **empty** because the reasoning used the
+    whole token budget. That is not the same as "unclear", and reporting it as an abstention is how an instrument lies -
+    measured on 5 pictures: 2 returned nothing at 300 tokens, and 1 of those answered at 900.
+    """
     key = os.environ.get('DEEPSEEK_API_KEY')
     if not key:
         raise RuntimeError('DEEPSEEK_API_KEY is not set: the grader cannot run')
@@ -48,7 +57,8 @@ def _post(body, timeout=120):
                                  headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         payload = json.load(r)
-    return (payload['choices'][0]['message'].get('content') or '').strip()
+    choice = payload['choices'][0]
+    return (choice['message'].get('content') or '').strip(), str(choice.get('finish_reason') or '')
 
 
 def b64(path):
@@ -68,13 +78,24 @@ def _json_reply(text):
 
 
 def ask(image_path, question, system):
-    body = {'model': vlm_score.MODEL, 'messages': [
-        {'role': 'system', 'content': system},
-        {'role': 'user', 'content': [
-            {'type': 'text', 'text': question},
-            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + b64(image_path)}}]}],
-        'max_tokens': 300, 'temperature': 0}
-    return _json_reply(_post(body))
+    """Ask, retrying with a larger budget while the reply is being cut off. Returns (answer, reason).
+
+    `answer` is 'unclear' when the model genuinely would not answer, and 'no-answer' when every budget was consumed by
+    the model's own reasoning - the two are reported separately so a lost answer never looks like an abstention.
+    """
+    payload_image = 'data:image/png;base64,' + b64(image_path)
+    last_finish = ''
+    for budget in BUDGETS:
+        body = {'model': vlm_score.MODEL, 'messages': [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': [
+                {'type': 'text', 'text': question},
+                {'type': 'image_url', 'image_url': {'url': payload_image}}]}],
+            'max_tokens': budget, 'temperature': 0}
+        content, last_finish = _post(body)
+        if content:
+            return _json_reply(content)
+    return ('no-answer', 'reasoning used every budget (last finish_reason: %s)' % (last_finish or '?'))
 
 
 def strip_directions(text):
@@ -179,9 +200,12 @@ def run_counts(gallery, sample, out):
         rows.append((png.name, stated, got, raw, reason, prompt))
         print('  %-46s stated %2d, counted %s' % (png.name[:46], stated, got))
 
+    lost = sum(1 for r in rows if r[2] is None and 'no-answer' in str(r[3]))
     lines = ['# Does a prompt\'s head count survive into the picture?\n',
              'Grader: `%s` via `%s`. %d pictures whose prompt states a count, one question each: '
              '"how many people are visible?".\n' % (vlm_score.MODEL, vlm_score.API, len(rows)),
+             '`no-answer` rows are questions the model\'s own reasoning consumed the token budget on - a lost answer, '
+             'not an abstention.\n',
              '| picture | stated | counted | grader says | prompt |', '|---|---|---|---|---|']
     for name, stated, got, raw, reason, prompt in rows:
         lines.append('| %s | %d | %s | %s | %s |' % (name[:44], stated, 'unclear' if got is None else got,
@@ -191,9 +215,10 @@ def run_counts(gallery, sample, out):
         exact = sum(1 for stated, got in scored if stated == got)
         within1 = sum(1 for stated, got in scored if abs(stated - got) <= 1)
         lines.append('')
-        lines.append('**%d of %d exact (%.0f %%), %d within one (%.0f %%)); %d unreadable; %d errors.**' % (
-            exact, len(scored), 100 * exact / len(scored), within1, 100 * within1 / len(scored),
-            len(rows) - len(scored), len(errors)))
+        lines.append('**%d of %d exact (%.0f %%), %d within one (%.0f %%)); %d unreadable (of which %d lost to the '
+                     'budget); %d errors.**' % (
+                         exact, len(scored), 100 * exact / len(scored), within1, 100 * within1 / len(scored),
+                         len(rows) - len(scored), lost, len(errors)))
         deltas = [got - stated for stated, got in scored]
         lines.append('')
         lines.append('Median error: %+.0f figures; the grader under-counts %d, over-counts %d.' % (

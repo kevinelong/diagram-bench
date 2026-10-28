@@ -331,8 +331,14 @@ comparisons) and does two jobs: grade a scene render against its own scene text,
 gallery. Its first measurement, in [COUNT-FIDELITY-2026-10-28.md](COUNT-FIDELITY-2026-10-28.md), asks the plain
 question - how many people are in this picture, against the number the prompt stated:
 
-**10 of 10 scored exact**, 4 abstentions. Small n, and it says nothing about unusual anatomy (the gallery contains no
-"four arms" prompts at all), but it does say head counts survive.
+**11 of 14 scored exact (79 %), 3 real misses, 0 unreadable.** Small n, and it says nothing about unusual anatomy (the
+gallery contains no "four arms" prompts at all).
+
+An earlier version of this section claimed "10 of 10 exact, 4 abstentions". That was wrong, and the way it was wrong is
+worth keeping: with a reasoning model, `finish_reason: length` returns **empty content** once its own reasoning has spent
+the token budget. The instrument scored those as abstentions, so four lost answers looked like four honest refusals - and
+the sample shrank to the pictures that happened to answer. `ask` now retries at 300 / 900 / 2400 tokens and reports
+`no-answer` separately from `unclear`; the corrected numbers above are from the fixed instrument, at 0 lost.
 
 Two bugs in the *instrument* were found by that measurement before it could report: a prompt reading "Pictured are six
 women. Each clothed in three layers" was being scored as three, and contact sheets (16 tiles of two figures = 32) were
