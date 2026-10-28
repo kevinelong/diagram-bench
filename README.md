@@ -372,6 +372,16 @@ input; asking for one there is refused before any weights load.
 now carries an entry (`DEFAULT_MOTION`, remembered in settings) that is sent as the clip's prompt, so the prompt box can
 keep describing the picture without telling the video to stand still.
 
+**Measured, one clip, 2026-10-27** (Wan 2.1 I2V-14B 480p Q3_K_M, 480x480, 49 frames, 30 steps, cfg 5.0, shift 8.0,
+`uni_pc`/`simple`): wall **480.0 s** for 2.04 s of 24 fps - **9.8 s per frame**, 235x real time, against the 5B's 2.2 s per
+frame at 704 px. Peak VRAM **11,770 of 12,227 MiB = 457 MiB free**, under this lab's 512 MiB floor, so the 14B at 480p is
+*at* the edge of the card, not comfortably inside it (`floor_breached: true` in the record; the model log reports
+`loaded partially; 8213.12 MB usable, 8180.82 MB loaded, 138.61 MB offloaded`). Endpoint accuracy: frame 0 against the
+supplied start **MAE 2.82**, last frame against the supplied end **13.50**, last against start **35.66** - the clip
+arrives near the end frame rather than pinning it, and the motion is front-loaded (middle frame 19.89 from the start,
+34.92 from the end). **65 %** of pixels changed by more than 12/255. One seed, one pair, no judged comparison: this is
+"no failure observed", not an established quality verdict.
+
 **Parameter levers that cost no download**, in order of expected gain: Q8_0 instead of Q4_K_M (5.40 GB), 121 frames
 instead of 49 (5 s at 24 fps), 40 steps, `dpmpp_2m_sde`/`karras` or `res_multistep`/`beta` instead of
 `uni_pc`/`simple`. `test_video.py` pins the wiring of both graphs and the four refusals that would otherwise cost a
