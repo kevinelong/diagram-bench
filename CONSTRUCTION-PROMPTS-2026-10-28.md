@@ -59,8 +59,7 @@ Two questions were asked of every render, because one question cannot judge two 
    sentence produced the same verdict on both models. The negative field is the place for exclusions; the positive should
    spend its ~50 words on what the picture *is*.
 5. **The construction-lines sentence works first time, at 0.72, on both models** - a line drawing of the figure with a
-   torso box and cylinder limbs drawn over it. The earlier plan of doing it as a second pass over a mannequin is *not
-   needed* for this artefact, though it remains the way to get lines that follow the mannequin's own construction.
+   torso box and cylinder limbs drawn over it.
 6. **The question decides the winner.** Q1 scored the best construction *drawing* as a failure, because the drawing
    keeps anatomy - which is correct for a planning underdrawing. Grading "did the prompt work" needs the question that
    matches the artefact wanted, or it measures the wrong thing.
@@ -74,3 +73,24 @@ Two questions were asked of every render, because one question cannot judge two 
 
 Both are starters in the app (`STARTER_PROMPTS`: `mannequin`, `construction`). Reproduce the whole comparison with
 `python tools/construction_trial.py --base <figure.png> --out <temp dir> --report <report.md>`.
+
+## The second pass, measured
+
+Lines over a mannequin, both models, at two strengths, question: *a figure built from simple 3D blocks and also drawn
+construction lines or geometric guides over or around it?* (`tools/two_pass_trial.py`; 86 s for four renders.)
+
+| model | second pass | blocks + lines | what the picture actually is |
+|---|---|---|---|
+| flux2 klein | **0.55** over its own mannequin | **yes** | **the clean one**: wooden blocks, same seated pose, centre line down the face, head circle, chest grid, ribcage arc, cross on the hip joint |
+| flux2 klein | 0.65 over its own mannequin | yes | blocks with guides, slightly more redrawn |
+| z-image turbo | 0.65 over its own mannequin | yes by the question, **weaker in fact** | turned "a box around the ribcage" into a literal **anatomical ribcage** growing from the torso, and dropped the chair and the crossed legs |
+| z-image turbo | 0.55 over its own mannequin | no | the mannequin survived, no guides appeared |
+
+So the two-pass recipe survives measurement, with one attribution: **the light second pass is the one that adds the
+drawing** - 0.55 near-copy strength is what keeps the blocks and lets the guides be drawn *on* them. Turbo needs 0.65 to
+draw at all, and at 0.65 it prefers anatomy to geometry and lets the pose go; its better single artefact is the one-pass
+construction drawing at 0.72.
+
+**The question again flattered turbo**: "blocks + guides" is true of both, but the klein 0.55 picture is the artist's
+planned figure and the turbo 0.65 picture is a figure study that has started growing ribs. Verdict tables answer the
+question asked; the images still have to be looked at.

@@ -463,7 +463,10 @@ per artefact (`CONSTRUCTION-PROMPTS-2026-10-28.md` has the whole table):
 | *an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere joints, unshaded* | **2 / 2** | 0 / 2 |
 
 So the two starters in the app are the two winners: `mannequin` (blocks, 0.72-0.80) and `construction` (a line drawing
-with construction marks, 0.72, works in one pass on both models). Two findings worth keeping:
+with construction marks, 0.72, works in one pass on both models). For guides drawn *on* the blocks - the artist's planned
+figure - feed the mannequin back as the base for `construction` at **0.55**: 3 of 4 measured second passes worked, and the
+clean one is klein at 0.55 (centre lines, head circle, chest grid, a cross on the hip joint, poses intact). Turbo only
+draws at 0.65 and there it prefers anatomy to geometry - it grew a literal ribcage and dropped the pose. Two findings worth keeping:
 
 - **Pedagogy half-lands.** Turbo's answer to the art-school prompt was a *plaster mannequin still wearing the dress*: the
   word's morpheme fetched a mannequin object, while "breakdown into simple volumes" did nothing. A noun can be fetched; a
