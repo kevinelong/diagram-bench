@@ -1835,7 +1835,11 @@ class App:
         self.vary_btn.pack(side='left')
         self.vary_soft_btn = ttk.Menubutton(act1, text='Vary\u2026', state='disabled')
         vary_menu = tk.Menu(self.vary_soft_btn, tearoff=False)
-        for label, strength in (('subtle (0.35)', 0.35), ('medium (0.60)', 0.60), ('strong (0.80)', 0.80)):
+        # Measured, not guessed: at 9 steps the sampler quantises strength, and 10 renders across 0.40-0.95 produced only
+        # 7 distinct pictures (0.78 == 0.80; 0.84 == 0.87 == 0.90). These five sit on distinct levels and are labelled by
+        # what they measured as a share of an unrelated picture's difference - see VARY-STRENGTH-2026-10-28.md.
+        for label, strength in (('subtle (0.40)', 0.40), ('partial (0.55)', 0.55), ('real change (0.72)', 0.72),
+                                ('new picture (0.87)', 0.87), ('different image (0.95)', 0.95)):
             vary_menu.add_command(label=label, command=lambda s=strength: self.vary('base', s))
         self.vary_soft_btn.configure(menu=vary_menu)
         self.vary_soft_btn.pack(side='left', padx=(4, 0))

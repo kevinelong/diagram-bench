@@ -309,6 +309,29 @@ projects through a fixed **perspective** view (so the fixture fits a homography 
 0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
 first answers are in [PIN-20261021.md](PIN-20261021.md).
 
+## What a "vary" strength actually does
+
+`vary_curve.py` measures it two ways, and the two disagree in an instructive way. The **population** curve - every
+parent/child pair the gallery already holds - is not monotone band to band, because each band mixes bases, prompts and
+models. The **controlled** sweep (`sweep_vary.py`: one base, one prompt, one seed, only the strength varying) is monotone
+end to end, and it also shows that strength is quantised:
+
+| denoise | grey difference | vs an unrelated pair | identical to |
+|---|---|---|---|
+| 0.40 | 0.0543 | 0.36x | |
+| 0.55 | 0.0779 | 0.51x | |
+| 0.65 | 0.1142 | 0.83x | |
+| 0.72 | 0.1514 | 0.99x | |
+| 0.78 / 0.80 | 0.1839 | 1.33x | each other |
+| 0.84 / 0.87 / 0.90 | 0.2159 | 1.56x | each other |
+| 0.95 | 0.2280 | 1.65x | |
+
+Ten renders at ten strengths gave **seven distinct pictures**. Two consequences are now built in: the Vary menu offers
+the measured distinct levels (0.40, 0.55, 0.72, 0.87, 0.95) instead of 0.35/0.60/0.80, and the report says plainly that
+the sidecar records the strength asked for rather than the one that ran. Identity is a *pixel* hash - the PNG bytes
+differ even for identical pictures, because ComfyUI embeds the workflow in each file. See
+[VARY-STRENGTH-2026-10-28.md](VARY-STRENGTH-2026-10-28.md).
+
 ## What the existing gallery still says
 
 `retrospect.py` reads the gallery and its sidecars and reports everything the files on disk can still answer - integrity,
