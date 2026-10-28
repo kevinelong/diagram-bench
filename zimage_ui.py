@@ -3699,6 +3699,29 @@ class App:
         return 'break'
 
     # -- the new actions -----------------------------------------------------
+    def _steps_ceiling(self, model):
+        """The step count a model was distilled or documented for. Measured: turbo and klein are unchanged above these."""
+        return int((zg.MODELS.get(model) or {}).get('max_steps') or 0)
+
+    def _clamp_steps(self, model, steps):
+        """Reduce an impossible step count to the model's ceiling, and say so.
+
+        The picker offers up to 50 and nothing stopped a user choosing it: 34 pictures in the gallery were drawn at 50
+        steps on a 4- or 9-step model, which is up to twelve times the compute for no measured gain. Silence is the
+        wrong fix in both directions - the control is set to what will actually run, and the hint says why.
+        """
+        ceiling = self._steps_ceiling(model)
+        if ceiling and steps > ceiling:
+            if hasattr(self, 'steps_var'):
+                self.steps_var.set(str(ceiling))
+            try:
+                self.hint.configure(text='%s draws in %d steps - its measured ceiling - so %d was reduced to %d; '
+                                         'more buys nothing on a distilled model' % (model, ceiling, steps, ceiling))
+            except Exception:
+                pass
+            return ceiling
+        return steps
+
     def _on_model_change(self, event=None):
         """A profile brings its own step count; ALL brings every profile's ceiling and the largest size.
 
@@ -3718,6 +3741,12 @@ class App:
         for widget in (getattr(self, 'size_cb', None), getattr(self, 'steps_cb', None)):
             if widget is not None:
                 widget.state(['!disabled'])
+        try:
+            asked = int(self.steps_var.get())
+        except (TypeError, ValueError):
+            asked = 0
+        if asked:
+            self._clamp_steps(choice, asked)
         prof = zg.MODELS.get(choice) or {}
         top = prof.get('max_steps') or prof.get('steps')
         if top:
@@ -5581,6 +5610,7 @@ class App:
             steps = int(self.steps_var.get())
         except (AttributeError, ValueError):
             steps = self.args.steps
+        steps = self._clamp_steps(model, steps)
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         full_prompt = self._apply_style(prompt, style)
         self._follow_prediction(full_prompt)

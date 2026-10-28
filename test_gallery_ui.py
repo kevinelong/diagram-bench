@@ -2016,6 +2016,31 @@ def main():
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy(); tk._default_root = root
 
+    print("\n-- steps above a model's ceiling are reduced and explained (2026-10-28)")
+    # 34 pictures in the gallery were drawn at 50 steps on a 4- or 9-step model: up to twelve times the compute for nothing
+    app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change(); root.update()
+    app.steps_var.set('50')
+    app._clamp_steps('flux2 klein 9b uncensored', int(app.steps_var.get()))
+    root.update()
+    check('choosing 50 for a 4-step model sets the box to 4', app.steps_var.get() == '4', app.steps_var.get())
+    check('and says why, with the ceiling named', 'ceiling' in app.hint.cget('text'), app.hint.cget('text'))
+    app.engine.calls.clear(); app.busy = False
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse')
+    app.generate(); root.update()
+    sent = app.engine.calls[-1][0][3] if app.engine.calls else None
+    check('the dispatch uses the ceiling, not the number asked for', sent == 4, sent)
+
+    app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
+    app.steps_var.set('12')
+    app._clamp_steps('z-image turbo', 12); root.update()
+    check('turbo clamps 12 to 9', app.steps_var.get() == '9', app.steps_var.get())
+    app.busy = False
+    app.engine.calls.clear()
+    app.generate(); root.update()
+    check('and a value already at the ceiling is left alone',
+          app.engine.calls and app.engine.calls[-1][0][3] == 9, app.engine.calls[-1][0][3] if app.engine.calls else None)
+    app.busy = False
+
     print("\n-- the strength readout is the value Generate will use (2026-10-28)")
     app.denoise.set(0.70); root.update()
     check('the label follows the slider', app.denoise_text.cget('text') == '0.70', app.denoise_text.cget('text'))
