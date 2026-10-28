@@ -921,6 +921,12 @@ vertical-clamp rather than a plain index step:
 | **Space** | toggles the current cell (opens a folder tile - a folder list has one selection, the open folder) |
 | **Enter** | activates it: loads the picture, or opens the folder |
 | **Shift+arrows** | extends the selection from the anchor, as shift+click does |
+
+**Which list answers the keys is which list you clicked.** The open folder's contents pane is a list in its own right:
+clicking a picture there gives it the keyboard and the arrows move *its* cursor (left/right wrap across its rows,
+up/down keep the column, PgUp/PgDn move a screenful, Home/End the row, Ctrl+Home/End the pane), leaving the strip alone;
+clicking a tile in column 0 hands the keyboard back. A re-render of the pane keeps the keyboard where it was, so a
+re-group does not silently move your arrows to the other column.
 | **Ctrl+A** | selects everything laid out |
 
 The keys are bound to the list itself, never to the whole application, so typing in the prompt box or in the View All

@@ -306,18 +306,21 @@ def main():
     check('Escape clears the selection', app.selected == [])
 
     print('\n-- keyboard is ignored while typing')
-    app.text.focus_set()
-    root.update()
-    app.select_all()
-    before = len(app.selected)
-    rc = app._on_ctrl_a()
-    check('Ctrl+A inside the prompt box does not select images', rc is None and len(app.selected) == before)
-    app.text.focus_set()
-    asked = []
-    real_ask = zui.messagebox.askyesno
-    zui.messagebox.askyesno = lambda *a, **k: asked.append(1) or True
-    rc = app._on_delete_key()
-    check('Del inside the prompt box does not delete', rc is None and not asked)
+    # focus_get() needs a realised, visible window; stub it so the guard is what is tested, not the window manager
+    real_focus = app.root.focus_get
+    app.root.focus_get = lambda: app.text
+    try:
+        root.update()
+        app.select_all()
+        before = len(app.selected)
+        rc = app._on_ctrl_a()
+        check('Ctrl+A inside the prompt box does not select images', rc is None and len(app.selected) == before)
+        asked = []
+        zui.messagebox.askyesno = lambda *a, **k: asked.append(1) or True
+        rc = app._on_delete_key()
+        check('Del inside the prompt box does not delete', rc is None and not asked)
+    finally:
+        app.root.focus_get = real_focus
 
     print('\n-- delete with No leaves everything alone')
     zui.messagebox.askyesno = lambda *a, **k: False
@@ -1949,6 +1952,62 @@ def main():
     check('and the seed it was made with', 'seed' in text, text)
     check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
+
+    print("\n-- the arrows follow the list that was clicked, pane or strip (2026-10-28)")
+    if app._plan and app._plan['groups']:
+        app.select_folder(0); root.update(); time.sleep(0.2)
+        cells = [c for c in app.contents.winfo_children() if c.winfo_class() == 'TFrame']
+        if cells:
+            handoffs = []
+            real_pane_focus = app.contents_canvas.focus_set
+            app.contents_canvas.focus_set = lambda: handoffs.append('pane')
+            try:
+                cells[0].winfo_children()[0].event_generate('<Button-1>', x=3, y=3)
+                root.update(); time.sleep(0.1)
+            finally:
+                app.contents_canvas.focus_set = real_pane_focus
+            check('clicking a pane picture hands the keyboard to the pane', 'pane' in handoffs, handoffs)
+
+            # with the keyboard in the pane, the pane answers the arrows and the strip does not
+            real_focus = app.root.focus_get
+            app.root.focus_get = lambda: app.contents_canvas
+            try:
+                keys, _cols, _tiles = app._pane_cells()
+                first = app.selected[-1] if app.selected else None
+                rc = app._pane_key(NS(state=0), 'right')
+                root.update()
+                check('the pane moves its own selection', rc == 'break' and app.selected[-1] != first,
+                      (first, app.selected[-1:] ))
+                check('and the strip ignores the same key', app._nav_key(NS(state=0), 1, 0) is None)
+            finally:
+                app.root.focus_get = real_focus
+    app.select_folder(None)
+    app.toggle_groups(False)          # the strip part needs picture tiles, not folder tiles
+    root.update(); time.sleep(0.15)
+    strip_tiles = [w for w in app.recent.winfo_children() if w.grid_info()]
+    if strip_tiles:
+        handoffs = []
+        real_strip_focus = app.gal_canvas.focus_set
+        app.gal_canvas.focus_set = lambda: handoffs.append('strip')
+        try:
+            strip_tiles[0].event_generate('<Button-1>', x=3, y=3)
+            root.update(); time.sleep(0.1)
+        finally:
+            app.gal_canvas.focus_set = real_strip_focus
+        check('clicking a strip tile hands the keyboard back to the strip', 'strip' in handoffs, handoffs)
+        real_focus = app.root.focus_get
+        app.root.focus_get = lambda: app.gal_canvas
+        try:
+            before = app.selected[-1] if app.selected else None
+            app._nav_key(NS(state=0), 1, 0)
+            root.update()
+            check('the strip moves again, and the pane ignores the key',
+                  app.selected and app.selected[-1] != before
+                  and app._pane_key(NS(state=0), 'right') is None,
+                  (before, app.selected[-1:]))
+        finally:
+            app.root.focus_get = real_focus
+    app.clear_selection(); app.toggle_groups(True); app.select_folder(None); root.update()
 
     print("\n-- a render lands in the open folder without the reader re-selecting it (2026-10-28)")
     if app._plan and app._plan['groups']:

@@ -1409,6 +1409,16 @@ class App:
         self.contents_holder.rowconfigure(0, weight=1)
         self.contents_holder.columnconfigure(0, weight=1)
         self.contents_canvas.configure(yscrollcommand=self.contents_bar.set)
+        self.contents_canvas.configure(takefocus=1)
+        for seq, fn in (('<Left>', lambda e: self._pane_key(e, 'left')), ('<Right>', lambda e: self._pane_key(e, 'right')),
+                        ('<Up>', lambda e: self._pane_key(e, 'up')), ('<Down>', lambda e: self._pane_key(e, 'down')),
+                        ('<Prior>', lambda e: self._pane_key(e, 'pageup')), ('<Next>', lambda e: self._pane_key(e, 'pagedown')),
+                        ('<Home>', lambda e: self._pane_key(e, 'home')), ('<End>', lambda e: self._pane_key(e, 'end')),
+                        ('<Control-Home>', lambda e: self._pane_key(e, 'all-home')),
+                        ('<Control-End>', lambda e: self._pane_key(e, 'all-end')),
+                        ('<space>', self._pane_toggle), ('<Return>', self._pane_open),
+                        ('<Control-a>', self._pane_all)):
+            self.contents_canvas.bind(seq, fn)
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -1863,6 +1873,9 @@ class App:
         # reported as confusing. Paint a grouping line instead and let `_apply_plan` draw the folders.
         self._grouping = bool(self.group_var.get())      # a plan is coming, so the strip has nothing to draw yet
         self._prediction = None          # which folder the prompt in the box would join
+        self._pane_cur = None            # the keyboard cursor inside the open folder's pane
+        self._content_order = []
+        self._content_cols = 1
         self._all_queue = None           # the ALL sweep's remaining profiles, or None
         self._all_total = 0
         self._all_saved = None
@@ -2058,6 +2071,114 @@ class App:
         except Exception:
             hit = None
         return hit['index'] if hit else None
+
+    def _pane_cells(self):
+        """The contents pane's cells in display order, its column count, and its tile widgets."""
+        keys = list(getattr(self, '_content_order', []) or [])
+        widgets = getattr(self, '_content_widgets', {}) or {}
+        return keys, max(1, int(getattr(self, '_content_cols', 1) or 1)), [widgets[k] for k in keys if k in widgets]
+
+    def _pane_visible_rows(self, tiles, cols):
+        pitch = 0
+        if len(tiles) > cols:
+            try:
+                pitch = tiles[cols].winfo_y() - tiles[0].winfo_y()
+            except Exception:
+                pitch = 0
+        if pitch <= 0 and tiles:
+            try:
+                pitch = tiles[0].winfo_height() + 2
+            except Exception:
+                pitch = 0
+        return grid_visible_rows(self.contents_canvas.winfo_height(), pitch)
+
+    def _see_pane_cell(self, tile):
+        """Scroll the pane to the cell under the keyboard, and only when it is actually out of view."""
+        if tile is None:
+            return
+        canvas = self.contents_canvas
+        self.contents.update_idletasks()
+        canvas.update_idletasks()
+        total = max(self.contents.winfo_height(), 0)
+        if total <= 0:
+            return
+        canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
+        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        view_top, view_h = canvas.canvasy(0), canvas.winfo_height()
+        if top >= view_top - 1 and top + height <= view_top + view_h:
+            return
+        canvas.yview_moveto(min(1.0, max(0.0, (top - 8.0) / total)))
+
+    def _pane_nav(self, move, extend=False):
+        """One layout-grid movement inside the open folder's pane.
+
+        The pane is a list in its own right: the arrows move its cursor and leave the strip alone, clicking a picture
+        hands it the keyboard, and clicking a tile in column 0 hands it back. The movement itself is the shared
+        `grid_move` the strip and both ScrollGrids use, so wrap/clamp/paging cannot drift between the lists.
+        """
+        keys, cols, tiles = self._pane_cells()
+        if not keys:
+            return 'break'
+        current = getattr(self, '_pane_cur', None)
+        if current not in keys:
+            current = self.selected[-1] if self.selected and self.selected[-1] in keys else None
+        index = keys.index(current) if current in keys else -1
+        new = grid_move(index, len(keys), cols, move, rows=self._pane_visible_rows(tiles, cols))
+        if new is None or not 0 <= new < len(keys):
+            return 'break'
+        key = keys[new]
+        self._pane_cur = key
+        if extend and self._anchor in keys:
+            i, j = keys.index(self._anchor), new
+            if i > j:
+                i, j = j, i
+            self.selected = list(keys[i:j + 1])
+        else:
+            self.selected = [key]
+            self._anchor = key
+        self._paint()
+        self._see_pane_cell(tiles[new] if new < len(tiles) else None)
+        return 'break'
+
+    def _pane_has_focus(self):
+        try:
+            focused = self.root.focus_get()
+        except Exception:
+            return False
+        return focused is self.contents_canvas or focused in (getattr(self, '_content_widgets', {}) or {}).values()
+
+    def _pane_key(self, event, move):
+        """Arrows reach the pane only while the pane has the keyboard - never while a text box does."""
+        if self._typing() or not self._pane_has_focus():
+            return None
+        return self._pane_nav(move, extend=bool(event.state & 0x0001))
+
+    def _pane_toggle(self, event=None):
+        if not self._pane_has_focus():
+            return None
+        keys, _cols, _tiles = self._pane_cells()
+        current = getattr(self, '_pane_cur', None)
+        if current in keys:
+            self.selected = ([p for p in self.selected if p != current] if current in self.selected
+                             else self.selected + [current])
+            self._paint()
+        return 'break'
+
+    def _pane_open(self, event=None):
+        if not self._pane_has_focus():
+            return None
+        keys, _cols, _tiles = self._pane_cells()
+        current = getattr(self, '_pane_cur', None)
+        if current in keys:
+            self.select_file(current)
+        return 'break'
+
+    def _pane_all(self, event=None):
+        if not self._pane_has_focus():
+            return None
+        self.selected = list(self._pane_cells()[0])
+        self._paint()
+        return 'break'
 
     def _regroup_soon(self):
         """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
@@ -2707,6 +2828,10 @@ class App:
             return
         group = self._plan['groups'][self._active_folder]
         pane_pos = self._scroll_pos(self.contents_canvas)
+        try:
+            had_focus = self.root.focus_get() is self.contents_canvas
+        except Exception:
+            had_focus = False
         self._rebuilding = True
         self.contents_holder.grid()
         for w in self.contents.winfo_children():
@@ -2742,6 +2867,7 @@ class App:
             pos = {p: i for i, p in enumerate(order)}
             items.sort(key=lambda r: pos.get(r['path'], len(items)))
         thumbs = thumbs_for([r['path'] for r in items])
+        order = []                                  # the pane's own display order, for its keyboard
         for i, row in enumerate(items[:self._content_shown]):
             tp = thumbs.get(row['path'])
             if not tp:
@@ -2756,6 +2882,7 @@ class App:
             cell.grid(row=i // cols, column=i % cols, padx=1, pady=1)
             lab = self._tile_widget(cell, row['path'], photo, pane=True)
             lab.pack()
+            order.append(Path(row['path']))
             # the corner badge: how big this file is, on the three bands - tomato red 64 kB or less, amber between,
             # medium green 1 MB or more. A pixel font because at 8 px an antialiased face is unreadable.
             try:
@@ -2780,7 +2907,12 @@ class App:
             elif row.get('fresh'):
                 ttk.Label(cell, text='new', font=PIXEL_FONT, foreground=self.theme.accent).pack()
             self._content_widgets[Path(row['path'])] = lab
+        self._content_order = order
+        self._content_cols = cols
         self._rebuilding = False
+        if had_focus:
+            # a re-render must not hand the keyboard to the strip: the reader was working in this pane
+            self.root.after_idle(lambda: self.contents_canvas.focus_set())
         self.root.after_idle(self._on_contents_resize)
         if pane_pos:
             self._restore_scroll(self.contents_canvas, pane_pos)
@@ -3909,7 +4041,14 @@ class App:
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
         path = Path(path)
-        if not browser:
+        if pane:
+            # the pane keeps its own cursor and its own keyboard: a click here must not hand the arrows to the strip
+            self._pane_cur = path
+            try:
+                self.contents_canvas.focus_set()
+            except Exception:
+                pass
+        elif not browser:
             self._nav_cur = path          # a click puts the keyboard cursor where the mouse is
             try:
                 self.gal_canvas.focus_set()  # so arrows and Space drive the strip after a click
