@@ -40,7 +40,10 @@ COUNT_SYSTEM = ('Count the people visible in the image. Reply with JSON only: {"
                 '"<8 words or fewer>"}. If you cannot tell, answer "unclear".')
 
 
-BUDGETS = (300, 900, 2400)     # a reasoning model can spend the whole budget thinking; measured, not assumed
+# A reasoning model can spend the whole budget thinking: measured, not assumed. 300 lost 2 of 5 answers, 900 recovered
+# one of those, and the hardest question in the consistency experiment ("how many arms does the figure in the middle
+# have") exhausted 2400 twice independently and answered at 6000. Four rungs, so a lost answer is rare rather than silent.
+BUDGETS = (300, 900, 2400, 6000)
 
 
 def _post(body, timeout=180):
