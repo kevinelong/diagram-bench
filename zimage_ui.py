@@ -534,7 +534,8 @@ DEFAULT_MOTION = 'the subject stays coherent, natural slow camera push in, no wa
 # ends up asking for two things at once - "oil painting, cinematic still, anamorphic" - so Generate asks first.
 STYLE_CONFLICT_WORDS = ('oil painting', 'watercolour painting', 'watercolor painting', 'acrylic painting', 'painting',
                         'photograph', 'photo', 'film still', 'film', 'sketch', 'drawing', 'illustration', 'anime',
-                        '3d render', 'vector icon')
+                        '3d render', 'vector icon', 'charcoal', 'graphite', 'pencil', 'pen and ink', 'chalk',
+                        'pastel', 'blueprint')
 
 STYLES = {
     'none': '',
@@ -544,7 +545,38 @@ STYLES = {
     'blueprint': 'engineering blueprint, white lines on blue, orthographic',
     'watercolour': 'watercolour painting, soft washes, paper texture',
     'cinematic': 'cinematic still, anamorphic, dramatic lighting, film grain',
+    # drawing media, for studies and underdrawings. Each suffix stays inside ~8 words: the encoder budget is about 50
+    # words in total, so a style that spends more than a tenth of it starts to cost the prompt its own subject.
+    'charcoal': 'charcoal drawing, coarse strokes, smudged shadow, textured paper',
+    'pencil': 'graphite pencil sketch, hatching, white paper',
+    'blue pencil': 'blue pencil underdrawing, light blue lines, white paper',
 }
+
+# What strength a base image wants, per style - **measured**, not chosen. A photograph was restyled at 0.55, 0.65 and
+# 0.72 with each medium's suffix (tools/style_strength_trial.py): at 0.55 and 0.65 the render is still called a photograph
+# by the grader ("a realistic photograph, not soft watercolour"), and at 0.72 each medium is the medium (charcoal on
+# textured paper, a blue-pencil underdrawing) while the figure, chair and room survive. So **0.72 is the strength at which a
+# medium change actually happens**, and it is where every medium style sits.
+#
+# The genre styles are a separate matter: 'diagram' at 0.78 produced "an illustrated portrait scene with labels", not a
+# technical diagram - a suffix cannot change genre, only the prompt can ("thin black lines, white background, black line
+# only", the words in the construction starter). They still sit at 0.78, the highest strength that keeps the subject before
+# 0.84 leaves the source.
+#
+# 'none' keeps 0.70: the measured pose threshold for flux2 klein, below which an instruction changes the props, not the pose.
+STYLE_STRENGTH = {
+    'none': 0.70,
+    'photo': 0.72, 'cinematic': 0.72, 'watercolour': 0.72,
+    'charcoal': 0.72, 'pencil': 0.72, 'blue pencil': 0.72,
+    'icon': 0.78, 'diagram': 0.78, 'blueprint': 0.78,
+}
+
+# The same suffix at the same strength does not do the same thing on both models, so the strength is corrected per model
+# rather than per style alone. Measured with the charcoal suffix on one photograph: klein draws charcoal at **0.72**;
+# turbo calls 0.65 and 0.72 renders "an oil painting" and only reads as charcoal at **0.78** - where its details drift
+# more (hair, collar and dress changed). A sweep over both can only pick one number: it takes the larger, so no model
+# silently under-acts, and the klein half runs a little stronger than it needs.
+MODEL_STRENGTH_OFFSET = {'flux2 klein 9b uncensored': 0.00, 'z-image turbo': 0.06, zg.ALL_MODEL: 0.06}
 
 # Measured cost of one sequential request at 4 steps, on this box, with the model cache disabled. The cost is flat
 # above 384 px - the per-request overhead dominates, not the pixel count - so area-based formulas are wrong here.
@@ -1724,7 +1756,12 @@ class App:
         ttk.Label(self.base_row, text='strength').pack(side='left')
         # 0.70 is the measured pose threshold for flux2 klein; below it an instruction changes the props, not the pose
         self.denoise = tk.DoubleVar(value=float(self._settings.get('denoise') or 0.70))
-        self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130)
+        # A style with a base image proposes its own strength (STYLE_STRENGTH), but only while the number is still the one
+        # we proposed: once the user moves the slider, no style change may quietly move it back.
+        self._strength_touched = False
+        self._strength_programmatic = None
+        self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130,
+                                        command=self._on_strength_move)
         self.strength_scale.pack(side='left', padx=4)
         # The readout must be *derived* from the variable. It was created with the literal string '0.60' and only
         # refreshed by a trace, and a trace fires on changes: nothing changed at startup, so the label said 0.60 while
@@ -1995,7 +2032,7 @@ class App:
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
-        self.style_var.trace_add('write', lambda *a: self._update_banner())
+        self.style_var.trace_add('write', lambda *a: self._on_style_change())
         self.model_var.trace_add('write', lambda *a: self._update_banner())
         for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
                         ('<Escape>', self._on_escape)):
@@ -3768,6 +3805,11 @@ class App:
         self.hint.configure(text='%s: %s steps (its maximum) at cfg %.1f - the first image loads that checkpoint, '
                                  'about 10-30 s; lower the steps if you are in a hurry'
                             % (self.model_var.get(), top or '?', prof.get('cfg', 1.0)))
+        # a style's strength is model-specific (MODEL_STRENGTH_OFFSET), so a model change may re-propose it
+        if self._apply_style_strength():
+            self.hint.configure(text='%s: style %s on a base image wants strength %.2f (+%.2f for this model)'
+                                     % (self.model_var.get(), self.style_var.get(), self.denoise.get(),
+                                        MODEL_STRENGTH_OFFSET.get(self.model_var.get(), 0.0)))
 
     def set_sidebar(self, show):
         """Fold the gallery away so the picture can use the width."""
@@ -3820,6 +3862,46 @@ class App:
         else:
             vals = [int(v) for v in vals]
         return vals
+
+    def _on_style_change(self):
+        self._update_banner()
+        if self._apply_style_strength():
+            # the readout already moved, so the sentence only has to say why
+            self.hint.configure(text='style %s on a base image: strength %.2f' % (self.style_var.get(), self.denoise.get()))
+
+    def _on_strength_move(self, value):
+        """Distinguish a value the user moved from one we set, so a style change can respect the difference."""
+        try:
+            v = float(value)
+        except Exception:
+            return
+        if self._strength_programmatic is not None and abs(v - self._strength_programmatic) < 1e-6:
+            return
+        self._strength_touched = True
+
+    def _apply_style_strength(self, style=None):
+        """Give a base image the strength its style asks for. Returns True when it changed anything.
+
+        No base image means the number has no meaning yet, and a strength the user set is never replaced - the same rule
+        the style-conflict dialog follows, that a guard must not silently overwrite a value someone chose.
+        """
+        if not getattr(self, 'base_path', None):
+            return False
+        if self._strength_touched:
+            return False
+        name = style if style is not None else (self.style_var.get() if hasattr(self, 'style_var') else 'none')
+        base_value = STYLE_STRENGTH.get(name, STYLE_STRENGTH['none'])
+        offset = MODEL_STRENGTH_OFFSET.get(self.model_var.get() if hasattr(self, 'model_var') else '', 0.0)
+        value = max(0.2, min(0.95, round(base_value + offset, 2)))
+        if abs(self.denoise.get() - value) < 1e-6:
+            return False
+        self._strength_programmatic = value
+        self.denoise.set(value)
+        self.root.after_idle(self._clear_programmatic_strength)
+        return True
+
+    def _clear_programmatic_strength(self):
+        self._strength_programmatic = None
 
     def _style_suffix(self, name):
         if name in self._custom_styles:
@@ -4989,6 +5071,7 @@ class App:
         if self._base_tip is None:
             self._base_tip = self._tip(self.base_label, '')
         self._base_tip.text = self.base_path.name
+        self._apply_style_strength()
         self.hint.configure(text='next generation starts from %s at strength %.2f'
                             % (self.base_path.name, self.denoise.get()))
         self._update_banner()

@@ -898,6 +898,87 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- drawing-media styles, and the strength a base image gets from its style')
+    for name in ('charcoal', 'pencil', 'blue pencil'):
+        check('%s exists and carries a medium' % name, name in zui.STYLES and bool(zui.STYLES.get(name)), name)
+    # the encoder budget is ~50 words, so a suffix must stay near a tenth of it. Nine is the existing worst case
+    # (diagram, which measured well in the construction trial and is left alone); the drawing media are <= 8.
+    check('no style suffix exceeds 9 words', all(len(zui.STYLES[s].split()) <= 9 for s in zui.STYLES),
+          str(max(len(zui.STYLES[s].split()) for s in zui.STYLES)))
+    check('the drawing-media suffixes stay at 8 or fewer',
+          all(len(zui.STYLES[s].split()) <= 8 for s in ('charcoal', 'pencil', 'blue pencil')),
+          str([len(zui.STYLES[s].split()) for s in ('charcoal', 'pencil', 'blue pencil')]))
+    check('every style also proposes a base-image strength',
+          all(s in zui.STYLE_STRENGTH for s in zui.STYLES), str(sorted(set(zui.STYLES) - set(zui.STYLE_STRENGTH))))
+    # measured: 0.55 and 0.65 still render a photograph, 0.72 makes the medium the medium
+    check('the medium styles sit at the measured medium-change strength',
+          all(zui.STYLE_STRENGTH[s] == 0.72 for s in ('charcoal', 'pencil', 'blue pencil', 'watercolour', 'photo',
+                                                     'cinematic')),
+          str({s: zui.STYLE_STRENGTH[s] for s in ('charcoal', 'photo', 'watercolour')}))
+    check('the genre styles sit higher, below the strength that leaves the source',
+          all(0.72 < zui.STYLE_STRENGTH[s] < 0.84 for s in ('icon', 'diagram', 'blueprint')),
+          str({s: zui.STYLE_STRENGTH[s] for s in ('icon', 'diagram', 'blueprint')}))
+    check('and none keeps the klein pose threshold', zui.STYLE_STRENGTH['none'] == 0.70, str(zui.STYLE_STRENGTH['none']))
+
+    # the guard: charcoal words against a photo style conflict, and against charcoal they agree
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a charcoal drawing of a fox')
+    app.style_var.set('photo'); root.update()
+    check('a charcoal prompt conflicts with the photo style', len(app.style_conflicts('a charcoal drawing of a fox', 'photo')) > 0,
+          str(app.style_conflicts('a charcoal drawing of a fox', 'photo')))
+    check('and agreement is not a conflict', app.style_conflicts('a charcoal drawing of a fox', 'charcoal') == [],
+          str(app.style_conflicts('a charcoal drawing of a fox', 'charcoal')))
+    app.style_var.set('none')
+
+    # the strength proposal: nothing without a base image, the style's number with one
+    app.clear_base(); root.update()
+    before = app.denoise.get()
+    app.style_var.set('charcoal'); root.update()
+    check('with no base image a style leaves the strength alone', abs(app.denoise.get() - before) < 1e-6, '%.2f' % app.denoise.get())
+    base_png = tmp / 'strength-base.png'
+    Image.new('RGB', (48, 48), 'green').save(base_png)
+    app._set_base(base_png); root.update()
+    offset_now = zui.MODEL_STRENGTH_OFFSET.get(app.model_var.get(), 0.0)
+    check("a base image takes its style's strength, plus this model's offset",
+          abs(app.denoise.get() - (zui.STYLE_STRENGTH['charcoal'] + offset_now)) < 1e-6,
+          '%.2f for offset +%.2f' % (app.denoise.get(), offset_now))
+    app.style_var.set('icon'); root.update()
+    check('another style proposes another strength',
+          abs(app.denoise.get() - (zui.STYLE_STRENGTH['icon'] + offset_now)) < 1e-6, '%.2f' % app.denoise.get())
+    app.strength_scale.set(0.33); root.update()
+    check('moving the slider is remembered', app._strength_touched, str(app._strength_touched))
+    app.style_var.set('charcoal'); root.update()
+    check('and no style change overwrites it afterwards', abs(app.denoise.get() - 0.33) < 1e-6, '%.2f' % app.denoise.get())
+    app.clear_base()
+    app.strength_scale.set(zui.STYLE_STRENGTH['none']); app._strength_touched = False; root.update()
+    app.style_var.set('none'); app.busy = False
+    base_png.unlink(missing_ok=True)
+
+    print('\n-- the strength a style proposes is model-specific')
+    check('the offsets are recorded per model', zui.MODEL_STRENGTH_OFFSET.get('z-image turbo', 0) > 0
+          and zui.MODEL_STRENGTH_OFFSET.get('flux2 klein 9b uncensored') == 0.0,
+          str(zui.MODEL_STRENGTH_OFFSET))
+    base_png = tmp / 'offset-base.png'
+    Image.new('RGB', (48, 48), 'blue').save(base_png)
+    app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change()
+    app.strength_scale.set(0.50); app._strength_touched = False
+    app._set_base(base_png); app.style_var.set('charcoal'); root.update()
+    klein_value = app.denoise.get()
+    check('klein takes the style strength itself',
+          abs(klein_value - zui.STYLE_STRENGTH['charcoal']) < 1e-6, '%.2f' % klein_value)
+    app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
+    turbo_value = app.denoise.get()
+    check('switching model re-proposes it with that model\'s offset',
+          abs(turbo_value - (zui.STYLE_STRENGTH['charcoal'] + zui.MODEL_STRENGTH_OFFSET['z-image turbo'])) < 1e-6,
+          '%.2f' % turbo_value)
+    app.strength_scale.set(0.40); root.update()
+    app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change(); root.update()
+    check('a strength the user set is still never replaced', abs(app.denoise.get() - 0.40) < 1e-6, '%.2f' % app.denoise.get())
+    app.clear_base()
+    app.strength_scale.set(zui.STYLE_STRENGTH['none']); app._strength_touched = False
+    app.style_var.set('none'); app.busy = False
+    app.model_var.set('z-image turbo'); app._on_model_change()
+    base_png.unlink(missing_ok=True)
+
     print('\n-- a style suffix is applied once, however often you rerender')
     app.style_var.set('photo')
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')

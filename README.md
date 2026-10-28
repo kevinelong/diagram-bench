@@ -477,6 +477,24 @@ draws at 0.65 and there it prefers anatomy to geometry - it grew a literal ribca
 Wooden is more robust than "soft clay" (the clay lost on turbo to a sculpted ribcage), and in-prompt negatives bought
 nothing - put exclusions in the negative field. Reproduce with `python tools/construction_trial.py`.
 
+## Styles, and the strength a base image gets
+
+Styles are prompt **suffixes** and carry the medium only - the subject stays in the prompt - so a style can never quietly
+re-subject a picture. Three drawing media were added: `charcoal`, `pencil`, `blue pencil`, each inside 8 words so the
+suffix does not eat the ~50-word encoder budget.
+
+Every style now proposes a strength when a base image is used, and the number comes from measurement
+(`STYLE-STRENGTH-2026-10-28.md`): on one photograph, 0.55 and 0.65 still render "a realistic photograph", and **0.72 is
+where a medium change actually happens** - charcoal on textured paper, a blue-pencil underdrawing, the figure and room
+intact. The genre styles (`icon`, `diagram`, `blueprint`) sit at 0.78, because a suffix cannot change genre: `diagram` at
+0.78 produced "an illustrated portrait scene with labels", which is why the genre words live in the prompt (the
+`construction` starter) instead.
+
+The strength is also **model-specific**: turbo reads charcoal as "an oil painting" at 0.65 and 0.72 and only draws charcoal
+at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweeping `ALL` takes the larger number. A style
+never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
+slider still holds what we put there.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of
