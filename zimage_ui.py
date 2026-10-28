@@ -1519,7 +1519,9 @@ class App:
         ttk.Label(selrow, text='order', foreground=self.theme.muted).pack(side='left')
         # wins travel with the picture, so "Wins" is a stable order across folders and restarts
         self.sort_var = tk.StringVar(value='Recent')
-        self.sort_cb = ttk.Combobox(selrow, state='readonly', width=7, values=['Recent', 'Wins'],
+        # Sequence reads a storyboard in film order (the scene numbers a multi-scene prompt records in its sidecars);
+        # it falls back to recency for pictures that have none, so an ordinary gallery is unchanged
+        self.sort_cb = ttk.Combobox(selrow, state='readonly', width=8, values=['Recent', 'Wins', 'Sequence'],
                                     textvariable=self.sort_var)
         self.sort_cb.pack(side='left', padx=(3, 0))
         self.sort_cb.bind('<<ComboboxSelected>>', lambda e: self._resort())
@@ -2792,6 +2794,64 @@ class App:
     def _sort_wins(self):
         return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'
 
+    def _sort_sequence(self):
+        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Sequence'
+
+    def _scene_of(self, path):
+        """(scene, position in that scene) for a picture, or None. Memoised: the sidecars are read once per refresh."""
+        cache = getattr(self, '_scene_cache', None)
+        if cache is None:
+            cache = self._scene_cache = {}
+        if path in cache:
+            return cache[path]
+        meta = read_meta(path) or {}
+        scene, of = meta.get('scene'), meta.get('scene_of')
+        value = (int(scene), int(of or 0)) if isinstance(scene, int) or (isinstance(scene, str) and scene.isdigit()) \
+            else None
+        cache[path] = value
+        return value
+
+    def _sequence_order(self, paths):
+        """Film order: numbered pictures by (scene, position in scene), then everything else newest-first.
+
+        Two passes rather than one clever key: a storyboard has an order that ends, and the pictures made outside one
+        (a test, a quick experiment) belong after it, not interleaved by a date they happened to be made on.
+        """
+        rows = [(p, self._scene_of(p), (read_meta(p) or {}).get('created') or '') for p in paths]
+        numbered = sorted((r for r in rows if r[1]), key=lambda r: (r[1][0], r[1][1], r[2]))
+        rest = sorted((r for r in rows if not r[1]), key=lambda r: r[2], reverse=True)
+        return [p for p, _scene, _created in numbered + rest]
+
+    def _sort_wins(self):
+        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'
+
+    def _sort_sequence(self):
+        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Sequence'
+
+    def _scene_of(self, path):
+        """(scene, position in that scene) for a picture, or None. Memoised: the sidecars are read once per refresh."""
+        cache = getattr(self, '_scene_cache', None)
+        if cache is None:
+            cache = self._scene_cache = {}
+        if path in cache:
+            return cache[path]
+        meta = read_meta(path) or {}
+        scene, of = meta.get('scene'), meta.get('scene_of')
+        value = (int(scene), int(of or 0)) if isinstance(scene, int) or (isinstance(scene, str) and scene.isdigit()) \
+            else None
+        cache[path] = value
+        return value
+
+    def _sequence_order(self, paths):
+        """Film order: scene, then the picture's position within the scene, then recency. Unnumbered pictures go last."""
+        def key(item):
+            path, created = item
+            scene = self._scene_of(path)
+            return (0, scene[0], scene[1], '') if scene else (1, 0, 0, ''.join(chr(255 - ord(c)) for c in created[::-1]))
+        ordered = [p for p, _c in sorted(
+            ((p, (read_meta(p) or {}).get('created') or '') for p in paths), key=key)]
+        return ordered
+
     def _resort(self):
         self._content_shown = BATCH_CONTENTS
         self.refresh_gallery()
@@ -2899,7 +2959,11 @@ class App:
         # newest first: a fresh render belongs at the top of the folder it just joined, and appending it after 200
         # members put it past the first batch, where paging could never reach it
         items = fresh_rows + items
-        if not self._sort_wins():
+        if self._sort_sequence():
+            order = self._sequence_order([r['path'] for r in items])
+            rank = {p: i for i, p in enumerate(order)}
+            items.sort(key=lambda r: rank.get(r['path'], len(items)))
+        elif not self._sort_wins():
             # newest on top: a folder is read from its most recent picture down, which is also where a fresh render
             # lands. The plan hands members over oldest-first so the folder order stays stable; the pane re-sorts them.
             items.sort(key=lambda r: r.get('created') or '', reverse=True)
@@ -3121,6 +3185,7 @@ class App:
             self._restore_scroll(self.gal_canvas, strip_pos)
 
     def _refresh_gallery(self, select=None):
+        self._scene_cache = {}
         everything = self._all_files()
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
@@ -3130,6 +3195,8 @@ class App:
         if self._sort_wins():
             import pair_rank
             files = pair_rank.sort_by_wins(files)
+        elif self._sort_sequence():
+            files = self._sequence_order(files)
         self._files = files
         # a search turns the strip into a result list, so it shows matches from the whole folder, not 18 of them
         filtering = bool(self.search_var.get().strip()) or bool(self.starred_only.get())

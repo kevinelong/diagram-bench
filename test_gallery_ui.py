@@ -1961,6 +1961,30 @@ def main():
     check('and the seed it was made with', 'seed' in text, text)
     app.select_folder(None); root.update()
 
+    print("\n-- the Sequence order reads a storyboard in film order (2026-10-28)")
+    import zimage_ui as _zq
+    _root_sq = tk.Tk()
+    _app_sq = _zq.App(_root_sq, StubEngine(), args)
+    _root_sq.update()
+    _sq_dir = Path(tempfile.mkdtemp(prefix='seq-'))
+    made = []
+    for name, scene, of in (('c.png', 2, 1), ('a.png', 1, 2), ('b.png', 1, 1), ('z.png', None, None)):
+        img = _sq_dir / name
+        Image.new('RGB', (16, 16), (40, 60, 80)).save(img)
+        meta = {'prompt': 'p', 'created': '2026-10-28T10:00:0%d' % len(made)}
+        if scene:
+            meta.update({'scene': scene, 'scene_of': of})
+        (img.with_suffix('.json')).write_text(json.dumps(meta), encoding='utf-8')
+        made.append(str(img))
+    order = [Path(p).name for p in _app_sq._sequence_order(made)]
+    check('numbered pictures come first, in scene then position order',
+          order[:3] == ['b.png', 'a.png', 'c.png'], order)
+    check('and an unnumbered picture comes after the storyboard, not inside it', order[-1] == 'z.png', order)
+    _app_sq.sort_var.set('Sequence')
+    check('the order control offers Sequence', 'Sequence' in list(_app_sq.sort_cb['values']),
+          _app_sq.sort_cb['values'])
+    _app_sq.sort_var.set('Recent'); _root_sq.destroy()
+
     print("\n-- a prompt that describes several scenes renders one image per scene (2026-10-28)")
     import zimage_ui as _zs
     _root_sc = tk.Tk()

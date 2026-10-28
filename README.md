@@ -320,6 +320,10 @@ Each render records `scene` / `scene_of` in its sidecar, the banner says how man
 chains one scene at a time on the idle card. On the screenplay in `D:/Codex/House Rules 2026 v3/Pool Hall Misfits/`,
 `scenes.detect` finds **86 set-ups** (the authored count) with a median of 254 words each.
 
+**`order: Sequence`** reads a storyboard in film order: numbered pictures first, by the `scene` / `scene_of` their
+sidecars record, then everything else newest-first - so a test render made today does not land in the middle of a scene.
+The pane and the strip both honour it.
+
 ## Asking the grader, instead of asserting
 
 `scene_grade.py` puts a question to the same vision model `vlm_score.py` uses (one scorer, so its bias cancels between
