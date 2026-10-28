@@ -309,6 +309,32 @@ projects through a fixed **perspective** view (so the fixture fits a homography 
 0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
 first answers are in [PIN-20261021.md](PIN-20261021.md).
 
+## One prompt, several scenes
+
+A prompt that marks two or more set-ups renders **one image per scene**. The split is `scenes.py`, which reads marker
+lines only - `SCENE ONE - OPENING` headers, `1. INT. …` / `INT./EXT. …` slugs, `SHOT 3:` and `[scene 2]` - and treats a
+`SCENE` header as the *title* of the set-ups beneath it, not as a picture of its own. Fewer than two markers is one
+scene, so an ordinary prompt behaves exactly as before (`test_scenes.py` pins both halves).
+
+Each render records `scene` / `scene_of` in its sidecar, the banner says how many images Generate will make, and the run
+chains one scene at a time on the idle card. On the screenplay in `D:/Codex/House Rules 2026 v3/Pool Hall Misfits/`,
+`scenes.detect` finds **86 set-ups** (the authored count) with a median of 254 words each.
+
+## Asking the grader, instead of asserting
+
+`scene_grade.py` puts a question to the same vision model `vlm_score.py` uses (one scorer, so its bias cancels between
+comparisons) and does two jobs: grade a scene render against its own scene text, and gather measurements over the
+gallery. Its first measurement, in [COUNT-FIDELITY-2026-10-28.md](COUNT-FIDELITY-2026-10-28.md), asks the plain
+question - how many people are in this picture, against the number the prompt stated:
+
+**10 of 10 scored exact**, 4 abstentions. Small n, and it says nothing about unusual anatomy (the gallery contains no
+"four arms" prompts at all), but it does say head counts survive.
+
+Two bugs in the *instrument* were found by that measurement before it could report: a prompt reading "Pictured are six
+women. Each clothed in three layers" was being scored as three, and contact sheets (16 tiles of two figures = 32) were
+being scored as count failures. Both are fixed, and an ambiguous prompt (several different counts stated) now returns
+"not measured" instead of guessing.
+
 ## What a "vary" strength actually does
 
 `vary_curve.py` measures it two ways, and the two disagree in an instructive way. The **population** curve - every

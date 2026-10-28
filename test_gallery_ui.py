@@ -1961,6 +1961,51 @@ def main():
     check('and the seed it was made with', 'seed' in text, text)
     app.select_folder(None); root.update()
 
+    print("\n-- a prompt that describes several scenes renders one image per scene (2026-10-28)")
+    import zimage_ui as _zs
+    _root_sc = tk.Tk()
+    _app_sc = _zs.App(_root_sc, StubEngine(), args)
+    _root_sc.update()
+    three = ("SCENE ONE - OPENING\n\n1. INT. THE LAST POCKET - NIGHT\nCAMERA: rain on glass.\n\n"
+             "SCENE TWO - NO SIDE BETS\n\n2. INT. THE LAST POCKET - UNDER THE RAIL\nCAMERA: a coin passing.\n\n"
+             "SCENE THREE - THE ENTRY\n\n3. INT. THE LAST POCKET - DRAWING\nCAMERA: the scoreboard.")
+    _app_sc.text.delete('1.0', 'end'); _app_sc.text.insert('1.0', three)
+    _root_sc.update()
+    _app_sc._update_banner()
+    check('the banner says how many scenes Generate will render', '3 scenes' in _app_sc.banner['text'],
+          _app_sc.banner['text'][:80])
+    _app_sc.engine.calls.clear()
+    _app_sc.generate(); _root_sc.update()
+    check('one dispatch, for the first scene only', len(_app_sc.engine.calls) == 1, len(_app_sc.engine.calls))
+    first_prompt, first_kw = _app_sc.engine.calls[0][0][0], _app_sc.engine.calls[0][1]
+    check('the first scene is the one sent', 'SCENE ONE' in first_prompt and 'SCENE TWO' not in first_prompt,
+          first_prompt[:60])
+    check('and it is recorded as scene 1 of 3', (first_kw.get('scene'), first_kw.get('of')) == (1, 3),
+          (first_kw.get('scene'), first_kw.get('of')))
+    check('two scenes remain queued', len(_app_sc._scene_queue) == 2, _app_sc._scene_queue and len(_app_sc._scene_queue))
+    _app_sc.busy = False
+    _app_sc._run_next_scene(); _root_sc.update()
+    second = _app_sc.engine.calls[-1][1]
+    check('the second scene follows, recorded as 2 of 3',
+          second.get('scene') == 2 and 'SCENE TWO' in _app_sc.engine.calls[-1][0][0],
+          (second.get('scene'), _app_sc.engine.calls[-1][0][0][:40]))
+    _app_sc.busy = False
+    _app_sc._run_next_scene(); _root_sc.update()
+    _app_sc.busy = False
+    _app_sc._run_next_scene(); _root_sc.update()
+    check('after the last scene the queue is spent', _app_sc._scene_queue is None, _app_sc._scene_queue)
+    check('three images in total, one per scene', len(_app_sc.engine.calls) == 3, len(_app_sc.engine.calls))
+
+    _app_sc.engine.calls.clear()
+    _app_sc.text.delete('1.0', 'end'); _app_sc.text.insert('1.0', 'a black poodle on a leather couch')
+    _app_sc.busy = False
+    _app_sc.generate(); _root_sc.update()
+    check('an ordinary prompt still sends exactly one image, with no scene number',
+          len(_app_sc.engine.calls) == 1 and _app_sc.engine.calls[0][1].get('scene') is None,
+          (len(_app_sc.engine.calls), _app_sc.engine.calls and _app_sc.engine.calls[0][1].get('scene')))
+    _app_sc.busy = False
+    _root_sc.destroy()
+
     print("\n-- closing while a render is running asks first, and interrupts it (2026-10-28)")
     import zimage_ui as _zu
     _root_close = tk.Tk()

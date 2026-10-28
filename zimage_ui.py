@@ -31,6 +31,7 @@ import struct
 import subprocess
 
 from winproc import popen, run
+import scenes as scene_detect
 import sys
 import threading
 import time
@@ -774,7 +775,8 @@ class Engine:
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
-                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1):
+                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1,
+                 scene=None, of=None):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -795,7 +797,8 @@ class Engine:
                         'mask': (Path(mask_path).name if mask_path else None),
                         'outpaint': list(outpaint) if outpaint else None,
                         'hires': (hires if hires > 1.0 else None),
-                        'hires_denoise': (hires_denoise if hires > 1.0 else None)}
+                        'hires_denoise': (hires_denoise if hires > 1.0 else None),
+                        'scene': scene, 'scene_of': of}
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name, scale_base = None, None
@@ -1912,6 +1915,8 @@ class App:
         self._content_cols = 1
         self._all_queue = None           # the ALL sweep's remaining profiles, or None
         self._all_total = 0
+        self._scene_queue = None         # the remaining scenes of a multi-scene prompt, or None
+        self._scene_total = 0
         self._all_saved = None
         self._see_pending = None         # a folder waiting to be scrolled into view after the next rebuild
         self.refresh_gallery()
@@ -3701,6 +3706,27 @@ class App:
                               % (index, getattr(self, '_all_total', 1), profile, zg.QUALITY_SIZE, steps))
         self.generate(_profile=profile, _force_single=True)
 
+    # -- scenes: one image per scene a prompt describes -----------------------------------------------------
+    def _start_scenes(self, found):
+        """Queue one render per scene, first one now. The split is `scenes.detect`, which only reads marker lines."""
+        self._scene_queue = list(found[1:])
+        self._scene_total = len(found)
+        first = found[0]
+        self.status.configure(text='scene 1 of %d · %s' % (self._scene_total, (first['title'] or 'untitled')[:48]))
+        self.generate(_prompt=first['text'], _scene=(1, self._scene_total), _force_single=True)
+
+    def _run_next_scene(self):
+        if not getattr(self, '_scene_queue', None):
+            self._scene_queue = None
+            self.status.configure(text='scenes done - %d images, one per scene' % getattr(self, '_scene_total', 0))
+            self._update_banner()
+            return
+        total = getattr(self, '_scene_total', 1)
+        index = total - len(self._scene_queue) + 1
+        item = self._scene_queue.pop(0)
+        self.status.configure(text='scene %d of %d · %s' % (index, total, (item['title'] or 'untitled')[:48]))
+        self.generate(_prompt=item['text'], _scene=(index, total), _force_single=True)
+
     def vary(self, mode, strength=0.35):
         """Re-run this picture's prompt. 'vary' moves the seed; 'subtle' re-samples the picture itself at 0.35."""
         meta = self._meta_of_current()
@@ -4821,6 +4847,13 @@ class App:
             colour = self.theme.accent
         n = self._batch()
         what = 'one image' if n == 1 else '%d tiles' % n
+        if self.base_path is None:
+            try:
+                found = scene_detect.detect(self.text.get('1.0', 'end'))
+            except Exception:
+                found = []
+            if len(found) > 1:
+                what = scene_detect.summary(found)     # Generate will render one image per scene
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
         if model == zg.ALL_MODEL:
@@ -5072,18 +5105,28 @@ class App:
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
 
-    def generate(self, _profile=None, _force_single=False):
-        """Render once. `_profile` and `_force_single` exist for the ALL sweep, which drives this per model."""
+    def generate(self, _profile=None, _force_single=False, _prompt=None, _scene=None):
+        """Render once.
+
+        `_profile` and `_force_single` exist for the ALL sweep, which drives this per model. `_prompt` and `_scene` exist
+        for the scene run, which drives this once per detected scene without touching the prompt box.
+        """
         if self.busy:
             return
         if _profile is None and getattr(self, 'model_var', None) is not None \
                 and self.model_var.get() == zg.ALL_MODEL:
             self._start_all()
             return
-        prompt = self.text.get('1.0', 'end').strip()
+        prompt = (_prompt if _prompt is not None else self.text.get('1.0', 'end')).strip()
         if not prompt:
             self.hint.configure(text='enter a prompt first')
             return
+        # a prompt that describes several scenes renders one image per scene; an edit (mask, pad, base) never splits
+        if _prompt is None and not _force_single and self.base_path is None and self._mask is None and not any(self._pads):
+            found = scene_detect.detect(prompt)
+            if len(found) > 1:
+                self._start_scenes(found)
+                return
         try:
             seed = int(self.seed.get())
         except ValueError:
@@ -5179,7 +5222,8 @@ class App:
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
                              sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,
                              hires=hires, hires_denoise=0.45, sweep=sweep,
-                             seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1))
+                             seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1),
+                             scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None))
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()
@@ -5309,6 +5353,8 @@ class App:
                         self._render_contents()
                     if getattr(self, '_all_queue', None):
                         self.root.after(400, self._run_next_all)   # a sweep: next model once the card is idle
+                    if getattr(self, '_scene_queue', None):
+                        self.root.after(400, self._run_next_scene)  # a storyboard: next scene once the card is idle
                     if self.chain_var.get():
                         self._set_base(path)
                         base_note = 'chained from %s' % Path(path).name
@@ -5480,7 +5526,8 @@ class App:
         prompt. Attached to a server we did not start (`--no-autostart`), closing therefore used to leave the render
         running on the card with nothing on screen able to cancel it. So: confirm, cancel, then shut down.
         """
-        pending = (1 + len(self._all_queue or [])) if getattr(self, 'busy', False) else 0
+        pending = (1 + len(self._all_queue or []) + len(getattr(self, '_scene_queue', None) or [])) \
+            if getattr(self, 'busy', False) else 0
         if pending and not messagebox.askyesno(
             'Still working',
             '%d render%s in flight.\n\nStop %s and close?' % (pending, '' if pending == 1 else 's',
@@ -5490,6 +5537,7 @@ class App:
             return
         if self.busy:
             self._all_queue = None
+            self._scene_queue = None
             try:
                 print('close: %s' % self.engine.cancel())
             except Exception as e:
