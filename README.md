@@ -228,7 +228,15 @@ in one folder.
   scene in one folder.
 
 **What you see on load:** the newest 18 pictures stay **ungrouped and in date order** for immediate work, while the
-grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). **Folders are ordered by their
+grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). **A stated head count is a subject.** "three very strong fit toned women" and "exactly six adult women sit
+cross-legged" are different pictures, and text similarity cannot see it because the count is one word among many. The
+count is read explicitly (`group_prompts.stated_count`, with the same rules the grader uses) and a cluster that holds two
+different counts is split before a label is chosen; members that state no count join the largest part rather than being
+exiled. Measured on the gallery: **2 of 85 folders mixed counts and between them held 363 pictures** - after the split,
+**0 of 87**, intra-folder similarity 0.852 -> **0.882**, and the reported case is its own folder: *"Exactly six adult
+women sit in a single shallow semicircle…"* (17 pictures) and *"exactly Six adult women sit cross-legged…"* (2).
+
+**Folders are ordered by their
 newest picture** - the one added to most recently comes first, which is what "last modified" means for a folder - with
 the label as the tie-break so the order stays deterministic. A folder needs at least two pictures so a one-off is not
 dressed up as a category, and a picture with no prompt is never folded - nothing can be said about it.

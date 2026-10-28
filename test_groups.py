@@ -118,7 +118,43 @@ def test_folder_order_follows_newest_member():
           all(newests[i] >= newests[i + 1] for i in range(len(newests) - 1)), newests)
 
 
+def test_a_stated_head_count_is_a_subject():
+    """Two prompts that state different numbers of people describe different pictures (2026-10-28).
+
+    Reported from the gallery: images prompted "exactly Six adult women ..." were landing in the folder labelled
+    "three very strong fit toned muscled ...". Measured before the fix: 2 of 85 folders mixed counts and between them
+    held 363 pictures. The text similarity cannot see it - the count is one word among many - so it is read explicitly.
+    """
+    check('a plain count is read', gp.stated_count('three very strong fit toned women') == 3,
+          gp.stated_count('three very strong fit toned women'))
+    check('an emphatic one is read too', gp.stated_count('exactly Six adult women sit cross-legged') == 6,
+          gp.stated_count('exactly Six adult women sit cross-legged'))
+    check('a count across a preposition is not this subject',
+          gp.stated_count('three green lamps above two women') == 2,
+          gp.stated_count('three green lamps above two women'))
+    check('a prompt with no count states nothing', gp.stated_count('a black poodle on a leather couch') is None)
+    check('two different counts in one prompt is ambiguous, so it decides nothing',
+          gp.stated_count('two women and three men in a hall') is None,
+          gp.stated_count('two women and three men in a hall'))
+
+    three_rows = [{'path': 's%d.png' % i, 'prompt': 'three very strong fit toned women', 'created': ''} for i in range(3)]
+    six_rows = [{'path': 'x%d.png' % i, 'prompt': 'exactly six adult women sit cross-legged', 'created': ''} for i in range(3)]
+    plain = [{'path': 'n1.png', 'prompt': 'a pool hall at night', 'created': ''}]
+    parts = gp.split_by_stated_count(three_rows + six_rows + plain)
+    check('a cluster holding two counts is split into two', len(parts) == 2, [len(p) for p in parts])
+    check('the counts keep their own pictures',
+          sorted(len(p) for p in parts) == [3, 4], [len(p) for p in parts])
+    check('a picture that states no count joins the larger part, it is not exiled',
+          any(any(r['path'] == 'n1.png' for r in part) for part in parts),
+          [[r['path'] for r in part] for part in parts])
+    check('a cluster with one count is left whole',
+          len(gp.split_by_stated_count(three_rows + plain)) == 1)
+    check('a cluster with no counts is left whole',
+          len(gp.split_by_stated_count(plain + plain)) == 1)
+
+
 def main():
+    test_a_stated_head_count_is_a_subject()
     test_folder_order_follows_newest_member()
     ap = argparse.ArgumentParser()
     ap.add_argument('--real', action='store_true', help='also group the real gallery, read-only, and time it')

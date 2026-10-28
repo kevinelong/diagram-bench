@@ -451,6 +451,56 @@ def label_for(prompts, members, width=60, lexicon=None):
     return head or '(no prompt recorded)'
 
 
+
+# -- stated head counts -----------------------------------------------------------------------------------------------
+# A prompt that says "three ... women" and one that says "exactly six adult women" describe different pictures. The
+# text similarity cannot tell, because the count is one word among many; so it is read explicitly and used to split.
+COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
+               'ten': 10, 'eleven': 11, 'twelve': 12}
+PEOPLE_WORDS = ('adult', 'woman', 'women', 'man', 'men', 'people', 'person', 'persons', 'figure', 'figures', 'character',
+                'characters', 'player', 'players', 'girl', 'girls', 'boy', 'boys', 'face', 'faces')
+_PREPOSITIONS = r'(?:above|behind|near|beside|by|on|in|at|with|from|under|over|across)\b'
+
+
+def stated_count(prompt):
+    """The single head count a prompt states, or None when it states several (ambiguous) or none.
+
+    The *earliest* phrase wins - iterating the words instead made "six women ... three layers" read as three - and a
+    people noun may sit a few adjectives away ("three very strong fit toned muscled adult women") but not across a
+    preposition: "three green lamps above two women" is about the lamps.
+    """
+    low = ' '.join((prompt or '').split()).lower()
+    found = []
+    for word, number in COUNT_WORDS.items():
+        pattern = r'\b%s\b\s+(?:(?!%s)\w+\s+){0,8}(?:%s)\b' % (word, _PREPOSITIONS, '|'.join(PEOPLE_WORDS))
+        for match in re.finditer(pattern, low):
+            found.append((match.start(), number))
+    if not found:
+        return None
+    found.sort()
+    if len({number for _pos, number in found}) > 1:
+        return None                      # several different counts stated: the prompt is ambiguous, so it decides nothing
+    return found[0][1]
+
+
+def split_by_stated_count(rows):
+    """Split one cluster by the head count its prompts state. A single count, or no counts, means one part.
+
+    Members that state no count carry no evidence against any part, so they join the largest one rather than forming a
+    folder of their own - otherwise every count-free prompt would be exiled from the subject it belongs to.
+    """
+    buckets = {}
+    for row in rows:
+        buckets.setdefault(stated_count(row.get('prompt')), []).append(row)
+    counted = {count: members for count, members in buckets.items() if count is not None}
+    if len(counted) < 2:
+        return [rows]
+    parts = sorted(counted.items())
+    largest = max(parts, key=lambda item: len(item[1]))[1]
+    largest.extend(buckets.get(None, []))
+    return [sorted(members, key=lambda r: r.get('created') or '') for _count, members in parts]
+
+
 def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
 
@@ -475,11 +525,18 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             if len(members) < min_group:
                 continue
             rows = sorted((with_prompt[m] for m in members), key=lambda r: r.get('created') or '')
-            # `label` is the short form for the selector; `title` is the same sentence uncut, for the tile
-            groups.append({'label': label_for(prompts, members, lexicon=lexicon),
-                           'title': label_for(prompts, members, width=0, lexicon=lexicon),
-                           'items': rows, 'oldest': rows[0].get('created') or '',
-                           'newest': (rows[-1].get('created') or '')})
+            # A cluster can hold two different stated counts ("three ... women" and "exactly six adult women"): the count
+            # is the subject, so the cluster is split before a label is chosen. Measured on the real gallery: two of 85
+            # folders mixed counts and between them held 363 pictures.
+            for part in split_by_stated_count(rows):
+                if len(part) < min_group:
+                    continue
+                part_prompts = [r['prompt'] for r in part]
+                # `label` is the short form for the selector; `title` is the same sentence uncut, for the tile
+                groups.append({'label': label_for(part_prompts, range(len(part)), lexicon=lexicon),
+                               'title': label_for(part_prompts, range(len(part)), width=0, lexicon=lexicon),
+                               'items': part, 'oldest': part[0].get('created') or '',
+                               'newest': (part[-1].get('created') or '')})
     grouped_paths = {r['path'] for g in groups for r in g['items']}
     leftovers = [r for r in with_prompt if r['path'] not in grouped_paths]
     # Folders are ordered by when they were last touched - the newest picture they hold - not by when they started.

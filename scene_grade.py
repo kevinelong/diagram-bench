@@ -26,6 +26,7 @@ import statistics
 import urllib.request
 from pathlib import Path
 
+import group_prompts as gp
 import vlm_score
 
 COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
@@ -122,29 +123,9 @@ def grade_scene(image_path, scene_text, title=''):
 
 
 def count_from_prompt(prompt):
-    """The single head count a prompt states, or None when the prompt is ambiguous.
-
-    Two rules, both learned the hard way. The *earliest* phrase wins (iterating words made "six women ... three layers"
-    read as three). And the phrase must be unambiguous: a long compositional prompt mentions several numbers, and
-    guessing which one is the cast is exactly the kind of silent error this instrument exists to avoid - so it answers
-    None and the picture is simply not measured.
-    """
-    low = ' '.join((prompt or '').split()).lower()
-    found = []
-    for word, number in COUNT_WORDS.items():
-        # the people noun may sit a few adjectives away ("three very strong fit toned muscled adult women") but not
-        # across a preposition: "three green lamps above two women" is about the lamps
-        pattern = (r'\b%s\b\s+(?:(?!(?:above|behind|near|beside|by|on|in|at|with|from|under|over|across)\b)\w+\s+)'
-                   r'{0,8}(?:%s)\b' % (word, '|'.join(PEOPLE)))
-        for match in re.finditer(pattern, low):
-            found.append((match.start(), number))
-    if not found:
-        return None
-    found.sort()
-    numbers = {number for _pos, number in found}
-    if len(numbers) > 1:
-        return None            # several different counts stated: the prompt is ambiguous, so it is not measured
-    return found[0][1]
+    """The single head count a prompt states, or None. Kept as a name here because the reports call it; the rule lives in
+    `group_prompts.stated_count`, where the folder split uses it too - one implementation, so the two cannot disagree."""
+    return gp.stated_count(prompt)
 
 
 def count_people(image_path):
