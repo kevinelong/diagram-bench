@@ -147,6 +147,47 @@ def main():
     root.update()
     shot(root, '01-start')
 
+    print('\n-- an automatically opened folder is scrolled into view and drawn in reverse video (2026-10-27)')
+    real_groups2 = list(app._plan['groups']) if app._plan else []
+    if real_groups2:
+        if getattr(app, '_regroup_job', None):
+            app.root.after_cancel(app._regroup_job)
+            app._regroup_job = None
+        real_scheduler2 = app._regroup_soon
+        app._regroup_soon = lambda: None
+        app._plan['groups'] = real_groups2 * 24
+        app._folder_shown = len(app._plan['groups'])
+        app.select_folder(None); app.refresh_gallery(); root.update(); time.sleep(0.2)
+        far = len(app._plan['groups']) - 1
+        app.select_folder(far); app._see_folder(far)
+        root.update(); time.sleep(0.25); root.update()
+        tiles = [w for w in app.recent.winfo_children() if w.grid_info()]
+        if far < len(tiles):
+            tile = tiles[far]
+            top, view_top, view_h = tile.winfo_y(), app.gal_canvas.canvasy(0), app.gal_canvas.winfo_height()
+            check('the opened folder is inside the visible strip',
+                  view_top - 2 <= top <= view_top + view_h, (top, view_top, view_h))
+        check('and the strip scrolled to get there', app.gal_canvas.yview()[0] > 0.5, app.gal_canvas.yview())
+        sel = tiles[far] if far < len(tiles) else None
+        if sel is not None:
+            body = sel.winfo_children()[0]
+            title = body.winfo_children()[1]
+            check('the open folder is drawn in reverse video',
+                  str(sel.cget('background')) == app.theme.text
+                  and str(title.cget('background')) == app.theme.text
+                  and str(title.cget('foreground')) == app.theme.window,
+                  (sel.cget('background'), title.cget('background'), title.cget('foreground')))
+            others = [w for w in tiles if w is not sel]
+            if others:
+                check('and an unselected tile is not',
+                      str(others[0].cget('background')) == app.theme.window, others[0].cget('background'))
+        app._plan['groups'] = real_groups2
+        app._folder_shown = zui.BATCH_FOLDERS
+        app._regroup_soon = real_scheduler2
+        app.select_folder(None); app.refresh_gallery(); root.update()
+    else:
+        check('fixture has folders to scroll through', False)
+
     print('\n-- with folders on, the strip never paints the pictures it is about to replace (2026-10-27)')
     # The state straight after construction: folders on, plan not in yet. Whatever the strip holds then must not be
     # photo tiles - the 18 thumbnails rendered only to be replaced are the flash that was reported as confusing.
@@ -1680,7 +1721,9 @@ def main():
     tiles = app.recent.winfo_children()
     check('one tile per folder', len(tiles) == len(app._plan['groups']), (len(tiles), len(app._plan['groups'])))
     if tiles:
-        pic, title, meta = tiles[0].winfo_children()[:3]
+        # a tile is now: outer frame (the 1 px selection line) -> body -> pic, title, meta
+        body = tiles[0].winfo_children()[0]
+        pic, title, meta = body.winfo_children()[:3]
         check('each tile carries a contact sheet',
               pic.image is not None and pic.image.width() >= zui.STRIP_TILE_MIN,
               pic.image.width() if pic.image else None)

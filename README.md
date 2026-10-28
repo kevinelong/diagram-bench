@@ -375,6 +375,15 @@ at startup were replaced a few hundred milliseconds later - the flash of content
 `Grouping prompts… · 1,827 pictures` and grouping starts on the next idle cycle instead of after a timer: measured right
 after construction, the strip holds **1 child and 0 photo tiles**, and still 0 once the folders arrive.
 
+**The open folder is findable at a glance and is scrolled to.** It is drawn in **reverse video**: a 1 px line around
+the contact sheet and between its four pictures (the sheet's own gutter in the same colour) with the caption on an
+inverted bar. Opening a folder *automatically* - the one the prompt is predicted to join, or the one a selected picture
+belongs to when folders are turned back on - scrolls it into view, and the strip's scrollregion is recomputed first,
+because `yview_moveto` against the stale post-rebuild region silently clamped to the top.
+
+**Captions that open a window end in an ellipsis**: `View All…`, `Run log…`, `A/B…`, `graph…`, `ⓘ metadata…`,
+`Open dir…`, `Open clip…`, `Delete…`, `save style…`, and the folder button itself.
+
 **The prompt is placed before it is rendered.** Pressing Generate predicts which folder the prompt would join and shows
 it beside the folder button (`→ a lighthouse on a rocky…`); from the unfiltered *All folders* state it also opens that
 folder, and a folder you are already reading is never replaced. Measured leave-one-out on the gallery - predict each of

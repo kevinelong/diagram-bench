@@ -1166,7 +1166,7 @@ class App:
         # per action cost ~180 px of picture height for no information; pairing them costs half of that.
         toprow = ttk.Frame(btns)
         toprow.pack(fill='x')
-        self.more_btn = ttk.Button(toprow, text='View All', command=self.open_all)
+        self.more_btn = ttk.Button(toprow, text='View All\u2026', command=self.open_all)
         self.more_btn.pack(side='left', fill='x', expand=True)
         self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked)
         self.folders_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
@@ -1175,9 +1175,9 @@ class App:
         toolrow.pack(fill='x', pady=(3, 0))
         self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery)
         self.refresh_btn.pack(side='left')
-        self.log_btn = ttk.Button(toolrow, text='Run log', command=self.show_run_log)
+        self.log_btn = ttk.Button(toolrow, text='Run log\u2026', command=self.show_run_log)
         self.log_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.folder_btn = ttk.Button(toolrow, text='Open dir', command=self.open_folder)
+        self.folder_btn = ttk.Button(toolrow, text='Open dir\u2026', command=self.open_folder)
         self.folder_btn.pack(side='left', fill='x', expand=True)
         self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False))
         self.collapse_btn.pack(side='left', padx=(3, 0))
@@ -1195,7 +1195,7 @@ class App:
         self.star_btn.pack(side='left', padx=(3, 0))
         self.sel_all_btn = ttk.Button(selrow, text='All', width=4, command=self.select_all)
         self.sel_all_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.del_btn = ttk.Button(selrow, text='Delete', command=self.delete_selected, state='disabled')
+        self.del_btn = ttk.Button(selrow, text='Delete\u2026', command=self.delete_selected, state='disabled')
         self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
 
         self.sel_label = ttk.Label(btns, text='', foreground=self.theme.accent)
@@ -1306,7 +1306,7 @@ class App:
         self.style_cb = ttk.Combobox(stylerow, textvariable=self.style_var, width=12, state='readonly',
                                      values=list(STYLES) + sorted(self._custom_styles))
         self.style_cb.pack(side='left')
-        self.save_style_btn = ttk.Button(stylerow, text='save style', command=self.save_style)
+        self.save_style_btn = ttk.Button(stylerow, text='save style\u2026', command=self.save_style)
         self.save_style_btn.pack(side='left', padx=(4, 0))
         # the checkpoint is a first-class choice, not an Advanced secret: picking one costs a model reload
         ttk.Label(stylerow, text='model').pack(side='left', padx=(10, 4))
@@ -1374,7 +1374,7 @@ class App:
                                      disabledforeground='#c9d2de', relief='flat', bd=0,
                                      height=1, cursor='hand2', takefocus=True)
         self.clip_btn.grid(row=0, column=2, sticky='ew', padx=(3, 3))
-        self.clip_open_btn = ActionButton(self.clip_row, text='Open clip', command=self.open_last_clip,
+        self.clip_open_btn = ActionButton(self.clip_row, text='Open clip\u2026', command=self.open_last_clip,
                                           font=('Segoe UI', 11), bg='#7a8699', fg='white',
                                           activebackground='#68748a', activeforeground='white',
                                           disabledforeground='#d5dae2', relief='flat', bd=0,
@@ -1485,9 +1485,9 @@ class App:
         tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
         self.copy_btn.pack(side='left')
-        self.info_btn = ttk.Button(tools, text='\u24d8 metadata', command=self.show_metadata, state='disabled')
+        self.info_btn = ttk.Button(tools, text='\u24d8 metadata\u2026', command=self.show_metadata, state='disabled')
         self.info_btn.pack(side='left', padx=(6, 0))
-        self.graph_btn = ttk.Button(tools, text='graph', command=self.show_graph)
+        self.graph_btn = ttk.Button(tools, text='graph\u2026', command=self.show_graph)
         self.graph_btn.pack(side='left', padx=(6, 0))
         self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
         self.describe_btn.pack(side='left', padx=(6, 0))
@@ -1574,6 +1574,7 @@ class App:
         # reported as confusing. Paint a grouping line instead and let `_apply_plan` draw the folders.
         self._grouping = bool(self.group_var.get())      # a plan is coming, so the strip has nothing to draw yet
         self._prediction = None          # which folder the prompt in the box would join
+        self._see_pending = None         # a folder waiting to be scrolled into view after the next rebuild
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
@@ -1741,7 +1742,30 @@ class App:
         self._prediction = hit
         if self._active_folder is None and hit['index'] < len(self._plan['groups']):
             self.select_folder(hit['index'])
+            self._see_folder(hit['index'])           # bring it into view: it may be far down the list
         self._render_folder_bar()
+
+    def _folder_holding(self, path, plan=None):
+        """Index of the folder that holds `path`, or that its prompt would join; None when neither applies."""
+        plan = plan or self._plan
+        if path is None or not plan or not plan.get('groups'):
+            return None
+        name = Path(path).name
+        for i, group in enumerate(plan['groups']):
+            if any(Path(r['path']).name == name for r in group['items']):
+                return i
+        try:
+            prompt = (read_meta(Path(path)) or {}).get('prompt') or ''
+        except Exception:
+            prompt = ''
+        if not prompt.strip():
+            return None
+        try:
+            import group_prompts as _gp
+            hit = _gp.predict(prompt, plan)
+        except Exception:
+            hit = None
+        return hit['index'] if hit else None
 
     def _regroup_soon(self):
         """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
@@ -1802,6 +1826,15 @@ class App:
         self._active_folder = None
         if was_open:
             self._active_folder = next((i for i, g in enumerate(plan['groups']) if g.get('label') == was_open), None)
+        elif plan['groups']:
+            # Folders have just been turned on with a picture selected in the flat list: open the folder that picture
+            # belongs to, and scroll to it. The picture itself if it is a member, otherwise the folder its prompt would
+            # join - the same rule as the pre-render prediction.
+            target = Path(self.selected[-1]) if self.selected else (self._current or None)
+            index = self._folder_holding(target, plan)
+            if index is not None:
+                self._active_folder = index
+                self._see_folder(index)
         self._render_folder_bar()
         self.refresh_gallery()
         self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
@@ -1826,10 +1859,10 @@ class App:
             return
         self._folder_choices = [None] + list(range(len(self._plan['groups'])))
         name = 'All folders' if self._active_folder is None else self._folder_text(self._active_folder)
-        self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s \u25b8' % name, width=17,
+        self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s\u2026' % name, width=17,
                                           command=self.open_folder_browser)
         self.folder_pick_btn.pack(side='left')
-        ttk.Button(self.folder_bar, text='A/B', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
+        ttk.Button(self.folder_bar, text='A/B\u2026', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
         if getattr(self, '_prediction', None):
             label = ttk.Label(self.folder_bar, text='\u2192 %s' % shorten_title(self._prediction['label'], 5),
                               foreground=self.theme.accent, font=('Segoe UI', 8))
@@ -1868,7 +1901,7 @@ class App:
         chosen.pack(side='left')
         count = ttk.Label(head, text='', foreground=self.theme.muted)
         count.pack(side='left', padx=(10, 0))
-        ttk.Button(head, text='A/B review', command=lambda: self.review_start()).pack(side='right', padx=(6, 0))
+        ttk.Button(head, text='A/B review\u2026', command=lambda: self.review_start()).pack(side='right', padx=(6, 0))
         ttk.Button(head, text='Close', command=self._close_folder_browser).pack(side='right')
 
         body = ttk.Frame(win)
@@ -1949,6 +1982,62 @@ class App:
         return '%s\u2026 (%d)' % (cut or label[:16], len(g['items'])) if len(label) > 16 else '%s (%d)' % (label, len(g['items']))
 
 
+    def _see_folder(self, index):
+        """Scroll the folder strip so the open folder is visible.
+
+        A folder opened *automatically* - the one the prompt is predicted to join - can be anywhere in the list, and
+        selecting it while it sits below the fold is invisible. Batches are lazy, so it may not even be rendered yet:
+        extend the batch first, then scroll after the layout has settled.
+        """
+        if index is None or not self._plan:
+            return
+        if index >= self._folder_shown:
+            self._folder_shown = index + 1
+            self._render_folder_tiles()
+        self._see_pending = index
+        self.root.after_idle(lambda: self.refresh_gallery())
+
+    def _scroll_folder_into_view(self, index, _retry=True):
+        """Scroll the strip to `index`, refreshing the scrollregion first.
+
+        `yview_moveto` against a stale scrollregion silently clamps to the old extent - the strip's resize handler is
+        debounced by 50 ms, so straight after a rebuild the canvas still believes the list is short and the scroll lands
+        at the top. One immediate pass with the region recomputed, then one retry while the layout settles.
+        """
+        def again():
+            # one retry is not enough: the strip rebuilds after the selection, and the batch may not even exist yet
+            if _retry:
+                self.root.after(80, lambda: self._scroll_folder_into_view(index, False))
+
+        tiles = [w for w in self.recent.winfo_children() if w.grid_info()]
+        if index >= len(tiles):
+            if index >= self._folder_shown:
+                self._folder_shown = index + 1
+                self._render_folder_tiles()
+            again()
+            return
+        tile = tiles[index]
+        canvas = self.gal_canvas
+        # The strip rebuilds right after a selection, so at this instant the inner frame is populated but not laid out:
+        # its bbox is a few tens of pixels while the canvas still holds the old, taller region. Measure a forced layout
+        # instead - shrinking the region to that 60 px bbox is what made yview_moveto clamp to the top.
+        self.recent.update_idletasks()
+        canvas.update_idletasks()
+        total = max(self.recent.winfo_height(), 0)
+        if total <= 0:
+            again()
+            return
+        canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
+        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        view_top, view_h = canvas.canvasy(0), canvas.winfo_height()
+        if top >= view_top - 1 and top + height <= view_top + view_h:
+            return                                   # already visible: never jump for nothing
+        canvas.yview_moveto(min(1.0, max(0.0, (top - 8.0) / total)))
+        canvas.update_idletasks()
+        view_top = canvas.canvasy(0)
+        if not (top >= view_top - 1 and top + height <= view_top + view_h):
+            again()
+
     def select_folder(self, index):
         self._active_folder = index
         # With a folder open the gallery column is two columns of pictures, so it is allowed to claim the empty space
@@ -1966,7 +2055,7 @@ class App:
         if getattr(self, 'folder_pick_btn', None) is not None and self._plan:
             try:
                 name = 'All folders' if index is None else self._folder_text(index)
-                self.folder_pick_btn.configure(text='%s \u25b8' % name)
+                self.folder_pick_btn.configure(text='%s\u2026' % name)
             except Exception:
                 pass
         self.refresh_gallery()
@@ -2260,7 +2349,7 @@ class App:
         return (bool(self._plan) and not getattr(self, '_grouping', False)
                 and not self.search_var.get().strip() and not self.starred_only.get())
 
-    def _folder_sheet(self, group, size):
+    def _folder_sheet(self, group, size, gutter=None):
         """A 2x2 contact sheet of a folder's first four pictures, built from the thumbnail cache.
 
         Four rather than nine because the tile has to sit two-up in the first column: a nine-up sheet demanded ~270 px
@@ -2269,13 +2358,14 @@ class App:
         """
         from PIL import Image as _I
         head = tuple(r['path'] for r in group['items'][:FOLDER_CELLS])
-        key = (group['label'], len(group['items']), size, head)
+        key = (group['label'], len(group['items']), size, head, gutter)
         hit = self._sheets.get(key)
         if hit is not None:
             return hit
         side = 2 if FOLDER_CELLS == 4 else 3
         cell = size // side
-        sheet = _I.new('RGB', (size, size), self.theme.sheet_bg)
+        # the gutter is what draws the 1 px line between the four pictures when the tile is selected
+        sheet = _I.new('RGB', (size, size), gutter or self.theme.sheet_bg)
         paths = list(head)
         thumbs = thumbs_for(paths)
         for i, path in enumerate(paths):
@@ -2445,23 +2535,33 @@ class App:
         cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
         sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
-            tile = ttk.Frame(self.recent, padding=(2, 3))
+            # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
+            # sheet's own gutter, in the same colour), with the caption on an inverted bar. Strong enough to find at a
+            # glance, quiet enough to sit in a grid of tiles.
+            selected = (self._active_folder == index)
+            ink = self.theme.text if selected else self.theme.window
+            plate = self.theme.text if selected else self.theme.sheet_bg
+            tile = tk.Frame(self.recent, background=ink, padx=1, pady=1)
             tile.grid(row=index // cols, column=index % cols, padx=2, pady=2, sticky='n')
-            photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px))
-            pic = tk.Label(tile, image=photo, bd=1, relief='flat', cursor='hand2', background=self.theme.sheet_bg)
+            body = tk.Frame(tile, background=self.theme.window)
+            body.pack(fill='both', expand=True)
+            photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px, gutter=plate if selected else None))
+            pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
             full_title = group.get('title') or group['label']
-            title = tk.Label(tile, text=shorten_title(full_title), wraplength=sheet_px - 4,
+            title = tk.Label(body, text=shorten_title(full_title), wraplength=sheet_px - 4,
                              justify='left', anchor='w', font=('Segoe UI', 8),
-                             foreground=self.theme.text, background=self.theme.window)
+                             foreground=self.theme.window if selected else self.theme.text,
+                             background=self.theme.text if selected else self.theme.window)
             title.pack(fill='x', pady=(3, 0))
             self._tip(title, full_title)
-            meta = tk.Label(tile, text='%d pictures' % len(group['items']), anchor='w',
-                            font=('Segoe UI', 8), foreground=self.theme.muted,
-                            background=self.theme.window)
+            meta = tk.Label(body, text='%d pictures' % len(group['items']), anchor='w',
+                            font=('Segoe UI', 8),
+                            foreground=self.theme.window if selected else self.theme.muted,
+                            background=self.theme.text if selected else self.theme.window)
             meta.pack(fill='x')
-            for w in (tile, pic, title, meta):
+            for w in (tile, body, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self.select_folder(i))
         self.root.after_idle(self._on_strip_resize)
 
@@ -2493,7 +2593,14 @@ class App:
             self._refresh_gallery(select)
         finally:
             self._rebuilding = False
-        self._restore_scroll(self.gal_canvas, strip_pos)
+        # A folder that has just been opened asks to be brought into view, and that must beat restoring the old
+        # position: the strip re-flows and rebuilds right after a selection, and the restore was undoing the scroll.
+        pending = getattr(self, '_see_pending', None)
+        if pending is not None:
+            self._see_pending = None
+            self.root.after_idle(lambda i=pending: self._scroll_folder_into_view(i))
+        else:
+            self._restore_scroll(self.gal_canvas, strip_pos)
 
     def _refresh_gallery(self, select=None):
         everything = self._all_files()
