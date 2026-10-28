@@ -382,6 +382,16 @@ at startup were replaced a few hundred milliseconds later - the flash of content
 `Grouping prompts… · 1,827 pictures` and grouping starts on the next idle cycle instead of after a timer: measured right
 after construction, the strip holds **1 child and 0 photo tiles**, and still 0 once the folders arrive.
 
+**The judge of a folder is its medoid, not its longest prompt.** A cluster used to be judged by its member with the most
+raw text, which is how 11 pictures from *Fight Club* came to judge a *Matrix* scene: they joined the same bucket at
+0.21-0.25 cosine, their longest prompt became the core, that core evicted the scene's six briefs by 0.012 of coverage,
+and the scene split into two folders 0.188 apart. The core is now the member closest to all the others. Measured over
+the gallery: 89 -> 87 folders, mean intra-folder cosine 0.859 -> 0.849, leave-one-out 98.78 -> 98.90 %, the scene is one
+folder of 14, the 11 fight-club pictures are separated, and the flow-chart pair and poodle family are unchanged; the two
+*style* variants of the cyberdeck merge into one folder of 47. A fixed cosine floor was tried first and rejected: it
+cost the module's rephrase-recall fixture (1.00 -> 0.90), because a genuine rephrasing and a different scene occupy the
+same 0.2-0.3 band.
+
 **A name that is the opening of another name is the same subject.** Measured on the gallery: "flow chart" (2 pictures)
 sat in its own folder beside "flow chart with start, processing and finish nodes" (24) - core-to-core **0.67**, just
 under the 0.70 merge floor, although one name is literally the other with less detail. The same shape appeared for

@@ -370,6 +370,25 @@ def main():
     apart4 = gp._merge_close([[0], [1]], vecs4, raws4)          # no prompts: similarity only
     check('without prompts the prefix rule cannot fire', len(apart4) == 2, apart4)
 
+    print('\n-- the judge is the cluster medoid, so a different scene cannot evict its neighbours (2026-10-28)')
+    # The LAFAYETTE shape, reduced: one long, different scene that shares only a location with a tighter scene, so the
+    # longest member (raw mass) would be the judge and would evict the rest. The medoid is the majority's member.
+    # four renderings of the same scene, as the drafts in the real case were
+    scene = [
+        'int. hotel lafayette room 1313 night a storm rages trinity neo morpheus leather sunglasses at last',
+        'int. hotel lafayette room 1313 night a storm rages trinity neo morpheus leather sunglasses at last cinematic still',
+        'int. hotel lafayette room 1313 night a storm rages trinity neo morpheus leather sunglasses at last anamorphic',
+        'int. hotel lafayette room 1313 night a storm rages trinity neo morpheus leather sunglasses at last film grain',
+    ]
+    intruder = ('a walking talking corporate spreadsheet narrator and marla singer in the support group basement '
+                'this is a really bad movie ' * 12)
+    prompts = scene + [intruder]
+    groups = gp.group_texts(prompts)
+    joined = [g for g in groups if len(g) >= 2]
+    check('the four scene prompts stay in one folder', joined and sorted(joined[0]) == [0, 1, 2, 3],
+          [sorted(g) for g in groups])
+    check('and the intruder is not in it', all(4 not in g for g in joined), [sorted(g) for g in groups])
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

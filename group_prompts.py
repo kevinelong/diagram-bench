@@ -279,7 +279,15 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
         if len(members) < 2:
             out.append(members)
             continue
-        core = max(members, key=lambda m: (sum(raws[m].values()), -m))
+        # The judge is the cluster's **medoid** - the member closest to all the others - not its most verbose member.
+        # Choosing by raw mass is how a different film's long prompt came to judge a scene it does not belong to: 11
+        # Fight Club prompts joined a bucket at 0.21-0.25 cosine, their longest member became the core, it evicted the
+        # six genuine scene briefs by 0.012 of coverage, and the scene split in two 0.188 apart (2026-10-28). The medoid
+        # is what the cluster actually agrees with. Measured over the gallery: 89 -> 87 folders, mean intra-folder
+        # cosine 0.859 -> 0.849, leave-one-out 98.78 % -> 98.90 %, the LAFAYETTE scene becomes one folder of 14 with the
+        # 11 Fight Club pictures separate, the flow-chart pair and the poodle family are unchanged, and the two style
+        # variants of the cyberdeck (10 + 37) merge into one folder of 47.
+        core = max(members, key=lambda m: (sum(cosine(vecs[m], vecs[o]) for o in members if o != m), -m))
         kept, dropped = [core], []
         for m in members:
             if m == core:
