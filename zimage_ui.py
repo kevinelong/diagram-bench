@@ -2059,8 +2059,10 @@ class App:
         if browser:
             # a double click loads the picture and leaves the window open: closing it was easy to do by accident
             lab.bind('<Double-Button-1>', lambda e, p=path: self._load_from_browser(p))
-        else:
-            lab.bind('<Double-Button-1>', lambda e, p=path: self.generate())
+        # Nothing else is bound to a double click. It used to *generate* on the strip and in the pane, so looking at a
+        # picture twice in quick succession spent a minute of GPU with whatever prompt happened to be in the box - a
+        # browsing gesture doing the most expensive thing in the app (reported 2026-10-28). Making a picture is the
+        # Generate button, Vary, or Upscale; none of them is a click away from browsing.
         return lab
 
     def _load_from_browser(self, path):

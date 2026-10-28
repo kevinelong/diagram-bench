@@ -2016,6 +2016,37 @@ def main():
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy(); tk._default_root = root
 
+    print("\n-- browsing never generates: the only dispatchers are deliberate (2026-10-28)")
+    # reported: "it starts to generate before I am expecting it". Style, strength, size and model changes must never
+    # dispatch either - their traces only repaint - and a double click on a picture used to generate, which was the
+    # hazard: looking at a thumbnail twice spent a minute of GPU with whatever prompt was in the box.
+    app.engine.calls.clear(); app.busy = False
+    app.style_var.set('cinematic'); root.update()
+    app.denoise.set(0.55); root.update()
+    app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
+    app.size_var.set('768'); root.update()
+    check('changing style, strength, model and size dispatch nothing', len(app.engine.calls) == 0,
+          len(app.engine.calls))
+
+    tiles = list(getattr(app, '_tile_widgets', {}).values()) + list(getattr(app, '_content_widgets', {}).values())
+    if tiles:
+        app.engine.calls.clear(); app.busy = False
+        for tile in tiles[:3]:
+            try:
+                tile.event_generate('<Double-Button-1>')
+            except Exception:
+                pass
+            root.update()
+        check('double clicking a picture does not render', len(app.engine.calls) == 0, len(app.engine.calls))
+
+    # the deliberate ones still work
+    app.busy = False; app.engine.calls.clear()
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse')
+    app.generate(); root.update()
+    check('the Generate path itself is untouched', len(app.engine.calls) == 1, len(app.engine.calls))
+    app.busy = False
+    app.style_var.set('none')
+
     print("\n-- a scene render is graded against the scene it came from (2026-10-28)")
     import scene_grade as _sg
     grade_dir = Path(tempfile.mkdtemp(prefix='grade-'))

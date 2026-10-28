@@ -351,6 +351,26 @@ chains one scene at a time on the idle card. On the screenplay in `D:/Codex/Hous
 sidecars record, then everything else newest-first - so a test render made today does not land in the middle of a scene.
 The pane and the strip both honour it.
 
+## What can start a render
+
+Reported as "it starts to generate before I am expecting it". The full list, and each one's reason:
+
+| trigger | why it exists |
+|---|---|
+| **Generate** | obvious |
+| **Enter in the prompt box** | documented in the prompt's own label (*"Enter generates · Shift+Enter adds a line"*); Shift+Enter is bound first and inserts a newline |
+| **Vary**, **Vary…** presets, **Upscale**, **Retry** | explicit buttons |
+| **ALL** and **scene** runs | they continue on their own once started - that is what a sweep is |
+| `--auto` | a launch flag, never a default |
+
+**Changing a style, a strength, a size or a model never dispatches**: their traces only repaint the banner and the strength
+readout (checked in the suite, because a control that quietly spends a minute of GPU is worse than a slow one).
+
+**Double-clicking a picture used to generate** - on the strip and in the contents pane. Looking at a thumbnail twice in
+quick succession fired a render with whatever prompt happened to be in the box, which is a browsing gesture doing the most
+expensive thing in the app. That binding is gone; a double click in the View All browser still loads the picture into the
+window, as it always did.
+
 ## A scene render is graded against its own scene
 
 The multi-scene run already recorded which scene each picture was - now it also asks whether the picture *is* that scene.
