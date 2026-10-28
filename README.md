@@ -136,6 +136,12 @@ curl -s http://127.0.0.1:8006/object_info/CLIPLoaderGGUF | python -c "import jso
 curl -s http://127.0.0.1:8006/object_info/UnetLoaderGGUF | python -c "import json,sys; print(json.load(sys.stdin)['UnetLoaderGGUF']['input']['required']['unet_name'][0])"
 ```
 
+**`ALL` has run live** (2026-10-28, same prompt, seed 1234, 1024 px): z-image turbo at 9 steps took **10.6 s** and
+peaked at **7,455 MiB**; klein 9B at 4 steps took **24.5 s** and peaked at **9,749 MiB**, leaving **2,478 MiB** of the
+12,227 MiB card - comfortably clear of the 512 MiB floor, so the 9B at 1024 px is now a measurement rather than a risk.
+Both sidecars named the real profile and their own steps. On that prompt both wrote `OPEN` exactly, so the 9B's label
+advantage from the 512 px diagram corpus did not reproduce here; the 9B's render was the more elaborate scene.
+
 **The picker offers two models and an `ALL` option** (2026-10-28). `z-image turbo` and `flux2 klein 9b uncensored` are
 the two; `ALL` renders one image from each at that profile's ceiling steps and the largest size the app offers (1024 px),
 sequentially, cheapest first - so one press gives the same prompt across both models for comparison, and each image lands

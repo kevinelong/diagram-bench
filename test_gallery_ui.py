@@ -514,8 +514,8 @@ def main():
     print('\n-- the VRAM estimate comes from measurements, not from a guess')
     mib_k, src_k = zui.estimate_vram('flux2 klein 9b uncensored', 1, 512)
     check('the new default has a measured peak at 512', mib_k == 8837, str(mib_k))
-    check('and 1024 px is honestly unmeasured for it, not borrowed from another model',
-          zui.estimate_vram('flux2 klein 9b uncensored', 1, 1024)[0] == 8837,
+    check('and 1024 px is now measured too - the live ALL run',
+          zui.estimate_vram('flux2 klein 9b uncensored', 1, 1024)[0] == 9749,
           str(zui.estimate_vram('flux2 klein 9b uncensored', 1, 1024)))
     mib, src = zui.estimate_vram('z-image turbo', 16, 512)
     check('a measured shape returns its peak', mib == 8927, str(mib))

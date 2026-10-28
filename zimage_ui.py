@@ -559,7 +559,8 @@ FILTER_CAP = 200     # while a search is active the strip is a result list, not 
 #  size and the checkpoint dominate. Every entry below actually ran - including 16-up at 512 px, which an earlier
 #  hand-written warning claimed would not fit.
 VRAM_POINTS = {
-    ('flux2 klein 9b uncensored', 1, 512): 8837,      # 2026-10-25 three-arm run; 1024 px is UNMEASURED
+    ('flux2 klein 9b uncensored', 1, 512): 8837,      # 2026-10-25 three-arm run
+    ('flux2 klein 9b uncensored', 1, 1024): 9749,     # 2026-10-28 live ALL run: 24.5 s, 2,478 MiB left
     ('z-image turbo', 1, 512): 6708,
     ('z-image turbo', 1, 1024): 7193,
     ('z-image turbo', 16, 384): 8206,
