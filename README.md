@@ -348,6 +348,35 @@ where this app stands:
 | window position and size remembered | **deliberately not** - it opens maximised, which is what was asked |
 | taskbar progress, thumbnails, jump lists | **not done** - Windows-specific shell integration, no Tk path without a COM shim |
 
+## Video: why the 5B looked unusable, and the two ways out
+
+**Make clip** and `video.py` ran Wan 2.2 **TI2V-5B** at GGUF **Q4_K_M**, 30 steps, cfg 5.0, shift 8.0, `uni_pc`/`simple`,
+49 frames. Those settings are *not* the defect: they match the official `wan2_2_5B_ti2v` template, which asks for 20
+steps at 121 frames. The ceilings were precision (4-bit on the smallest model), class (the 5B is the "fits 8 GB" tier)
+and length (2 s clips have the least temporal context to keep an identity coherent).
+
+**Two modes now, and they are two models, not a flag:**
+
+| mode | model | files | grid | when |
+|---|---|---|---|---|
+| start-only | Wan 2.2 TI2V-5B | Q4_K_M 3.2 GB (Q6_K 4.21 / Q8_0 5.40 available) | 704², 1280x704 | one picture selected; fastest |
+| **first -> last frame** | Wan 2.1 **I2V-14B 480p** | `wan2.1-i2v-14b-480p-Q3_K_M.gguf` 8.59 GB + `clip_vision_h` 1.26 GB + `wan_2.1_vae` 0.25 GB | 480², 832x480, 640x480 | **two pictures selected**; both endpoints are frames you drew |
+
+The last one is why FLF was worth the download: `WanFirstLastFrameToVideo` is a *conditioning* node for the Wan 2.1 8x8x4
+path - it feeds both images in as pixels, as CLIP-vision embeddings, and as the conditioning that pins where the clip
+must arrive - so only the middle is invented and the drift that made diagram clips unusable cannot happen. It is not
+available on the 5B, whose `Wan22ImageToVideoLatent` packs a start image into a 16x16x4 latent and has no end-image
+input; asking for one there is refused before any weights load.
+
+**A clip gets its own motion line.** An image prompt describes a still; an I2V model obeys motion language. The clip row
+now carries an entry (`DEFAULT_MOTION`, remembered in settings) that is sent as the clip's prompt, so the prompt box can
+keep describing the picture without telling the video to stand still.
+
+**Parameter levers that cost no download**, in order of expected gain: Q8_0 instead of Q4_K_M (5.40 GB), 121 frames
+instead of 49 (5 s at 24 fps), 40 steps, `dpmpp_2m_sde`/`karras` or `res_multistep`/`beta` instead of
+`uni_pc`/`simple`. `test_video.py` pins the wiring of both graphs and the four refusals that would otherwise cost a
+failed run after the weights load.
+
 ## Ranking by wins: a non-destructive alternative to deleting
 
 The A/B window opens in **Rank** mode: `Left wins (1)` / `Tie (2)` / `Right wins (3)` mark a winner and delete nothing.

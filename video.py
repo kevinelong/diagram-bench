@@ -47,7 +47,32 @@ WAN = {
     'scheduler': 'simple',
 }
 
+# Wan 2.1 I2V-14B (480p). Different VAE, different conditioning node, and a CLIP-vision tower the 5B does not use, so
+# this is a second profile rather than a flag on the first: `Wan22ImageToVideoLatent` packs a start image into a
+# 16x16x4 latent, while `WanFirstLastFrameToVideo` builds *conditioning* for the 8x8x4 Wan 2.1 path - and only that path
+# can be given an end image at all.
+WAN_I2V14 = {
+    'unet': 'wan2.1-i2v-14b-480p-Q3_K_M.gguf',
+    'clip': 'umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+    'vae': 'wan_2.1_vae.safetensors',
+    'clip_vision': 'clip_vision_h.safetensors',
+    'clip_type': 'wan',
+    'steps': 30,
+    'cfg': 5.0,
+    'shift': 8.0,
+    'sampler': 'uni_pc',
+    'scheduler': 'simple',
+}
+
+PROFILES = {'5b': WAN, 'i2v14': WAN_I2V14}
+
 GRIDS = {'1:1': (704, 704), '16:9': (1280, 704), '4:3': (1024, 704)}
+# 480p is what this model was trained for; the app can upscale the result, but a 704 grid would be off-distribution
+GRIDS_480 = {'1:1': (480, 480), '16:9': (832, 480), '4:3': (640, 480)}
+
+
+def grids_for(profile):
+    return GRIDS_480 if PROFILES[profile].get('clip_vision') else GRIDS
 VRAM_FLOOR_MIB = 512          # the lab's rule: never leave less than half a gigabyte free on the card
 DEFAULT_NEGATIVE = ('blurry, low quality, distorted, deformed, extra limbs, watermark, text, static, '
                     'jitter, warping, morphing')
@@ -208,17 +233,71 @@ def graph(image_name, width, height, frames, prompt, negative, seed, steps, cfg,
     }
 
 
+def graph_first_last(start_name, end_name, width, height, frames, prompt, negative, seed, steps, cfg, shift,
+                     sampler, scheduler, prefix, profile=None):
+    """Wan 2.1 I2V-14B with a start *and* an end frame: only the middle is invented, so nothing can drift.
+
+    The endpoints are encoded three ways and all three matter: `WanFirstLastFrameToVideo` takes the two images as pixels
+    (VAE-encoded inside the node), as CLIP-vision embeddings, and as the conditioning that says where the clip must
+    arrive. That is why this profile needs `clip_vision_h` and the 2.1 VAE, and why it cannot be bolted onto the 5B.
+    """
+    wan = profile or WAN_I2V14
+    return {
+        "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": wan['unet']}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": wan['clip'], "type": wan['clip_type']}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": wan['vae']}},
+        "4": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": wan['clip_vision']}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["2", 0]}},
+        "7": {"class_type": "LoadImage", "inputs": {"image": start_name}},
+        "8": {"class_type": "LoadImage", "inputs": {"image": end_name}},
+        "9": {"class_type": "CLIPVisionEncode",
+              "inputs": {"clip_vision": ["4", 0], "image": ["7", 0], "crop": "none"}},
+        "10": {"class_type": "CLIPVisionEncode",
+               "inputs": {"clip_vision": ["4", 0], "image": ["8", 0], "crop": "none"}},
+        "11": {"class_type": "WanFirstLastFrameToVideo",
+               "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["3", 0],
+                          "width": width, "height": height, "length": frames, "batch_size": 1,
+                          "clip_vision_start_image": ["9", 0], "clip_vision_end_image": ["10", 0],
+                          "start_image": ["7", 0], "end_image": ["8", 0]}},
+        "12": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": shift}},
+        "13": {"class_type": "KSampler",
+               "inputs": {"model": ["12", 0], "positive": ["11", 0], "negative": ["11", 1],
+                          "latent_image": ["11", 2], "seed": seed, "steps": steps, "cfg": cfg,
+                          "sampler_name": sampler, "scheduler": scheduler, "denoise": 1.0}},
+        "14": {"class_type": "VAEDecode", "inputs": {"samples": ["13", 0], "vae": ["3", 0]}},
+        "15": {"class_type": "SaveAnimatedWEBP",
+               "inputs": {"images": ["14", 0], "filename_prefix": prefix, "fps": 24.0,
+                          "lossless": False, "quality": 88, "method": "default"}},
+    }
+
+
 def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE, seed=1234,
-              steps=None, cfg=None, host=None, out_dir=None, free_first=True, on_event=None):
-    """Render a clip from `still`. Returns a record; the file lands beside the still unless out_dir says otherwise."""
+              steps=None, cfg=None, host=None, out_dir=None, free_first=True, on_event=None,
+              end=None, model='5b'):
+    """Render a clip from `still`, or from `still` to `end`.
+
+    Two modes, because they are two different models in this build: `model='5b'` is Wan 2.2 TI2V-5B and takes only a
+    start image; `model='i2v14'` is Wan 2.1 I2V-14B at 480p and takes a start *and* an end image, which is the only way
+    to make the last frame the one you drew. Returns a record; the file lands beside the still unless out_dir says so.
+    """
+    if model not in PROFILES:
+        raise ValueError('unknown model %r, expected one of %s' % (model, sorted(PROFILES)))
+    wan = PROFILES[model]
+    grids = grids_for(model)
+    if grid not in grids:
+        raise ValueError('grid %r is not available for %s (choose %s)' % (grid, model, sorted(grids)))
     host = host or HOST
-    width, height = GRIDS[grid]
+    width, height = grids[grid]
     frames = int(frames)
     if frames < 5 or (frames - 1) % 4:
         raise ValueError('frames must be 4k+1 (49, 81, 121 ...), got %d' % frames)
-    steps = int(steps or WAN['steps'])
-    cfg = float(cfg if cfg is not None else WAN['cfg'])
+    steps = int(steps or wan['steps'])
+    cfg = float(cfg if cfg is not None else wan['cfg'])
     still = Path(still)
+    end = Path(end) if end else None
+    if end is not None and model == '5b':
+        raise ValueError('Wan 2.2 TI2V-5B has no end-image input; use --model i2v14 for first/last-frame clips')
 
     say = on_event or (lambda msg: None)
     if free_first:
@@ -230,6 +309,14 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
                                   if out_dir else None))
     say('still prepared at %dx%d: %s' % (width, height, prepared.name))
     uploaded = zg.upload_image(host, prepared)
+    uploaded_end = None
+    if end is not None:
+        prepared_end = prepare_still(end, width, height,
+                                     out=(Path(out_dir) / ('%s-%s-%dx%d.png'
+                                                           % (end.stem, grid.replace(':', 'x'), width, height))
+                                          if out_dir else None))
+        say('end frame prepared at %dx%d: %s' % (width, height, prepared_end.name))
+        uploaded_end = zg.upload_image(host, prepared_end)
 
     peak = {'v': 0}
     stop = threading.Event()
@@ -245,9 +332,14 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
     t.start()
     started = time.monotonic()
     try:
-        pid = post('/prompt', {'prompt': graph(uploaded, width, height, frames, prompt, negative, seed,
-                                              steps, cfg, WAN['shift'], WAN['sampler'], WAN['scheduler'],
-                                              'wan-clip-%d' % int(time.time()))}, host=host)['prompt_id']
+        prefix = 'wan-clip-%d' % int(time.time())
+        if uploaded_end is not None:
+            wf = graph_first_last(uploaded, uploaded_end, width, height, frames, prompt, negative, seed,
+                                  steps, cfg, wan['shift'], wan['sampler'], wan['scheduler'], prefix, wan)
+        else:
+            wf = graph(uploaded, width, height, frames, prompt, negative, seed, steps, cfg,
+                       wan['shift'], wan['sampler'], wan['scheduler'], prefix)
+        pid = post('/prompt', {'prompt': wf}, host=host)['prompt_id']
         out = None
         while time.monotonic() - started < 3600:
             h = get('/history/' + pid, host=host)
@@ -285,6 +377,8 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
               'mp4_seconds': (mp4_secs if mp4 else None), 'still': str(still.resolve()), 'grid': grid,
               'width': width, 'height': height, 'frames': frames, 'fps': 24,
               'seconds': round(frames / 24.0, 2), 'steps': steps, 'cfg': cfg, 'seed': seed,
+              'model': model, 'mode': 'first-last' if uploaded_end else 'start-only',
+              'end': str(end.resolve()) if end else None,
               'wall_s': wall, 'vram_peak_mib': peak['v'] or None,
               'bytes': len(data), 'created': time.strftime('%Y-%m-%dT%H:%M:%S')}
     dest.with_suffix('.json').write_text(json.dumps(record, indent=1), encoding='utf-8')
@@ -294,7 +388,10 @@ def make_clip(still, grid='1:1', frames=49, prompt='', negative=DEFAULT_NEGATIVE
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--still', required=True, help='finished PNG to animate')
-    ap.add_argument('--grid', choices=sorted(GRIDS), default='1:1')
+    ap.add_argument('--grid', choices=sorted(set(GRIDS) | set(GRIDS_480)), default='1:1')
+    ap.add_argument('--model', choices=sorted(PROFILES), default='5b',
+                    help='5b = Wan 2.2 TI2V-5B (start image only); i2v14 = Wan 2.1 I2V-14B 480p (start and end)')
+    ap.add_argument('--end', default='', help='last frame; needs --model i2v14')
     ap.add_argument('--frames', type=int, default=49, help='4k+1: 49 (2s), 81 (3.4s), 121 (5s) at 24 fps')
     ap.add_argument('--prompt', default='', help='what should happen; empty means a gentle natural continuation')
     ap.add_argument('--seed', type=int, default=1234)
@@ -307,7 +404,7 @@ def main(argv=None):
 
     rec = make_clip(args.still, grid=args.grid, frames=args.frames, prompt=args.prompt, seed=args.seed,
                     steps=args.steps, cfg=args.cfg, host=args.host, out_dir=args.out_dir,
-                    free_first=not args.keep_model)
+                    free_first=not args.keep_model, end=args.end or None, model=args.model)
     print('wrote %s' % rec['clip'])
     print('  %dx%d, %d frames, %.1f s at 24 fps, %d steps, cfg %s, seed %d'
           % (rec['width'], rec['height'], rec['frames'], rec['seconds'], rec['steps'], rec['cfg'], rec['seed']))

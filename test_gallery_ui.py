@@ -2119,7 +2119,45 @@ def main():
     check('... the layout', app3.layout_var.get() == '4-up (2x2)', app3.layout_var.get())
     check('but the chain box is still off for this window', app3.chain_var.get() is False)
     check('starters still shown for the still-empty folder', bool(app3.starters.winfo_ismapped()))
+    print('\n-- a clip: the motion line is what gets sent, and two selections mean first -> last frame')
+    gal_clip = tmp / 'clipgal'
+    make_gallery(gal_clip, 4)
+    args_clip = NS(port=8021, size=512, steps=4, cfg=1.0, seed=1234, out=str(gal_clip),
+                   initial='', initial_file='', auto=False, no_progress=True)
+    root4 = tk.Toplevel(root3)          # a second Tk() root would fight the first for tkinter's default root
+    app4 = zui.App(root4, StubEngine(), args_clip)
+    root4.update()
+    check('there is a motion line with a default',
+          bool(zui.DEFAULT_MOTION) and app4.motion_var.get() == zui.DEFAULT_MOTION, app4.motion_var.get())
+    app4.motion_var.set('camera drifts left, the face stays coherent')
+    app4.busy = False
+    app4.clear_selection()
+    first, second = app4._files[0], app4._files[1]
+    click(app4, first)
+    click(app4, second, ctrl=True)
+    before = len(app4.engine.calls)
+    app4.make_clip(); root4.update(); time.sleep(0.2)
+    calls = app4.engine.calls[before:]
+    kwargs = calls[-1][2] if calls else {}
+    check('two selections run the 14B with both endpoints',
+          kwargs.get('model') == 'i2v14' and kwargs.get('end') is not None, kwargs)
+    check('the motion line is sent, not the image prompt',
+          kwargs.get('prompt') == app4.motion_var.get(), kwargs.get('prompt'))
+    check('and it is remembered', app4._settings.get('motion') == app4.motion_var.get())
+    app4.busy = False
+    app4.clear_selection()
+    click(app4, first)
+    before = len(app4.engine.calls)
+    app4.make_clip(); root4.update(); time.sleep(0.2)
+    calls = app4.engine.calls[before:]
+    kwargs = calls[-1][2] if calls else {}
+    check('one selection means the 5B, start only',
+          kwargs.get('model') == '5b' and kwargs.get('end') is None, kwargs)
+    app4.busy = False
+    root4.destroy()
+
     root3.destroy()
+
 
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
     print('gallery was %s' % tmp)

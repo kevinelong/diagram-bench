@@ -400,7 +400,11 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders')
+                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion')
+
+# An image prompt describes a still; an image-to-video model obeys motion language. Sending the still's description
+# with a clip asks for motion while describing stillness, which is exactly what "unusable" looked like.
+DEFAULT_MOTION = 'the subject stays coherent, natural slow camera push in, no warping'
 
 # Style presets are prompt suffixes, the way Fooocus exposes --style: the model is not retrained, the words are added.
 STYLES = {
@@ -603,8 +607,8 @@ class Engine:
         return client_id
 
     # -- generation --------------------------------------------------------
-    def make_clip(self, still, grid='1:1', frames=49, prompt='', seed=1234):
-        """Render a few seconds from a still, off the UI thread. Frees the image model first - video needs the VRAM."""
+    def make_clip(self, still, grid='1:1', frames=49, prompt='', seed=1234, end=None, model='5b'):
+        """Render a few seconds from a still (or between two), off the UI thread. Frees the image model first."""
         self._cancel.clear()
         if self.progress:
             self._listen_progress()          # same websocket the image path uses, so the step counter works
@@ -614,6 +618,7 @@ class Engine:
                 import video
                 rec = video.make_clip(still, grid=grid, frames=frames, prompt=prompt, seed=seed,
                                       host='http://%s:%d' % (self.host, self.port),
+                                      end=end, model=model,
                                       on_event=lambda msg: self.events.put(('status', msg)))
                 self.events.put(('clip', rec))
             except Exception as e:
@@ -1357,12 +1362,18 @@ class App:
         self.clip_row.grid(row=13, column=0, sticky='ew', pady=(6, 0))
         self.clip_row.columnconfigure(0, weight=3)
         self.clip_row.columnconfigure(1, weight=2)
+        self.motion_var = tk.StringVar(value=str(self._settings.get('motion') or DEFAULT_MOTION))
+        self.motion_entry = ttk.Entry(self.clip_row, textvariable=self.motion_var)
+        self.motion_entry.grid(row=0, column=1, sticky='ew', padx=(3, 3))
+        self._tip(self.motion_entry, 'Motion for a clip only: what should happen between the frames. '
+                                     'The prompt above describes the still and is not sent with a clip.')
+        self.clip_row.columnconfigure(1, weight=1)
         self.clip_btn = ActionButton(self.clip_row, text='\u25b6 Make clip (2 s)', command=self.make_clip,
                                      font=('Segoe UI', 11), bg='#3f4f63', fg='white',
                                      activebackground='#33404f', activeforeground='white',
                                      disabledforeground='#c9d2de', relief='flat', bd=0,
                                      height=1, cursor='hand2', takefocus=True)
-        self.clip_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
+        self.clip_btn.grid(row=0, column=2, sticky='ew', padx=(3, 3))
         self.clip_open_btn = ActionButton(self.clip_row, text='Open clip', command=self.open_last_clip,
                                           font=('Segoe UI', 11), bg='#7a8699', fg='white',
                                           activebackground='#68748a', activeforeground='white',
@@ -3973,17 +3984,25 @@ class App:
             pass
 
     def make_clip(self):
-        """A few seconds of motion from the picture on screen: 704x704 or 1280x704, 2 s, 24 fps."""
+        """A few seconds of motion: first->last frame when two pictures are selected, otherwise from the one shown.
+
+        The two modes are two models, not a flag: Wan 2.2 TI2V-5B takes a start image only, and Wan 2.1 I2V-14B takes a
+        start *and* an end image. So selecting two pictures in the gallery is the gesture that asks for the 14B: both
+        endpoints are frames you drew, and only the middle is invented.
+        """
         if self.busy:
             return
-        if self._current is None:
+        picked = [Path(p) for p in self.selected if Path(p).is_file()]
+        start = picked[0] if len(picked) >= 2 else self._current
+        end = picked[-1] if len(picked) >= 2 else None
+        if start is None:
             self.hint.configure(text='show a picture first - a clip starts from the picture on screen')
             return
         try:
             seed = int(self.seed.get())
         except ValueError:
             seed = self.args.seed
-        with Image.open(self._current) as im:
+        with Image.open(start) as im:
             grid = '16:9' if im.width >= im.height * 1.4 else '1:1'
             size = im.size
         self.busy = True
@@ -3993,12 +4012,20 @@ class App:
         self.bar.configure(mode='determinate', value=0, maximum=30)
         self.bar.grid()
         self.status.configure(text='preparing the clip from %s...' % self._short_name(Path(self._current).name))
-        clip_w, clip_h = (1280, 704) if grid == '16:9' else (704, 704)
-        self.hint.configure(text='%dx%d from a %dx%d still - the first clip of a session loads 10.8 GiB of video '
-                                 'weights, so expect minutes, not seconds'
-                            % (clip_w, clip_h, size[0], size[1]))
-        self.engine.make_clip(self._current, grid=grid, frames=49,
-                              prompt=self.text.get('1.0', 'end').strip(), seed=seed)
+        model = 'i2v14' if end is not None else '5b'
+        clip_w, clip_h = ((832, 480) if grid == '16:9' else (480, 480)) if model == 'i2v14' else (
+            (1280, 704) if grid == '16:9' else (704, 704))
+        motion = (self.motion_var.get() or '').strip()
+        self._settings['motion'] = motion
+        save_settings(self._settings)
+        if end is not None:
+            self.hint.configure(text='first -> last frame at %dx%d through Wan 2.1 I2V-14B: both ends are yours, the '
+                                     'middle is invented. Expect minutes.' % (clip_w, clip_h))
+        else:
+            self.hint.configure(text='%dx%d from a %dx%d still - the first clip of a session loads about 10 GiB of '
+                                     'video weights, so expect minutes, not seconds'
+                                % (clip_w, clip_h, size[0], size[1]))
+        self.engine.make_clip(start, grid=grid, frames=49, prompt=motion, seed=seed, end=end, model=model)
 
     @staticmethod
     def find_player(exists=None):
