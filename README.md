@@ -118,7 +118,7 @@ plumbing must exist before any profile works:
 
 | profile | files (folder) | size | source |
 |---|---|---|---|
-| `flux2 klein`, `flux2 klein uncensored` | `flux-2-klein-4b-Q4_K_M.gguf` (diffusion_models), `flux2-vae.safetensors` (vae) | 2.6 + 0.31 GiB | unsloth FLUX.2-klein-4B-GGUF, Comfy-Org Flux-2-Klein-4B |
+| ~~`flux2 klein`, `flux2 klein uncensored`~~ | `flux-2-klein-4b-Q4_K_M.gguf` (diffusion_models), `flux2-vae.safetensors` (vae) | 2.6 + 0.31 GiB | **retired from the picker 2026-10-28**; weights still on disk, every 4B measurement still in `RESULTS-*.md` |
 | | shipped encoder `qwen_3_4b_fp4_flux2.safetensors` | 3.58 GiB | Comfy-Org Flux-2-Klein-4B |
 | | uncensored encoder `flux2-klein-4b-uncensored-q4_k_m.gguf` | **2.33 GiB** | `nerualdreming/flux2-klein-4b-uncensored-text-encoder` (ungated) |
 | `flux2 klein 9b uncensored` | `flux-2-klein-9b-Q4_K_M.gguf` (diffusion_models) | **5.50 GiB** | `unsloth/FLUX.2-klein-9B-GGUF` (ungated, FLUX non-commercial) |
@@ -135,6 +135,13 @@ Verify a deployment in two calls, before blaming a prompt:
 curl -s http://127.0.0.1:8006/object_info/CLIPLoaderGGUF | python -c "import json,sys; print(json.load(sys.stdin)['CLIPLoaderGGUF']['input']['required']['clip_name'][0])"
 curl -s http://127.0.0.1:8006/object_info/UnetLoaderGGUF | python -c "import json,sys; print(json.load(sys.stdin)['UnetLoaderGGUF']['input']['required']['unet_name'][0])"
 ```
+
+**The picker offers two models and an `ALL` option** (2026-10-28). `z-image turbo` and `flux2 klein 9b uncensored` are
+the two; `ALL` renders one image from each at that profile's ceiling steps and the largest size the app offers (1024 px),
+sequentially, cheapest first - so one press gives the same prompt across both models for comparison, and each image lands
+in the gallery with its own sidecar. The step and size boxes are disabled while `ALL` is selected rather than ignored.
+The 9B's peak at 1024 px is **unmeasured** (its measured point is 8,837 MiB at 512, from the 2026-10-25 three-arm run),
+and the banner says so instead of inventing a number.
 
 If a profile's encoder is missing from the first list, the file is in the wrong folder or the extra-paths config is
 not loaded - the graph will be rejected rather than silently falling back. `--profile` lists the wired profiles and
@@ -404,6 +411,12 @@ folder, and a folder you are already reading is never replaced. Measured leave-o
 1,756 member prompts against every folder without itself - the first guess is right **99.0 %** of the time, median
 top1-top2 margin **0.42**, 99.5 % at a score of 0.85. The prediction runs on the *final* prompt (after any style suffix),
 because that is the text that gets grouped.
+
+**A render made while a folder is open appears in it *immediately*.** Two gaps were found and closed on 2026-10-28:
+the pane is drawn by `_render_contents`, which only `select_folder` called, so a re-group that changed the plan left the
+open folder's pane stale - the pictures only appeared after toggling folders or re-selecting the folder. It is now
+re-rendered when a render lands (before the debounced re-group) and again whenever a plan is applied, so the plan and the
+pane cannot disagree. Verified in the live window: pane 8 -> 9 with the new picture visible and no re-selection.
 
 **A render made while a folder is open now appears in it.** Folders are derived from prompt text and the newest 18
 pictures are deliberately outside every folder, so the folder you are standing in can never contain the picture you just

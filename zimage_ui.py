@@ -559,8 +559,7 @@ FILTER_CAP = 200     # while a search is active the strip is a result list, not 
 #  size and the checkpoint dominate. Every entry below actually ran - including 16-up at 512 px, which an earlier
 #  hand-written warning claimed would not fit.
 VRAM_POINTS = {
-    ('flux2 klein', 1, 512): 5749,
-    ('flux2 klein', 1, 1024): 5655,
+    ('flux2 klein 9b uncensored', 1, 512): 8837,      # 2026-10-25 three-arm run; 1024 px is UNMEASURED
     ('z-image turbo', 1, 512): 6708,
     ('z-image turbo', 1, 1024): 7193,
     ('z-image turbo', 16, 384): 8206,
@@ -1603,7 +1602,7 @@ class App:
         self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
         self.model_cb = ttk.Combobox(stylerow, textvariable=self.model_var, width=14, state='readonly',
                                      values=[name for name, prof in zg.MODELS.items()
-                                             if prof.get('in_picker', True)])
+                                             if prof.get('in_picker', True)] + [zg.ALL_MODEL])
         self.model_cb.pack(side='left')
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
@@ -1864,6 +1863,9 @@ class App:
         # reported as confusing. Paint a grouping line instead and let `_apply_plan` draw the folders.
         self._grouping = bool(self.group_var.get())      # a plan is coming, so the strip has nothing to draw yet
         self._prediction = None          # which folder the prompt in the box would join
+        self._all_queue = None           # the ALL sweep's remaining profiles, or None
+        self._all_total = 0
+        self._all_saved = None
         self._see_pending = None         # a folder waiting to be scrolled into view after the next rebuild
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
@@ -2127,6 +2129,11 @@ class App:
                 self._see_folder(index)
         self._render_folder_bar()
         self.refresh_gallery()
+        # The plan just changed underneath an open folder, and the pane is drawn by `_render_contents`, which only
+        # `select_folder` called: a picture that had just landed in the open folder stayed invisible until the reader
+        # re-selected the folder (reported 2026-10-28). Re-render here so the plan and the pane cannot disagree.
+        if self._active_folder is not None:
+            self._render_contents()
         self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
                               % (len(plan['groups']), len(plan['recent']) + len(plan['groups']) and
                                  sum(len(g['items']) for g in plan['groups']) + len(plan['ungrouped']) + len(plan['recent']),
@@ -3244,8 +3251,25 @@ class App:
 
     # -- the new actions -----------------------------------------------------
     def _on_model_change(self, event=None):
-        """A profile brings its own step count: flux dev at 4 steps would look broken."""
-        prof = zg.MODELS.get(self.model_var.get()) or {}
+        """A profile brings its own step count; ALL brings every profile's ceiling and the largest size.
+
+        The size and step boxes are disabled rather than ignored while ALL is chosen: the sweep overrides both per
+        model, and a control that looks editable but is not is worse than one that says so.
+        """
+        choice = self.model_var.get()
+        if choice == zg.ALL_MODEL:
+            plan = zg.all_plan()
+            self.size_var.set(str(zg.QUALITY_SIZE))
+            self.steps_var.set(str(max(steps for _n, steps, _s in plan)))
+            for widget in (getattr(self, 'size_cb', None), getattr(self, 'steps_cb', None)):
+                if widget is not None:
+                    widget.state(['disabled'])
+            self._update_banner()
+            return
+        for widget in (getattr(self, 'size_cb', None), getattr(self, 'steps_cb', None)):
+            if widget is not None:
+                widget.state(['!disabled'])
+        prof = zg.MODELS.get(choice) or {}
         top = prof.get('max_steps') or prof.get('steps')
         if top:
             self.steps_var.set(str(top))
@@ -3470,6 +3494,35 @@ class App:
                              negative=self.negative.get('1.0', 'end').strip(),
                              profile=self.model_var.get(), style=self.style_var.get())
         self.busy = True
+
+    # -- ALL: one image per profile, at that profile's ceiling --------------------------------------------
+    def _start_all(self):
+        """Queue every profile once. Each runs at its own `max_steps` and the largest size, one at a time."""
+        if getattr(self, '_all_queue', None):
+            return                                     # already sweeping
+        self._all_queue = list(zg.ALL_ORDER)
+        self._all_total = len(self._all_queue)
+        self._all_saved = (self.size_var.get(), self.steps_var.get())
+        self._run_next_all()
+
+    def _run_next_all(self):
+        if not self._all_queue:
+            self._all_queue = None
+            saved = getattr(self, '_all_saved', None)
+            if saved:
+                self.size_var.set(saved[0])
+                self.steps_var.set(saved[1])
+            self.status.configure(text='ALL finished - %d images, one per model' % getattr(self, '_all_total', 0))
+            self._update_banner()
+            return
+        profile = self._all_queue.pop(0)
+        steps = int((zg.MODELS.get(profile) or {}).get('max_steps') or 4)
+        index = getattr(self, '_all_total', 1) - len(self._all_queue)
+        self.size_var.set(str(zg.QUALITY_SIZE))
+        self.steps_var.set(str(steps))
+        self.status.configure(text='ALL %d of %d · %s at %d px, %d steps'
+                              % (index, getattr(self, '_all_total', 1), profile, zg.QUALITY_SIZE, steps))
+        self.generate(_profile=profile, _force_single=True)
 
     def vary(self, mode, strength=0.35):
         """Re-run this picture's prompt. 'vary' moves the seed; 'subtle' re-samples the picture itself at 0.35."""
@@ -4586,6 +4639,18 @@ class App:
         what = 'one image' if n == 1 else '%d tiles' % n
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
+        if model == zg.ALL_MODEL:
+            plan = zg.all_plan()
+            peaks = [estimate_vram(name, 1, size)[0] or 0 for name, _steps, size in plan]
+            peak = max(peaks) if peaks else 0
+            self.banner.configure(
+                text='ALL  ·  %s  ·  one image each at their ceiling, %d px  ·  style %s   ·   '
+                     'VRAM ≈ %.1f/%.1f GiB (peak of one model, not the sum)%s'
+                     % (' + '.join('%s %d steps' % (name, steps) for name, steps, _s in plan),
+                        zg.QUALITY_SIZE, style, peak / 1024.0, VRAM_TOTAL_MIB / 1024.0,
+                        '' if all(peaks) else '   ·   1024 px is unmeasured for at least one model'),
+                foreground=colour)
+            return
         try:
             vram, _src = estimate_vram(model, n, int(self.size_var.get() or 0) or 512)
         except (TypeError, ValueError):
@@ -4823,8 +4888,13 @@ class App:
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
 
-    def generate(self):
+    def generate(self, _profile=None, _force_single=False):
+        """Render once. `_profile` and `_force_single` exist for the ALL sweep, which drives this per model."""
         if self.busy:
+            return
+        if _profile is None and getattr(self, 'model_var', None) is not None \
+                and self.model_var.get() == zg.ALL_MODEL:
+            self._start_all()
             return
         prompt = self.text.get('1.0', 'end').strip()
         if not prompt:
@@ -4853,8 +4923,8 @@ class App:
             edit_base = self._current
 
         # an edit yields exactly one result, so an N-up layout does not apply
-        batch = 1 if (edit_base or mask_path or outpaint) else self._batch()
-        model = self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL
+        batch = 1 if (edit_base or mask_path or outpaint or _force_single) else self._batch()
+        model = _profile or (self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL)
 
         if not self._history or self._history[-1] != prompt:
             self._history.append(prompt)
@@ -5049,6 +5119,12 @@ class App:
                     self.ticks.configure(text='')
                     self.status.configure(text='wrote %s' % path)
                     self.refresh_gallery(select=path)
+                    if self._active_folder is not None:
+                        # the live view is the open folder plus whatever outside it the folder would accept: a fresh
+                        # render belongs there at once, before the debounced re-group even runs
+                        self._render_contents()
+                    if getattr(self, '_all_queue', None):
+                        self.root.after(400, self._run_next_all)   # a sweep: next model once the card is idle
                     if self.chain_var.get():
                         self._set_base(path)
                         base_note = 'chained from %s' % Path(path).name

@@ -492,24 +492,73 @@ def main():
     app.seq_var.set(True)
     app.layout_var.set('single')
 
-    print('\n-- the defaults are the measured pose-combo')
-    check('the default model is flux2 klein', zui.zg.DEFAULT_MODEL == 'flux2 klein', zui.zg.DEFAULT_MODEL)
-    check('the default strength is 0.70', abs(app.denoise.get() - 0.70) < 1e-9, str(app.denoise.get()))
+    print('\n-- the picker is two models and ALL, and the default is the remaining edit-capable one')
+    check('exactly two profiles survive', sorted(zui.zg.MODELS) == ['flux2 klein 9b uncensored', 'z-image turbo'],
+          sorted(zui.zg.MODELS))
+    check('the default model is the 9B', zui.zg.DEFAULT_MODEL == 'flux2 klein 9b uncensored', zui.zg.DEFAULT_MODEL)
+    check('the picker offers both profiles plus ALL',
+          [str(v) for v in app.model_cb['values']] == list(zui.zg.MODELS) + ['ALL'],
+          [str(v) for v in app.model_cb['values']])
+    check('the default strength is still 0.70', abs(app.denoise.get() - 0.70) < 1e-9, str(app.denoise.get()))
     check('and its step count comes from the profile',
-          str(zui.zg.MODELS['flux2 klein']['steps']) == app.steps_var.get(),
-          '%s vs %s' % (zui.zg.MODELS['flux2 klein']['steps'], app.steps_var.get()))
+          str(zui.zg.MODELS['flux2 klein 9b uncensored']['steps']) == app.steps_var.get(),
+          '%s vs %s' % (zui.zg.MODELS['flux2 klein 9b uncensored']['steps'], app.steps_var.get()))
     app.denoise.set(0.55); app._persist()
     check('the strength is remembered', abs(zui.load_settings().get('denoise', 0) - 0.55) < 1e-9,
           str(zui.load_settings().get('denoise')))
     app.denoise.set(0.70)
 
     print('\n-- the VRAM estimate comes from measurements, not from a guess')
-    mib_k, src_k = zui.estimate_vram('flux2 klein', 1, 512)
-    check('the new default has a measured peak', mib_k == 5749, str(mib_k))
+    mib_k, src_k = zui.estimate_vram('flux2 klein 9b uncensored', 1, 512)
+    check('the new default has a measured peak at 512', mib_k == 8837, str(mib_k))
+    check('and 1024 px is honestly unmeasured for it, not borrowed from another model',
+          zui.estimate_vram('flux2 klein 9b uncensored', 1, 1024)[0] == 8837,
+          str(zui.estimate_vram('flux2 klein 9b uncensored', 1, 1024)))
     mib, src = zui.estimate_vram('z-image turbo', 16, 512)
     check('a measured shape returns its peak', mib == 8927, str(mib))
     check('and says where it came from', 'measured' in (src or ''), str(src))
     check('an unmeasured model invents nothing', zui.estimate_vram('nosuch model', 1, 256)[0] is None)
+    print('\n-- ALL runs every profile once at its ceiling')
+    app.model_var.set('ALL'); app._on_model_change(); root.update()
+    check('ALL picks the largest size', app.size_var.get() == '1024', app.size_var.get())
+    check('and the highest ceiling among the profiles', app.steps_var.get() == '9', app.steps_var.get())
+    check('the boxes it overrides are disabled, not silently ignored',
+          'disabled' in app.size_cb.state() and 'disabled' in app.steps_cb.state(),
+          (app.size_cb.state(), app.steps_cb.state()))
+    check('the banner describes the sweep', 'ALL' in app.banner['text'] and '9 steps' in app.banner['text'],
+          app.banner['text'])
+    check('the plan is cheapest-first, ceiling steps, 1024 px',
+          zui.zg.all_plan() == [('z-image turbo', 9, 1024), ('flux2 klein 9b uncensored', 4, 1024)],
+          zui.zg.all_plan())
+    app.busy = False
+    app.engine.calls.clear()
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse at dusk')
+    app.generate(); root.update()
+    check('pressing Generate with ALL starts the sweep and dispatches the first model',
+          len(app.engine.calls) == 1 and app._all_queue == ['flux2 klein 9b uncensored'],
+          (len(app.engine.calls), app._all_queue))
+    first_args, first_kw = app.engine.calls[-1] if app.engine.calls else ((), {})
+    check('the first render is z-image turbo at its ceiling',
+          first_kw.get('profile') == 'z-image turbo' and first_args[3] == 9 and first_kw.get('batch') == 1,
+          (first_kw.get('profile'), first_args[3:4], first_kw.get('batch')))
+    check('and at 1024 px', first_args[1] == 1024 and first_args[2] == 1024, first_args[1:3])
+    app.busy = False
+    app._run_next_all(); root.update(); time.sleep(0.05)
+    second_args, second_kw = app.engine.calls[-1] if app.engine.calls else ((), {})
+    check('the second is the 9B at its own ceiling',
+          second_kw.get('profile') == 'flux2 klein 9b uncensored' and second_args[3] == 4,
+          (second_kw.get('profile'), second_args[3:4]))
+    app.busy = False
+    app._run_next_all(); root.update(); time.sleep(0.05)
+    check('and the queue is spent', app._all_queue is None, app._all_queue)
+    # the boxes stay locked while ALL is still the picker value - that is the point of locking them
+    check('the boxes stay locked while ALL is selected',
+          'disabled' in app.steps_cb.state(), app.steps_cb.state())
+    app.model_var.set(zui.zg.DEFAULT_MODEL); app._on_model_change(); root.update()
+    check('choosing a real profile again unlocks them',
+          'disabled' not in app.steps_cb.state() and 'disabled' not in app.size_cb.state(),
+          (app.steps_cb.state(), app.size_cb.state()))
+    app.size_var.set('512'); root.update()
     app.model_var.set('z-image turbo'); app.size_var.set('512'); app.layout_var.set('16-up (4x4)')
     app.busy = False; root.update()
     check('the banner shows headroom', 'VRAM' in app.banner['text'], app.banner['text'])
@@ -525,7 +574,7 @@ def main():
     root.update(); root.update_idletasks()
     check('the model picker is visible while Advanced is closed', bool(app.model_cb.winfo_ismapped()))
     shown = [n for n, prof in zui.zg.MODELS.items() if prof.get('in_picker', True)]
-    check('it offers every profile still in the picker', list(app.model_cb['values']) == shown,
+    check('it offers every profile still in the picker, then ALL', list(app.model_cb['values']) == shown + ['ALL'],
           str(app.model_cb['values']))
     check('Clear base sits directly above Generate', app.clear_base_btn.winfo_y() < app.gen_btn.winfo_y(),
           'clear y=%d generate y=%d' % (app.clear_base_btn.winfo_y(), app.gen_btn.winfo_y()))
@@ -672,7 +721,7 @@ def main():
     print('\n-- changing the model sets that model\'s step ceiling')
     check('the deleted profiles are gone from MODELS',
           'flux1 schnell' not in zui.zg.MODELS and 'flux1 dev' not in zui.zg.MODELS, str(list(zui.zg.MODELS)))
-    for prof_name, want in (('z-image turbo', '9'), ('flux2 klein', '4'),
+    for prof_name, want in (('z-image turbo', '9'), ('flux2 klein 9b uncensored', '4'),
                             ('flux2 klein 9b uncensored', '4')):
         app.model_var.set(prof_name)
         app._on_model_change()
@@ -1900,6 +1949,44 @@ def main():
     check('and the seed it was made with', 'seed' in text, text)
     check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
+
+    print("\n-- a render lands in the open folder without the reader re-selecting it (2026-10-28)")
+    if app._plan and app._plan['groups']:
+        import group_prompts as _gp3
+        prompt = 'a black poodle on a leather couch, watercolour'
+        members = [{'path': str(p), 'prompt': prompt, 'created': '2026-10-01'} for p in app._files[:-1][:5]]
+        fresh = app._files[-1]
+        lex3 = _gp3.fit_lexicon([prompt, 'a beach at dawn'])
+        base_plan = {'groups': [{'label': 'poodles', 'title': 'poodles', 'items': members,
+                                 'oldest': '2026-10-01'}],
+                     'recent': [], 'ungrouped': [], 'threshold': _gp3.DEFAULT_THRESHOLD,
+                     '_lexicon': lex3, 'seconds': 0.0}
+        saved_plan = app._plan
+        app._plan = base_plan
+        app.select_folder(0); root.update(); time.sleep(0.15)
+        before = set(app._content_widgets)
+        check('the folder is open with only its members', len(before) == len(members), len(before))
+        regrouped = dict(base_plan)
+        regrouped['recent'] = [{'path': str(fresh), 'prompt': prompt, 'created': '2026-10-28T12:00:00'}]
+        app._apply_plan(regrouped)
+        root.update(); time.sleep(0.2)
+        after = set(app._content_widgets)
+        check('a re-group puts the new render in the open folder without a re-select',
+              Path(fresh) in after, (Path(fresh), len(after)))
+        check('and the folder stayed open across the re-group',
+              app._active_folder is not None and app._plan['groups'][app._active_folder]['label'] == 'poodles',
+              app._active_folder)
+        calls = []
+        real_contents = app._render_contents
+        app._render_contents = lambda: (calls.append(1), real_contents())[1]
+        try:
+            feed_image(app, app._files[-2])
+        finally:
+            app._render_contents = real_contents
+        check('a landed render re-renders the open pane at once', bool(calls), len(calls))
+        app._plan = saved_plan
+        app.select_folder(None); root.update()
+    app.clear_selection(); root.update()
 
     print("\n-- turning folders on with a picture selected opens that picture's folder (2026-10-27)")
     app.toggle_groups(False); root.update(); time.sleep(0.1)
