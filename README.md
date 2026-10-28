@@ -348,6 +348,35 @@ where this app stands:
 | window position and size remembered | **deliberately not** - it opens maximised, which is what was asked |
 | taskbar progress, thumbnails, jump lists | **not done** - Windows-specific shell integration, no Tk path without a COM shim |
 
+## Folders: why one subject had two folders, and the live view
+
+**The defect, measured.** Two folders held variations of "black medium size standard poodle": 3 pictures without a style
+prefix and 5 with "artists watercolor rendering of". The cause was not the style axis - clustering compared each prompt
+only against its folder's **first (oldest) member**, and the oldest poodle prompt is the shortest one; the styled ones
+score 0.01-0.09 against it and opened a second folder. Evidence that this was an artefact: the strongest **cross**-folder
+pair measured **0.87** while each folder's own mean was **0.83** and **0.80**.
+
+**The fix, and the three that were rejected** (all measured on this gallery, 1,783 distinct prompts):
+
+| rule | folders | biggest | mean intra | poodles |
+|---|---|---|---|---|
+| anchor-only (before) | 93 | 206 | 0.873 | 5 + 3 |
+| match any member instead of the anchor | 34 | 322 | 0.822 | 8 |
+| any-member merge pass, floor 0.70 | 73 | 342 | 0.864 | 8 |
+| **core-to-core merge at 0.70 (adopted)** | **86** | **223** | **0.875** | **8** |
+
+Replacing the anchor comparison with member matching over-merges the whole gallery (34 folders, a 322-picture blob);
+doing it as a *post-hoc* merge on every member is almost as bad (73). Comparing each folder's **core** - its most
+specific member, the same one the verification pass uses - merges only the 7 genuinely duplicated pairs, costs 0.0 s, and
+leaves the mean intra-folder cosine *higher* than before. A plan over 1,783 prompts takes 2.4 s.
+
+**A render made while a folder is open now appears in it.** Folders are derived from prompt text and the newest 18
+pictures are deliberately outside every folder, so the folder you are standing in can never contain the picture you just
+made. Two changes answer that: a finished render schedules a debounced **re-group** (1.2 s, on a worker), and the open
+folder is rendered as a **live view** - its own members plus any picture outside every folder that the folder would
+accept (`live_append`, same membership threshold), marked `new`. The re-group keeps the open folder by *name*, so the view
+never closes underneath you. Verified on the real window with a synthetic render: pane 8 -> 9, the new tile marked.
+
 ## Video: why the 5B looked unusable, and the two ways out
 
 **Make clip** and `video.py` ran Wan 2.2 **TI2V-5B** at GGUF **Q4_K_M**, 30 steps, cfg 5.0, shift 8.0, `uni_pc`/`simple`,

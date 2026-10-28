@@ -297,6 +297,42 @@ def main():
         bad_names = [g['label'] for g in plan['groups'] if headerish.match(g['label']) or g['label'] in slugs]
         check('no folder in the real gallery is named after a section header', not bad_names, bad_names[:4])
 
+    print('\n-- two folders that differ only in how their cores read are merged (2026-10-27)')
+    # The poodle case reduced to its mechanism: same subject, a style prefix, and an older anchor too short to see the
+    # link. `_merge_close` works on cluster cores, so this is testable without the gallery.
+    near = ['a black medium size standard poodle on a leather couch in a craftsman home, oil on canvas',
+            'a black medium size standard poodle on a leather couch in a craftsman home, oil on canvas painting']
+    lex = gp.fit_lexicon(near)
+    vecs = gp.build_vectors(near, lex)
+    raws = [gp.raw_vector(x, lex) for x in near]
+    merged = gp._merge_close([[0], [1]], vecs, raws)
+    check('the near-identical pair is one cluster', len(merged) == 1 and len(merged[0]) == 2, merged)
+
+    far = ['a black medium size standard poodle on a leather couch',
+           'a white cat asleep on a windowsill in summer light']
+    lex2 = gp.fit_lexicon(far)
+    v2 = gp.build_vectors(far, lex2)
+    r2 = [gp.raw_vector(x, lex2) for x in far]
+    apart = gp._merge_close([[0], [1]], v2, r2)
+    check('unrelated subjects stay apart', len(apart) == 2, apart)
+
+    print('\n-- the live view offers only what the folder would accept')
+    texts = ['a black medium size standard poodle on a leather couch in a craftsman home',
+             'a black medium size standard poodle laying on a leather couch, watercolour']
+    lex3 = gp.fit_lexicon(texts + ['a lighthouse on a rocky coast at dusk'])
+    plan = {'groups': [{'label': 'poodle',
+                        'items': [{'path': 'a.png', 'prompt': texts[0], 'created': '2026-10-01'}]}],
+            'recent': [{'path': 'b.png', 'prompt': texts[1], 'created': '2026-10-27'},
+                       {'path': 'c.png', 'prompt': 'a lighthouse on a rocky coast at dusk',
+                        'created': '2026-10-27'}],
+            'ungrouped': [], '_lexicon': lex3}
+    hits = gp.live_append(plan['groups'][0], plan)
+    check('a matching recent picture is offered', [r['path'] for r in hits] == ['b.png'], hits)
+    check('an unrelated one is not', all(r['path'] != 'c.png' for r in hits), hits)
+    check('a folder member is never offered twice', all(r['path'] != 'a.png' for r in hits), hits)
+    check('a plan without a lexicon offers nothing rather than refitting',
+          gp.live_append(plan['groups'][0], {}) == [])
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

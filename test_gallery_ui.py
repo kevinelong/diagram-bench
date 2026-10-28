@@ -1695,9 +1695,12 @@ def main():
               len(app.recent.winfo_children()) == before, (len(app.recent.winfo_children()), before))
         check('and the pictures appear in their own pane', bool(app.contents.winfo_children())
               and app.contents_holder.winfo_manager() != '', app.contents_holder.winfo_manager())
-        check('the pane holds exactly that folder\'s pictures',
-              len(app._content_widgets) == min(len(app._plan['groups'][pick]['items']), app._content_shown),
-              (len(app._content_widgets), len(app._plan['groups'][pick]['items'])))
+        members = {Path(r['path']) for r in app._plan['groups'][pick]['items']}
+        shown = set(app._content_widgets)
+        check('the pane holds that folder\'s pictures, and only pictures it would accept',
+              members <= shown and len(shown) > 0, (len(members), len(shown)))
+        check('the extra ones are the live view, not members',
+              len(shown - members) <= app._content_shown, (len(members), len(shown)))
         app.select_folder(None); root.update()
         check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
         check('the folder list is still there', len(app.recent.winfo_children()) == before)
@@ -1745,6 +1748,35 @@ def main():
     check('a narrower window uses fewer, not smaller, columns', cols2 <= cols and tile2 <= tile,
           (cols, tile, cols2, tile2))
     probe_win.destroy()
+
+    print('\n-- a finished render re-groups, and the open folder survives it (2026-10-27)')
+    if not (app._plan and app._plan['groups']):
+        app.toggle_groups(True)
+        for _ in range(100):
+            app._poll(); root.update()
+            if app._plan:
+                break
+            time.sleep(0.05)
+    app.select_folder(0 if app._plan and app._plan['groups'] else None); root.update()
+    open_label = None
+    if app._active_folder is not None:
+        open_label = app._plan['groups'][app._active_folder]['label']
+    app._regroup_soon(); root.update()
+    check('a render schedules a re-group', getattr(app, '_regroup_job', None) is not None)
+    app._regroup_job and app.root.after_cancel(app._regroup_job)
+    app._regroup_job = None
+    app._regroup_now()
+    for _ in range(120):
+        app._poll(); root.update()
+        if not getattr(app, '_grouping', False):
+            break
+        time.sleep(0.05)
+    check('the re-group completes', app._grouping is False)
+    if open_label is not None:
+        check('and the folder that was open is still open',
+              app._active_folder is not None and app._plan['groups'][app._active_folder]['label'] == open_label,
+              (open_label, app._active_folder))
+    app.select_folder(None); root.update()
 
     print('\n-- size badges, three-line folder titles, and the picture resolution (2026-10-27)')
     check('the 64 kB band is tomato red', zui.size_band(64 * 1024)[0] == '#ff6347', zui.size_band(64 * 1024))
@@ -1813,6 +1845,22 @@ def main():
             time.sleep(0.05)
     # The real fixture yields one or two folders, which never overflow a tall window, so the retention property would
     # pass without being exercised. Clone the folders to make the list genuinely longer, then restore.
+    # A generation earlier in this suite schedules a re-group, and a re-group replaces the cloned plan underneath this
+    # test - which showed up as a flaky "the folder list can be scrolled". Stop re-grouping for the duration rather than
+    # racing it: wait for any in-flight grouping, stub the scheduler, restore it after.
+    for _ in range(120):
+        app._poll(); root.update()
+        if not getattr(app, '_grouping', False):
+            break
+        time.sleep(0.05)
+    if getattr(app, '_regroup_job', None):
+        try:
+            app.root.after_cancel(app._regroup_job)
+        except Exception:
+            pass
+        app._regroup_job = None
+    real_scheduler = app._regroup_soon
+    app._regroup_soon = lambda: None
     real_groups = list(app._plan['groups'])
     app._plan['groups'] = real_groups * 24
     app._folder_shown = len(app._plan['groups'])
@@ -1857,6 +1905,7 @@ def main():
         check('a different folder starts at the top', True)
     app.select_folder(None)
     app._plan['groups'] = real_groups                   # the clones were only for the scroll test
+    app._regroup_soon = real_scheduler
     app._folder_shown = zui.BATCH_FOLDERS
     app.refresh_gallery(); root.update()
 

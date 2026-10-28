@@ -1714,6 +1714,28 @@ class App:
         self._render_folder_bar()
         threading.Thread(target=self._compute_groups, daemon=True).start()
 
+    def _regroup_soon(self):
+        """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
+
+        Debounced because a batch or a 16-up sheet arrives as several events; grouping 1,800 prompts costs ~2.4 s, which
+        belongs on a worker, not in the event loop.
+        """
+        if not self.group_var.get():
+            return
+        if getattr(self, '_regroup_job', None):
+            try:
+                self.root.after_cancel(self._regroup_job)
+            except Exception:
+                pass
+        self._regroup_job = self.root.after(1200, self._regroup_now)
+
+    def _regroup_now(self):
+        self._regroup_job = None
+        if not self.group_var.get() or getattr(self, '_grouping', False):
+            return
+        self._grouping = True
+        threading.Thread(target=self._compute_groups, daemon=True).start()
+
     def _folders_clicked(self):
         """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
         if self._plan:
@@ -1731,19 +1753,26 @@ class App:
                 meta = read_meta(path) or {}
                 rows.append({'path': str(path), 'prompt': meta.get('prompt') or '',
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds')})
-            plan = group_prompts.plan(rows)
+            plan = group_prompts.plan(rows, keep_lexicon=True)
             plan['seconds'] = round(time.time() - started, 2)
             self.ui_events.put(('groups', plan))
         except Exception as e:
             self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
 
     def _apply_plan(self, plan):
+        was_open = None
+        if self._plan and self._active_folder is not None and self._active_folder < len(self._plan['groups']):
+            was_open = self._plan['groups'][self._active_folder].get('label')
         self._folder_shown = BATCH_FOLDERS
         self._shown = RECENT_N
         self._sheets = {}
         self._plan = plan
         self._grouping = False
+        # keep the open folder by name: a re-group after a generation must not close the view being read, and indexes
+        # move when the plan is recomputed
         self._active_folder = None
+        if was_open:
+            self._active_folder = next((i for i, g in enumerate(plan['groups']) if g.get('label') == was_open), None)
         self._render_folder_bar()
         self.refresh_gallery()
         self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
@@ -2253,6 +2282,18 @@ class App:
         cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
         tile_px = max(48, (width - 8) // cols - 6)
         items = list(group['items'])
+        # Live view: the newest pictures are outside every folder by design, so a render made while this folder is open
+        # would otherwise never appear in it. `live_append` answers "what else would this folder accept?" from the same
+        # corpus statistics, newest first, and marks them so the folder's own membership stays honest.
+        try:
+            import group_prompts as _gp
+            fresh = _gp.live_append(group, self._plan) if self._plan else []
+        except Exception:
+            fresh = []
+        for row in fresh:
+            row = dict(row)
+            row['fresh'] = True
+            items.append(row)
         if self._sort_wins():
             import pair_rank
             order = pair_rank.sort_by_wins([r['path'] for r in items])
@@ -2294,6 +2335,8 @@ class App:
                 mark = ''
             if mark:
                 ttk.Label(cell, text=mark, font=('Segoe UI', 7), foreground=self.theme.win_mark).pack()
+            elif row.get('fresh'):
+                ttk.Label(cell, text='new', font=PIXEL_FONT, foreground=self.theme.accent).pack()
             self._content_widgets[Path(row['path'])] = lab
         self._rebuilding = False
         self.root.after_idle(self._on_contents_resize)
@@ -4310,6 +4353,7 @@ class App:
                         self.status.configure(text='preview (2 steps, 256 px) - nothing saved to the gallery')
                         return
                     self._raw = raw
+                    self._regroup_soon()          # a new picture changes the folders: re-group off the event loop
                     meta = read_meta(path)
                     if meta and meta.get('tiles'):
                         n = len(meta['tiles'])

@@ -45,6 +45,12 @@ MIN_LENGTH_RATIO = 0.4
 # populations: the weakest genuine rephrase pairs score ratio 0.46 / coverage 0.43, while the space-pirate intruders
 # scored 0.04 (the two-word prompt) and 0.12 (the "show exactly 9 ..." instruction).
 MIN_MEMBER_COVERAGE = 0.30
+# A second attachment path, beside the anchor comparison that `DEFAULT_THRESHOLD` governs. A candidate that misses every
+# anchor still joins a folder if it is this similar to *any* member - which is what an older, shorter anchor fails to
+# notice. Measured on the real gallery (1,783 distinct prompts): the poodle family, split only by prompt length, becomes
+# one folder of 8 and the folder count moves 97 -> 96, while the e2e paraphrase recall of `test_groups.py` is unchanged
+# because the 0.20 anchor path is untouched. At 0.55 the gallery collapses to 73 folders; 0.75 loses a member again.
+MEMBER_MATCH = 0.70
 DEFAULT_RECENT = 18
 MIN_GROUP = 2                  # a "folder" of one picture is just the picture
 
@@ -243,18 +249,21 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
     vecs = build_vectors(prompts, lexicon)
     raws = [raw_vector(p, lexicon) for p in prompts]
     labels = [-1] * len(prompts)
-    reps = []
+    buckets = []                     # cluster -> its member indices
     for i, vec in enumerate(vecs):
         best, best_k = 0.0, -1
-        for k, r in enumerate(reps):
-            s = cosine(vec, vecs[r])
+        for k, members in enumerate(buckets):
+            s = cosine(vec, vecs[members[0]])
             if s > best:
                 best, best_k = s, k
         if best >= threshold and best_k >= 0:
             labels[i] = best_k
+            buckets[best_k].append(i)
+            continue
         else:
-            reps.append(i)
-            labels[i] = len(reps) - 1
+            buckets.append([i])
+            labels[i] = len(buckets) - 1
+
     groups = {}
     for i, lab in enumerate(labels):
         groups.setdefault(lab, []).append(i)
@@ -293,7 +302,52 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
         out.extend([[rejected[j] for j in g] for g in sub])
     elif rejected:
         out.extend([[m] for m in rejected])
-    return out
+    return _merge_close(out, vecs, raws)
+
+
+def _merge_close(groups, vecs, raws, floor=MEMBER_MATCH):
+    """Join clusters whose most specific members are near-identical, after clustering rather than during it.
+
+    This is the fix for a measured defect: the anchor is the *oldest* member, and an oldest prompt is often the shortest
+    one. Three poodle prompts anchored a folder; the five longer ones - "artists watercolor rendering of a black medium
+    size standard poodle ..." - opened a second, the first of them scoring 0.01 against that anchor, even though the
+    strongest cross-folder pair measured 0.87 while each folder's own mean was 0.83 and 0.80. Comparing every cluster's
+    core (its most specific member) closes the gap in one pass, and it cannot chain the way a member-level threshold
+    does: on the real gallery, cores at 0.70 merge 7 pairs (93 -> 86 folders, biggest 206 -> 223, mean intra-folder
+    cosine 0.873 -> 0.875), while comparing every member at the same 0.70 collapses the gallery to 73 folders with a
+    342-picture folder.
+
+    Pairs are taken strongest first and merged with a union-find, so a chain of weak links cannot walk the whole corpus
+    together; each core is compared once.
+    """
+    if len(groups) < 2:
+        return groups
+    cores = [max(g, key=lambda m: (sum(raws[m].values()), -m)) for g in groups]
+    pairs = []
+    for a in range(len(groups)):
+        for b in range(a + 1, len(groups)):
+            s = cosine(vecs[cores[a]], vecs[cores[b]])
+            if s >= floor:
+                pairs.append((s, a, b))
+    if not pairs:
+        return groups
+    pairs.sort(reverse=True)
+    parent = list(range(len(groups)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for _s, a, b in pairs:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+    merged = {}
+    for i, g in enumerate(groups):
+        merged.setdefault(find(i), []).extend(g)
+    return [sorted(v) for v in merged.values()]
 
 
 def label_for(prompts, members, width=60, lexicon=None):
@@ -371,7 +425,7 @@ def label_for(prompts, members, width=60, lexicon=None):
     return head or '(no prompt recorded)'
 
 
-def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP):
+def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
 
     Returns {'recent': [...], 'groups': [{'label', 'items', 'oldest'}]}: the newest `recent` pictures untouched and in
@@ -401,8 +455,41 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     grouped_paths = {r['path'] for g in groups for r in g['items']}
     leftovers = [r for r in with_prompt if r['path'] not in grouped_paths]
     groups.sort(key=lambda g: g['oldest'])
-    return {'recent': head, 'groups': groups, 'ungrouped': leftovers + without,
-            'threshold': threshold, 'recent_n': recent}
+    out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + without,
+           'threshold': threshold, 'recent_n': recent}
+    if keep_lexicon and with_prompt:
+        out['_lexicon'] = lexicon      # the open-folder view re-matches new pictures against the same corpus statistics
+    return out
+
+
+def live_append(group, plan, threshold=None):
+    """Pictures that belong in `group` but are not members of it yet - newest first.
+
+    The newest `recent` pictures are deliberately excluded from grouping, so a render made *while looking at a folder*
+    never appears in it: the folder you are standing in is not history yet. This answers the narrow question instead -
+    which of the pictures outside every folder would this one accept? - without touching the plan's membership or the
+    disk. Matching is against the group's own members at the same rule the clustering uses.
+    """
+    lexicon = plan.get('_lexicon')
+    if not lexicon or not group.get('items'):
+        return []
+    members = [r.get('prompt') or '' for r in group['items']]
+    member_vecs = build_vectors(members, lexicon)
+    taken = {r['path'] for r in group['items']}
+    candidates = [r for r in list(plan.get('recent') or []) + list(plan.get('ungrouped') or [])
+                  if r.get('path') not in taken and (r.get('prompt') or '').strip()]
+    if not candidates:
+        return []
+    # the same rule the clustering used, not the stricter core-merge floor: "would this folder have accepted it?"
+    # is the membership question, and a live view stricter than a folder would show nothing at all
+    limit = (plan.get('threshold') or DEFAULT_THRESHOLD) if threshold is None else threshold
+    hits = []
+    for row in candidates:
+        vec = vector(row['prompt'], lexicon)
+        if max((cosine(vec, mv) for mv in member_vecs), default=0.0) >= limit:
+            hits.append(row)
+    hits.sort(key=lambda r: r.get('created') or '', reverse=True)
+    return hits
 
 
 def self_test():
