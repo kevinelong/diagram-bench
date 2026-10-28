@@ -4255,6 +4255,10 @@ class App:
             # noise-blend node this ComfyUI does not have - the tooltip says which knob this actually is.
             self._set_base(self._current)
             self.denoise.set(strength)
+            # Choosing a variation strength is a decision about this picture, so the style and model defaults must not
+            # replace it afterwards - the same rule as a slider the user moved by hand. Measured before the fix: vary at
+            # 0.40 became 0.78 on a style change and 0.84 on a model switch.
+            self._strength_touched = True
             self.hint.configure(text='variation at strength %.2f of %s'
                                      % (strength, self._short_name(Path(self._current).name)))
             self.generate()

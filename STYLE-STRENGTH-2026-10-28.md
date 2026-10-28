@@ -52,6 +52,11 @@ before 0.84 has left the source.
 put there (`_strength_touched`), the same rule the style-conflict dialog follows. Switching model re-proposes the number,
 because the offset belongs to the model; a number the user moved by hand survives the switch.
 
+That rule had a hole, found by probing rather than by reading: `vary('base', 0.40)` set the strength *without* marking it as
+chosen, so a style change turned 0.40 into 0.78 and a model switch into 0.84. Picking a variation strength is a decision
+about that picture, so it now counts as one (`_strength_touched`), and a test pins both the style change and the model
+switch against it.
+
 ## Checks
 
 - `test_gallery_ui.py`: the three styles exist and carry a medium; no suffix exceeds 9 words (9 is the pre-existing worst

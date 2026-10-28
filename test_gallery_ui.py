@@ -979,6 +979,25 @@ def main():
     app.model_var.set('z-image turbo'); app._on_model_change()
     base_png.unlink(missing_ok=True)
 
+    print('\n-- a variation strength is a choice, not a default')
+    vary_png = tmp / '20261028-120001_512x512_seed9.png'
+    Image.new('RGB', (32, 32), 'purple').save(vary_png)
+    vary_png.with_suffix('.json').write_text(json.dumps({'prompt': 'a red fox', 'seed': 9, 'style': 'charcoal',
+                                                         'steps': 4, 'cfg': 1.0, 'size': 512}), encoding='utf-8')
+    app.select_file(vary_png); app.busy = False
+    app.vary('base', 0.40); root.update()
+    check('vary sets its strength', abs(app.denoise.get() - 0.40) < 1e-6, '%.2f' % app.denoise.get())
+    check('and counts as the user\'s choice', app._strength_touched, str(app._strength_touched))
+    app.style_var.set('icon'); root.update()
+    check('a style change does not overwrite it', abs(app.denoise.get() - 0.40) < 1e-6, '%.2f' % app.denoise.get())
+    app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
+    check('nor does a model switch', abs(app.denoise.get() - 0.40) < 1e-6, '%.2f' % app.denoise.get())
+    app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change()
+    app.style_var.set('none'); app.strength_scale.set(zui.STYLE_STRENGTH['none']); app._strength_touched = False
+    app.clear_base(); app.busy = False
+    vary_png.unlink(); vary_png.with_suffix('.json').unlink(missing_ok=True)
+    app.refresh_gallery(); root.update()
+
     print('\n-- a style suffix is applied once, however often you rerender')
     app.style_var.set('photo')
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
