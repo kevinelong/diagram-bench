@@ -308,6 +308,14 @@ projects through a fixed **perspective** view (so the fixture fits a homography 
 0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
 first answers are in [PIN-20261021.md](PIN-20261021.md).
 
+## The toolkit question, parked
+
+Whether Tk itself is the cause of the gallery's UI friction, and whether a native or browser-based shell would behave
+more like Windows expects, is written up with the incidents classified and the options costed in
+[UI-TOOLKIT-QUESTION-2026-10-28.md](UI-TOOLKIT-QUESTION-2026-10-28.md). Short version: about half the incident *classes*
+are the toolkit's plumbing, all of the bugs we actually hit were ours, and a Rust rewrite would not have caught them - it
+is the UI layer that decides the behaviour, not the language.
+
 ## The window takes the host's size and colours
 
 The window opens **maximised**, confirmed after it is mapped (`state('zoomed')` is silently ignored on some Tk/Windows
