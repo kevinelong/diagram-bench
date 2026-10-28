@@ -575,6 +575,8 @@ RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
 CONTENTS_W = 300     # requested width of the open-folder pane beside the folder list; it grows with the column
 STRIP_TILE_MIN = 96  # a tile never shrinks below this: the row count follows the width, the tile follows the row
 FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
+FOLDER_DISTINCT = 8  # how many of 64 difference-hash bits count as a visibly different picture on a tile
+FOLDER_COLOUR = 24   # or a channel shift of this much between two quadrants: dHash alone cannot see colour
 BATCH_TILES = 21     # strip pictures added per scroll to the bottom
 BATCH_FOLDERS = 12   # folder tiles added per scroll
 BATCH_CONTENTS = 24  # pictures added per scroll inside the open folder
@@ -1493,7 +1495,10 @@ class App:
         self._shown = RECENT_N            # how many strip pictures are on screen (grows as you scroll)
         self._folder_shown = BATCH_FOLDERS
         self._content_shown = BATCH_CONTENTS
-        self._sheets = {}                 # folder label -> composed 3x3 contact sheet
+        self._sheets = {}                 # memo for composed contact sheets, keyed by the pictures in them
+        self._hashes = {}                 # path -> 64-bit difference hash of its thumbnail (None when unreadable)
+        self._heads = {}                  # folder -> the four pictures its tile shows
+        self.sheets_all_alike = 0         # folders that could not produce four visibly different pictures
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
         self._all_widgets = {}            # same, for the "More..." window
@@ -1707,23 +1712,11 @@ class App:
         self.clip_row.columnconfigure(1, weight=2)
         self.motion_var = tk.StringVar(value=str(self._settings.get('motion') or DEFAULT_MOTION))
         self.motion_entry = ttk.Entry(self.clip_row, textvariable=self.motion_var)
+        ttk.Label(self.clip_row, text='motion', foreground=self.theme.muted).grid(row=0, column=0, sticky='w')
         self.motion_entry.grid(row=0, column=1, sticky='ew', padx=(3, 3))
         self._tip(self.motion_entry, 'Motion for a clip only: what should happen between the frames. '
                                      'The prompt above describes the still and is not sent with a clip.')
         self.clip_row.columnconfigure(1, weight=1)
-        self.clip_btn = ActionButton(self.clip_row, text='\u25b6 Make clip (2 s)', command=self.make_clip,
-                                     font=('Segoe UI', 11), bg='#3f4f63', fg='white',
-                                     activebackground='#33404f', activeforeground='white',
-                                     disabledforeground='#c9d2de', relief='flat', bd=0,
-                                     height=1, cursor='hand2', takefocus=True)
-        self.clip_btn.grid(row=0, column=2, sticky='ew', padx=(3, 3))
-        self.clip_open_btn = ActionButton(self.clip_row, text='Open clip\u2026', command=self.open_last_clip,
-                                          font=('Segoe UI', 11), bg='#7a8699', fg='white',
-                                          activebackground='#68748a', activeforeground='white',
-                                          disabledforeground='#d5dae2', relief='flat', bd=0,
-                                          height=1, cursor='hand2', takefocus=True)
-        self.clip_open_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
-        self.clip_open_btn.state(['disabled'])
         self._last_clip = None
 
         self.gen_btn = ActionButton(left, text='\u26a1 Generate', command=self.generate,
@@ -1824,8 +1817,13 @@ class App:
         self.canvas.bind('<Button-1>', self._on_canvas_click)
         self.canvas.bind('<B1-Motion>', self._on_crop_drag, add='+')
         self.canvas.bind('<ButtonRelease-1>', self._on_crop_release)
+        # what the picture is, directly under it in the same column: pixels, bytes, seed, steps, then model and date.
+        # 'always' means always - it sits under the picture, not tucked at the end of a row of buttons
+        self.res_label = ttk.Label(right, text='', foreground=self.theme.muted, font=('Segoe UI', 8),
+                                   anchor='e', justify='right')
+        self.res_label.grid(row=1, column=0, sticky='e', pady=(2, 0))
         tools = ttk.Frame(right)
-        tools.grid(row=1, column=0, sticky='ew', pady=(6, 0))
+        tools.grid(row=2, column=0, sticky='ew', pady=(6, 0))
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
         self.copy_btn.pack(side='left')
         self.info_btn = ttk.Button(tools, text='\u24d8 metadata\u2026', command=self.show_metadata, state='disabled')
@@ -1834,15 +1832,29 @@ class App:
         self.graph_btn.pack(side='left', padx=(6, 0))
         self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
         self.describe_btn.pack(side='left', padx=(6, 0))
-        # what the picture actually is: pixels, bytes on disk, the seed - at the end of the tools row, where it lines up
-        # with the picture rather than competing for a grid cell (row 1 already belongs to this row of controls)
-        self.res_label = ttk.Label(tools, text='', foreground=self.theme.muted, font=('Segoe UI', 8), anchor='e')
-        self.res_label.pack(side='right')
         self.copy_status = ttk.Label(tools, text='', foreground=self.theme.muted)
         self.copy_status.pack(side='left', padx=(8, 0))
         # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
+        # the clip controls sit at the bottom of the picture column, where the picture they act on is: Make clip first,
+        # then Open clip - the order the work happens in
+        self.clip_actions = ttk.Frame(right)
+        self.clip_actions.grid(row=4, column=0, sticky='ew', pady=(6, 0))
+        self.clip_btn = ActionButton(self.clip_actions, text='\u25b6 Make clip (2 s)', command=self.make_clip,
+                                     font=('Segoe UI', 11), bg='#3f4f63', fg='white',
+                                     activebackground='#33404f', activeforeground='white',
+                                     disabledforeground='#c9d2de', relief='flat', bd=0,
+                                     height=1, cursor='hand2', takefocus=True)
+        self.clip_btn.pack(side='left', fill='x', expand=True)
+        self.clip_open_btn = ActionButton(self.clip_actions, text='Open clip\u2026', command=self.open_last_clip,
+                                          font=('Segoe UI', 11), bg='#7a8699', fg='white',
+                                          activebackground='#68748a', activeforeground='white',
+                                          disabledforeground='#d5dae2', relief='flat', bd=0,
+                                          height=1, cursor='hand2', takefocus=True)
+        self.clip_open_btn.pack(side='left', fill='x', expand=True, padx=(6, 0))
+        self.clip_open_btn.state(['disabled'])
+
         self.actions = ttk.Frame(right)
-        self.actions.grid(row=2, column=0, sticky='ew', pady=(6, 0))
+        self.actions.grid(row=3, column=0, sticky='ew', pady=(6, 0))
         act1 = ttk.Frame(self.actions)
         act1.pack(fill='x')
         self.vary_btn = ttk.Button(act1, text='Vary', command=lambda: self.vary('vary'), state='disabled')
@@ -2891,15 +2903,91 @@ class App:
         return (bool(self._plan)
                 and not self.search_var.get().strip() and not self.starred_only.get())
 
+    def _signature(self, path):
+        """What makes two pictures different on a tile: the shape of their gradients *and* their colours.
+
+        A difference hash alone was not enough, and the test proved it: four pictures in four different colours hashed
+        identically, because a dHash compares neighbours and ignores absolute level. Collage and colour are both cheap, so
+        both are kept - and the colour part is what tells a red render from a green one.
+        """
+        if path in self._hashes:
+            return self._hashes[path]
+        value = None
+        thumb = thumbs_for([path]).get(path)
+        if thumb:
+            try:
+                from PIL import Image as _I
+                with _I.open(thumb) as im:
+                    small = im.convert('RGB').resize((16, 16), _I.LANCZOS)
+                    grey = small.convert('L').resize((9, 8), _I.LANCZOS)
+                pixels = grey.tobytes()
+                bits = 0
+                for y in range(8):
+                    for x in range(8):
+                        bits = (bits << 1) | (1 if pixels[y * 9 + x] > pixels[y * 9 + x + 1] else 0)
+                # four quadrant means, quantised: enough to separate a palette shift without being fooled by noise
+                quadrants = []
+                raw = small.tobytes()
+                for qy in (0, 8):
+                    for qx in (0, 8):
+                        total = [0, 0, 0]
+                        for y in range(qy, qy + 8):
+                            for x in range(qx, qx + 8):
+                                at = (y * 16 + x) * 3
+                                for c in range(3):
+                                    total[c] += raw[at + c]
+                        quadrants.append(tuple(total[c] // 64 for c in range(3)))
+                value = (bits, tuple(quadrants))
+            except Exception:
+                value = None
+        self._hashes[path] = value
+        return value
+
+    def _different(self, a, b):
+        """Are two signatures different enough to sit side by side on one tile?"""
+        if a is None or b is None:
+            return True                       # an unreadable thumbnail must not block the tile
+        grey_bits = bin(a[0] ^ b[0]).count('1')
+        colour_delta = max(max(abs(x - y) for x, y in zip(qa, qb)) for qa, qb in zip(a[1], b[1]))
+        return grey_bits >= FOLDER_DISTINCT or colour_delta >= FOLDER_COLOUR
+
+    def _sheet_paths(self, group):
+        """The four pictures a folder's tile shows: the newest four that are visibly different from each other.
+
+        Newest rather than oldest because a tile summarises what the folder *is now*; distinct because four variations of
+        one render say nothing. When a folder genuinely holds fewer than four different pictures the newest four are shown
+        anyway and the folder is counted in `sheets_all_alike` - a quiet fallback would hide a real property.
+        Always newest-first, so a tile reads the same way whichever path produced it.
+        """
+        items = group['items']
+        cache_key = (group['label'], len(items), items[-1]['path'] if items else '')
+        cached = self._heads.get(cache_key)
+        if cached is not None:
+            return cached
+        want = FOLDER_CELLS
+        kept, signatures = [], []
+        for row in reversed(items):
+            signature = self._signature(row['path'])
+            if signature is not None and all(self._different(signature, other) for other in signatures):
+                signatures.append(signature)
+                kept.append(row['path'])
+                if len(kept) == want:
+                    break
+        if len(kept) < want:
+            kept = [r['path'] for r in reversed(items[-want:])]
+            self.sheets_all_alike += 1
+        self._heads[cache_key] = kept
+        return kept
+
     def _folder_sheet(self, group, size, gutter=None):
-        """A 2x2 contact sheet of a folder's first four pictures, built from the thumbnail cache.
+        """A 2x2 contact sheet of a folder's newest four distinct pictures, built from the thumbnail cache.
 
         Four rather than nine because the tile has to sit two-up in the first column: a nine-up sheet demanded ~270 px
         and left room for one folder per row. One PhotoImage per folder instead of four keeps a 60-folder view cheap,
         and the sheet is memoised so scrolling or a redraw does not re-compose it.
         """
         from PIL import Image as _I
-        head = tuple(r['path'] for r in group['items'][:FOLDER_CELLS])
+        head = tuple(self._sheet_paths(group))
         key = (group['label'], len(group['items']), size, head, gutter)
         hit = self._sheets.get(key)
         if hit is not None:
@@ -3195,6 +3283,8 @@ class App:
 
     def _refresh_gallery(self, select=None):
         self._scene_cache = {}
+        self._hashes = {}                 # a new or deleted picture invalidates its hash and the heads that used it
+        self._heads = {}
         everything = self._all_files()
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
@@ -4593,7 +4683,18 @@ class App:
             parts.append('seed %s' % meta['seed'])
         if meta.get('steps') is not None:
             parts.append('%s steps' % meta['steps'])
-        self.res_label.configure(text='  \u00b7  '.join(parts))
+        origin = []
+        if meta.get('model'):
+            origin.append(str(meta['model']))
+        created = str(meta.get('created') or '')
+        if created:
+            origin.append(created.replace('T', ' ')[:16])
+        if path is not None and meta.get('scene') is not None:
+            origin.append('scene %s of %s' % (meta['scene'], meta.get('scene_of') or '?'))
+        lines = ['  \u00b7  '.join(parts)]
+        if origin:
+            lines.append('  \u00b7  '.join(origin))
+        self.res_label.configure(text='\n'.join(lines))
 
     def _display_raw(self, raw, path=None):
         self._current = Path(path) if path else None
@@ -5516,9 +5617,12 @@ class App:
         im = self._img.copy()
         im.thumbnail((w, h), Image.LANCZOS)   # never upscales, never overflows the canvas
         self._tk = ImageTk.PhotoImage(im)
-        cx, cy = self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2
-        self._draw = (cx - im.width // 2, cy - im.height // 2, im.width, im.height)
-        self.canvas.create_image(cx, cy, image=self._tk, tags='img')
+        # pinned to the top right: the picture keeps still while the metadata block under it changes, and the eye always
+        # starts in the same place instead of hunting a centred image of a different size
+        margin = 6
+        cx, cy = self.canvas.winfo_width() - margin, margin
+        self._draw = (cx - im.width, cy, im.width, im.height)
+        self.canvas.create_image(cx, cy, anchor='ne', image=self._tk, tags='img')
         self.canvas.tag_raise('paint')       # a repaint must not bury the mask strokes under the picture
         self._draw_compare(im)
 

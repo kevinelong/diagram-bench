@@ -1985,6 +1985,86 @@ def main():
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy()
 
+    print("\n-- the picture is pinned top-right with its metadata under it, and the clip buttons below (2026-10-28)")
+    if app._files:
+        app.select_file(app._files[0]); root.update(); time.sleep(0.25); root.update()
+        box = app.canvas.bbox('img')
+        canvas_w = app.canvas.winfo_width()
+        check('the picture sits at the top right of its column',
+              box is not None and box[2] >= canvas_w - 10 and box[1] <= 10, (box, canvas_w))
+        check('the metadata block lives under the picture, in the same column',
+              app.res_label.winfo_parent() == app.canvas.winfo_parent()
+              and int(app.res_label.grid_info().get('row', -1)) == 1,
+              (app.res_label.winfo_parent(), app.res_label.grid_info().get('row')))
+        text = app.res_label.cget('text')
+        check('and it carries more than one line: the facts, then where they came from',
+              '\n' in text, text)
+        check('the block updates with the selection rather than going stale',
+              str(app._img.size[0]) in text, (app._img.size, text.splitlines()[:1]))
+        clip_row = int(app.clip_actions.grid_info().get('row', -1))
+        check('the clip buttons are at the bottom of that column',
+              app.clip_actions.winfo_parent() == app.canvas.winfo_parent() and clip_row > 0, clip_row)
+        order = [w for w in app.clip_actions.pack_slaves()]
+        check('Make clip comes before Open clip',
+              order and order[0] is app.clip_btn and order[-1] is app.clip_open_btn,
+              [str(w.cget('text')) for w in order])
+        check('and Open clip starts disabled, because there is no clip yet',
+              'disabled' in app.clip_open_btn.state() or app._last_clip is not None, app.clip_open_btn.state())
+
+    print("\n-- a folder tile shows its newest four *distinct* pictures (2026-10-28)")
+    import zimage_ui as _zt
+    _root_tile = tk.Tk()
+    _app_tile = _zt.App(_root_tile, StubEngine(), args)
+    _root_tile.update()
+    _tile_dir = Path(tempfile.mkdtemp(prefix='tile-'))
+
+    def _picture(name, colour, bar=(0, 0), size=(96, 96)):
+        """A picture with a distinctive mark, so its difference hash differs from its neighbours."""
+        img = Image.new('RGB', size, colour)
+        if bar != (0, 0):
+            Image.Image.paste(img, Image.new('RGB', (24, 24), bar), (8, 8))
+        path = _tile_dir / name
+        img.save(path)
+        return str(path)
+
+    distinct_colours = [(200, 30, 30), (30, 200, 30), (30, 30, 200), (210, 210, 30), (40, 210, 210)]
+    paths = []
+    # two older, plainly different pictures
+    paths.append(_picture('a0.png', (240, 240, 240), (10, 10, 10)))
+    paths.append(_picture('a1.png', (10, 10, 10), (240, 240, 240)))
+    # five newest, each a different colour: the tile should take four of these
+    for i, colour in enumerate(distinct_colours):
+        paths.append(_picture('b%d.png' % i, colour, (0, 0, 0)))
+    group = {'label': 'distinct', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in paths]}
+    chosen = _app_tile._sheet_paths(group)
+    check('the tile takes four pictures', len(chosen) == 4, chosen)
+    check('and they are the newest four, not the oldest',
+          chosen == list(reversed(paths[-4:])), (chosen, paths[-4:]))
+    check('the same folder twice reuses the answer', _app_tile._sheet_paths(group) == chosen)
+
+    # a folder of near-copies: five newest frames of one picture, two older different ones
+    near = []
+    near.append(_picture('c0.png', (250, 250, 250), (0, 0, 0)))
+    for i in range(5):
+        near.append(_picture('d%d.png' % i, (120, 120, 120), (121, 121, 121)))   # one pixel of difference
+    near_group = {'label': 'near copies', 'items': [{'path': p, 'prompt': 'p', 'created': ''} for p in near]}
+    before = _app_tile.sheets_all_alike
+    chosen_near = _app_tile._sheet_paths(near_group)
+    check('a folder that cannot give four different pictures still fills four tiles',
+          len(chosen_near) == 4, chosen_near)
+    check('and it falls back to the newest four rather than repeating one', chosen_near == list(reversed(near[-4:])),
+          chosen_near)
+    check('the fallback is counted, not hidden', _app_tile.sheets_all_alike == before + 1,
+          (before, _app_tile.sheets_all_alike))
+
+    # and the sheet that gets composed is keyed by the chosen pictures, so the memo cannot serve a stale one
+    sheet = _app_tile._folder_sheet(group, 128)
+    check('the composed sheet exists', sheet is not None and getattr(sheet, 'width', lambda: 0)() == 128,
+          getattr(sheet, 'width', lambda: -1)())
+    check('its memo key carries the chosen pictures',
+          any(key[3] == tuple(chosen) for key in _app_tile._sheets), list(_app_tile._sheets)[:1])
+    _root_tile.destroy()
+
     print("\n-- a prompt that describes several scenes renders one image per scene (2026-10-28)")
     import zimage_ui as _zs
     _root_sc = tk.Tk()

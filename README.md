@@ -364,6 +364,21 @@ women. Each clothed in three layers" was being scored as three, and contact shee
 being scored as count failures. Both are fixed, and an ambiguous prompt (several different counts stated) now returns
 "not measured" instead of guessing.
 
+## The picture column
+
+The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of
+floating in the middle and shifting as sizes change. Directly under it, right-aligned, is the **metadata block** - always
+there when a picture is selected, two lines:
+
+```
+1024x1024  ·  1.6M  ·  seed 1236  ·  4 steps
+flux2 klein 9b uncensored  ·  2026-10-28 13:25
+```
+
+The facts first, then where they came from (model, date, and the scene number when a picture came from a multi-scene run).
+At the bottom of the same column sit **Make clip** and **Open clip** - in that order, which is the order the work happens
+in, next to the picture they act on rather than in the prompt column.
+
 ## What a "vary" strength actually does
 
 `vary_curve.py` measures it two ways, and the two disagree in an instructive way. The **population** curve - every
