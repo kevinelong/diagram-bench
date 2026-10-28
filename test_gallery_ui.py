@@ -2247,13 +2247,52 @@ def main():
         check('revising dispatches nothing', len(app.engine.calls) == 0, len(app.engine.calls))
         check('the words stay highlighted so the edit is obvious', bool(app.text.tag_ranges('conflict')),
               app.text.tag_ranges('conflict'))
-        try:
-            wants_keyboard = app.root.focus_lastfor()
-        except Exception:
-            wants_keyboard = None
-        check('and the prompt is where the keyboard would go', wants_keyboard is app.text, wants_keyboard)
+        check('and the prompt is where the keyboard was sent', getattr(app, '_focus_target', None) is app.text,
+              getattr(app, '_focus_target', None))
     finally:
         app.ask_style_conflict = real_ask
+
+    # the dialog itself must offer four ways out, not three
+    labels = []
+    real_wait = app.root.wait_window
+
+    def _snapshot(win):
+        def walk(widget):
+            for child in widget.winfo_children():
+                if child.winfo_class() == 'TButton':
+                    labels.append(str(child.cget('text')))
+                walk(child)
+        walk(win)
+        win.destroy()
+
+    app.root.wait_window = _snapshot
+    try:
+        choice = app.ask_style_conflict('cinematic', 'a lighthouse, oil painting', [(14, 26)])
+        check('the dialog offers four choices', len(labels) == 4, labels)
+        check('including clearing the style and proceeding',
+              any('clear style' in label.lower() for label in labels), labels)
+        check('and closing or losing it means revise, not generate', choice == 'revise', choice)
+    finally:
+        app.root.wait_window = real_wait
+
+    # 3b. Clear style and proceed: the prompt keeps its own medium, the suffix goes, the job still dispatches
+    app.style_var.set('cinematic')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse, oil painting, stormy sea')
+    app.engine.calls.clear(); app.busy = False
+    ask = _fake_ask('clear_style'); app.ask_style_conflict = ask
+    try:
+        app.generate(); root.update()
+        check('clearing the style leaves the prompt exactly as typed',
+              app.text.get('1.0', 'end').strip() == 'a lighthouse, oil painting, stormy sea',
+              app.text.get('1.0', 'end').strip())
+        check('and sets the style to none', app.style_var.get() == 'none', app.style_var.get())
+        sent_style = (app.engine.calls[-1][1].get('style') if app.engine.calls else 'nothing')
+        check('the dispatch carries no style suffix', sent_style == 'none', sent_style)
+        check('and the banner shows the style is gone', 'style none' in app.banner['text'], app.banner['text'][:100])
+    finally:
+        app.ask_style_conflict = real_ask
+        app.style_var.set('none')
+        app.busy = False
 
     # 4. no conflict, no dialog
     app.style_var.set('none')

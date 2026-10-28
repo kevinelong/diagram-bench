@@ -426,7 +426,10 @@ If a style is selected and the prompt already names a medium, Generate asks befo
 |---|---|
 | **Remove them and generate** | the ranges are cut, the leftover punctuation tidied, and the job is dispatched |
 | **Keep and generate** | nothing changes and the job is dispatched |
+| **Clear style and proceed** | the prompt keeps its own medium, the style suffix is dropped, and the job is dispatched - the mirror of *Remove*, which keeps the style and cuts the words |
 | **Revise manually** | nothing is dispatched, the highlights stay lit, and the keyboard goes to the prompt |
+
+Closing the dialog (or `WM_DELETE_WINDOW`) means **Revise**: losing a dialog never spends a minute of GPU.
 
 Detection is deliberately narrow: it fires only when a style is set, only on whole words from a fixed list
 (`oil painting`, `watercolour painting`, `painting`, `photograph`, `photo`, `film still`, `film`, `sketch`, `drawing`,

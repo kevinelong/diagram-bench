@@ -3868,6 +3868,19 @@ class App:
         out = re.sub(r',\s*,', ',', out)
         return out.strip(' ,')
 
+    def _focus_prompt(self):
+        """Put the keyboard in the prompt box, and record that as the app's intent.
+
+        `focus_set` is a request: in a window that is not active (a test, a background run) it does nothing observable, so
+        the intent is kept as state too - the honest evidence that "revise manually" really means the prompt.
+        """
+        self._focus_target = getattr(self, 'text', None)
+        try:
+            self.text.focus_set()
+            self.text.mark_set('insert', 'end')
+        except Exception:
+            pass
+
     def ask_style_conflict(self, style_name, prompt, spans):
         """Remove, keep, or stop and edit. Modal: the caller needs the answer before it dispatches."""
         words = sorted({prompt[a:b] for a, b in spans})
@@ -3889,6 +3902,9 @@ class App:
 
         ttk.Button(row, text='Remove them and generate', command=lambda: pick('remove')).pack(side='left')
         ttk.Button(row, text='Keep and generate', command=lambda: pick('keep')).pack(side='left', padx=(6, 0))
+        # the fourth way out: the prompt's own medium wins and the style suffix is dropped, which is the other half of
+        # "remove" - removing the words keeps the style, this keeps the words
+        ttk.Button(row, text='Clear style and proceed', command=lambda: pick('clear_style')).pack(side='left', padx=(6, 0))
         ttk.Button(row, text='Revise manually', command=lambda: pick('revise')).pack(side='left', padx=(6, 0))
         win.protocol('WM_DELETE_WINDOW', lambda: pick('revise'))
         win.grab_set()
@@ -5555,10 +5571,14 @@ class App:
                 style_choice = self.ask_style_conflict(chosen_style, prompt, spans)
                 if style_choice == 'revise':
                     # stop here, leave the words lit, and put the caret where the edit has to happen
-                    self.text.focus_set()
+                    self._focus_prompt()
                     self.hint.configure(text='edit the prompt, then press Generate again')
                     return
                 self._mark_conflicts([])
+                if style_choice == 'clear_style':
+                    if hasattr(self, 'style_var'):
+                        self.style_var.set('none')          # the control and the banner are the receipt; a hint here is
+                                                            # overwritten by Generate's own lines a moment later
                 if style_choice == 'remove':
                     removed = sorted({prompt[a:b] for a, b in spans})
                     prompt = self._strip_spans(prompt, spans)
