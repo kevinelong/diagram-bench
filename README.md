@@ -372,6 +372,21 @@ women. Each clothed in three layers" was being scored as three, and contact shee
 being scored as count failures. Both are fixed, and an ambiguous prompt (several different counts stated) now returns
 "not measured" instead of guessing.
 
+## What ALL does to the base and the strength
+
+Measured rather than assumed: with a base armed and strength 0.62, **both** models in the sweep received `base_path` and
+`denoise=0.62` - one image each at its own ceiling (turbo 9 steps, klein 4), the same edit parameters. The banner says so
+now (`ALL · … · EDIT base.png at 0.62`), because it used to describe a plain text sweep while doing an edit.
+
+ALL also can no longer dodge the style question: the sweep runs **after** the style/medium guard, so a prompt that names
+"oil painting" while *cinematic* is selected asks Remove / Keep / Revise before the first model is dispatched - and
+Revise starts no sweep at all.
+
+**The strength readout is derived from the slider, not typed.** It was created with the literal string `0.60` and only
+refreshed by a change trace, so at startup the label said 0.60 while Generate used the real value (0.70, the measured pose
+threshold for klein). One number a user reads before pressing a button that spends a minute was wrong; the label is now
+`'%.2f' % denoise.get()` at creation and on every change.
+
 ## A style and a medium in the prompt
 
 If a style is selected and the prompt already names a medium, Generate asks before sending both. The words are

@@ -1716,7 +1716,10 @@ class App:
         self.denoise = tk.DoubleVar(value=float(self._settings.get('denoise') or 0.70))
         self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130)
         self.strength_scale.pack(side='left', padx=4)
-        self.denoise_text = ttk.Label(self.base_row, text='0.60')
+        # The readout must be *derived* from the variable. It was created with the literal string '0.60' and only
+        # refreshed by a trace, and a trace fires on changes: nothing changed at startup, so the label said 0.60 while
+        # Generate used the real value (0.70) - the one number a user reads before pressing a button that spends a minute.
+        self.denoise_text = ttk.Label(self.base_row, text='%.2f' % self.denoise.get())
         self.denoise_text.pack(side='left')
         self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
 
@@ -5215,13 +5218,17 @@ class App:
             plan = zg.all_plan()
             peaks = [estimate_vram(name, 1, size)[0] or 0 for name, _steps, size in plan]
             peak = max(peaks) if peaks else 0
+            # the sweep honours the base and the strength too (measured: both models get the same base_path and denoise),
+            # so the banner has to say so - an "EDIT" that reads as a plain text sweep is the misleading version
+            edit = ('  ·  EDIT %s at %.2f' % (self._short_name(self.base_path.name), self.denoise.get())
+                    if self.base_path is not None else '')
             self.banner.configure(
-                text='ALL  ·  %s  ·  one image each at their ceiling, %d px  ·  style %s   ·   '
+                text='ALL  ·  %s  ·  one image each at their ceiling, %d px%s  ·  style %s   ·   '
                      'VRAM ≈ %.1f/%.1f GiB (peak of one model, not the sum)%s'
                      % (' + '.join('%s %d steps' % (name, steps) for name, steps, _s in plan),
-                        zg.QUALITY_SIZE, style, peak / 1024.0, VRAM_TOTAL_MIB / 1024.0,
+                        zg.QUALITY_SIZE, edit, style, peak / 1024.0, VRAM_TOTAL_MIB / 1024.0,
                         '' if all(peaks) else '   ·   1024 px is unmeasured for at least one model'),
-                foreground=colour)
+                foreground=self.theme.accent if self.base_path is not None else colour)
             return
         try:
             vram, _src = estimate_vram(model, n, int(self.size_var.get() or 0) or 512)
@@ -5468,10 +5475,6 @@ class App:
         """
         if self.busy:
             return
-        if _profile is None and getattr(self, 'model_var', None) is not None \
-                and self.model_var.get() == zg.ALL_MODEL:
-            self._start_all()
-            return
         prompt = (_prompt if _prompt is not None else self.text.get('1.0', 'end')).strip()
         if not prompt:
             self.hint.configure(text='enter a prompt first')
@@ -5511,6 +5514,12 @@ class App:
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', prompt)
                     self.hint.configure(text='removed %s from the prompt' % ', '.join(removed))
+
+        # ALL is a sweep of models, not of scenes: it runs after the style question has been answered, and never splits
+        if _profile is None and getattr(self, 'model_var', None) is not None \
+                and self.model_var.get() == zg.ALL_MODEL:
+            self._start_all()
+            return
 
         # the action follows the selection: a painted mask means fill, any pad means expand
         mask_path, outpaint = None, None

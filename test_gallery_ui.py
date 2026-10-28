@@ -2016,6 +2016,64 @@ def main():
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy(); tk._default_root = root
 
+    print("\n-- the strength readout is the value Generate will use (2026-10-28)")
+    app.denoise.set(0.70); root.update()
+    check('the label follows the slider', app.denoise_text.cget('text') == '0.70', app.denoise_text.cget('text'))
+    app.denoise.set(0.6); root.update(); time.sleep(0.05); root.update()
+    check('including a value set in code', app.denoise_text.cget('text') == '0.60', app.denoise_text.cget('text'))
+    check('and it is two decimals, not a raw float', len(app.denoise_text.cget('text')) == 4,
+          app.denoise_text.cget('text'))
+    app.denoise.set(0.70); root.update()
+
+    print("\n-- ALL honours the base and the strength, and says so (2026-10-28)")
+    base_png = Path(tempfile.mkdtemp(prefix='allbase-')) / 'base.png'
+    Image.new('RGB', (256, 256), (60, 90, 120)).save(base_png)
+    base_png.with_suffix('.json').write_text(json.dumps({'prompt': 'a base', 'seed': 1,
+                                                         'created': '2026-10-28T10:00:00'}), encoding='utf-8')
+    app.base_path = base_png
+    app.denoise.set(0.62)
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse on a coast')
+    app.model_var.set(zui.zg.ALL_MODEL); app._on_model_change(); root.update()
+    app._update_banner()
+    check('the ALL banner says it is editing the base, at the strength set',
+          'EDIT' in app.banner['text'] and '0.62' in app.banner['text'], app.banner['text'][:120])
+    app.engine.calls.clear(); app.busy = False
+    app.generate(); root.update()
+    guard = 0
+    while getattr(app, '_all_queue', None) and guard < 6:
+        app.busy = False; app._run_next_all(); root.update(); guard += 1
+    check('the sweep dispatched one job per model', len(app.engine.calls) == 2, len(app.engine.calls))
+    passes = [(Path(k.get('base_path') or '').name, round(k.get('denoise') or 0, 2)) for _a, k in app.engine.calls]
+    check('every model got the base', all(name == 'base.png' for name, _d in passes), passes)
+    check('and the strength that was set', all(d == 0.62 for _n, d in passes), passes)
+    check('each at its own ceiling, not the sweep driving one model twice',
+          sorted(k.get('profile') for _a, k in app.engine.calls) == sorted([p for p in zui.zg.ALL_ORDER]), 
+          [k.get('profile') for _a, k in app.engine.calls])
+    app.base_path = None; app.denoise.set(0.35); app._update_banner()
+    check('with no base the banner does not claim an edit', 'EDIT' not in app.banner['text'], app.banner['text'][:80])
+
+    # and ALL cannot dodge the style question: it asks before the first model is dispatched
+    app.style_var.set('cinematic')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a lighthouse, oil painting')
+    app.model_var.set(zui.zg.ALL_MODEL); app._on_model_change(); root.update()
+    asked = []
+    real_ask = app.ask_style_conflict
+    app.ask_style_conflict = lambda style, prompt, spans: (asked.append((style, [prompt[a:b] for a, b in spans])), 'revise')[1]
+    app.engine.calls.clear(); app.busy = False
+    try:
+        app.generate(); root.update()
+        check('ALL asks about the style before sweeping', asked and asked[0][1] == ['oil painting'], asked)
+        check('choosing Revise starts no sweep at all',
+              not getattr(app, '_all_queue', None) and len(app.engine.calls) == 0,
+              (getattr(app, '_all_queue', None), len(app.engine.calls)))
+    finally:
+        app.ask_style_conflict = real_ask
+        app.style_var.set('none')
+        app._all_queue = None
+        app.busy = False
+        # put the picker back where it was: a sweep left set would send the next block's Generate down the ALL path
+        app.model_var.set('z-image turbo'); app._on_model_change(); root.update()
+
     print("\n-- a style and a medium in the prompt are reconciled before Generate sends both (2026-10-28)")
     app.style_var.set('cinematic')
     app.text.delete('1.0', 'end')
