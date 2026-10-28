@@ -932,7 +932,17 @@ class Engine:
         return path
 
 
-STARTER_PROMPTS = [('icon', 'flat vector icon of a fox, simple shapes, white background'), ('diagram', 'clean flowchart: START, VALIDATE, STORE, DONE - vertical, thin black lines, white background'), ('photo', 'photo of a ceramic mug on a wooden table, soft window light')]
+STARTER_PROMPTS = [
+    ('icon', 'flat vector icon of a fox, simple shapes, white background'),
+    ('diagram', 'clean flowchart: START, VALIDATE, STORE, DONE - vertical, thin black lines, white background'),
+    ('photo', 'photo of a ceramic mug on a wooden table, soft window light'),
+    # A figure rebuilt from blocks. "Mannequinization", "construction" and "structural breakdown" are studio words a
+    # 77-token encoder has never seen; what it can draw is the nouns: mannequin, boxes, cylinders, joints, no shading.
+    ('mannequin', "an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere "
+                  "joints, unshaded, plain grey background"),
+    ('construction', 'thin construction lines over the figure: centre line, a box around the ribcage, cylinders on the '
+                     'limbs, white background, black line only'),
+]
 
 
 class ActionButton(tk.Button):

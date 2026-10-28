@@ -449,6 +449,26 @@ Recycle Bin · Ctrl+A selects all"* - instead of `ctrl+click adds · shift range
 The fold is a *visibility* group rather than a new parent: the widgets are the same ones the tests and the keyboard already
 use, so nothing about their behaviour changes when the panel is closed.
 
+## Prompting a figure into construction forms (mannequinization)
+
+The studio vocabulary - *mannequinization, construction, structural breakdown, form blocking* - names a **process**. Our
+models have a 77-token encoder and no drawing pedagogy in it. What they can draw is the **objects** the process leaves
+behind, so the prompt describes the picture, not the method:
+
+| pass | prompt (now a starter in the app) | base | strength |
+|---|---|---|---|
+| 1. mannequin | *an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere joints, unshaded, plain grey background* | the photo | **0.72–0.80** on klein (its measured pose threshold is 0.70), 0.72–0.85 on turbo |
+| 2. construction | *thin construction lines over the figure: centre line, a box around the ribcage, cylinders on the limbs, white background, black line only* | pass 1 | **0.55–0.65**, style `diagram` |
+
+Why those strengths, from the measured curve: 0.40 and 0.55 are near-copies (36 % and 51 % of an unrelated pair's
+difference), 0.65–0.72 is the first band that really redraws (83–99 %), 0.84 and above has already left the source
+(156 %), and past 0.90 the pose drifts. Two passes beat one because a single pass at 0.8 tends to produce a *sculpted
+mannequin* rather than *drawn* construction marks.
+
+What will not work, measured: counting the forms ("three blocks") rather than naming them; a prompt past ~50 words, because
+the encoder truncates the tail - where the negatives usually are, so put those in the **negative** field; steps above the
+ceiling; and asking for "mannequinization" with no object in the sentence.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of
