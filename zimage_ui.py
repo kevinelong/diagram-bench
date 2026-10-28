@@ -1399,15 +1399,20 @@ class App:
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
         # the pane is a second column of pictures: give it the column's spare width instead of a fixed 236 px
         gal.columnconfigure(2, weight=1)
+        # The folder's own name at the top of its column. The pane had no identity at all: a folder was recognisable
+        # only by the truncated label back in the first column, so nothing on screen said which folder you were in.
+        self.contents_title = ttk.Label(self.contents_holder, text='', anchor='w', justify='left',
+                                        wraplength=CONTENTS_W)
+        self.contents_title.grid(row=0, column=0, columnspan=2, sticky='we', pady=(0, 4))
         self.contents_canvas = tk.Canvas(self.contents_holder, highlightthickness=0, borderwidth=0,
                                          background=plate, width=CONTENTS_W)
-        self.contents_canvas.grid(row=0, column=0, sticky='nsew')
+        self.contents_canvas.grid(row=1, column=0, sticky='nsew')
         self.contents_bar = ttk.Scrollbar(self.contents_holder, orient='vertical',
                                           command=self.contents_canvas.yview)
-        self.contents_bar.grid(row=0, column=1, sticky='ns')
+        self.contents_bar.grid(row=1, column=1, sticky='ns')
         # the pane must stretch with the row, not sit at the canvas's requested 7 cm height (the folder list did, and
         # the pictures were clipped to a two-row band under a much taller column)
-        self.contents_holder.rowconfigure(0, weight=1)
+        self.contents_holder.rowconfigure(1, weight=1)
         self.contents_holder.columnconfigure(0, weight=1)
         self.contents_canvas.configure(yscrollcommand=self.contents_bar.set)
         self.contents_canvas.configure(takefocus=1)
@@ -2866,6 +2871,13 @@ class App:
             # lands. The plan hands members over oldest-first so the folder order stays stable; the pane re-sorts them.
             items.sort(key=lambda r: r.get('created') or '', reverse=True)
         self._content_items = items
+        # the caption says which folder this is and how much is in it, so the column identifies itself
+        title = (group.get('title') or group.get('label') or '').strip()
+        total = len(items)
+        caption = '%s  -  %d picture%s' % (title, total, '' if total == 1 else 's')
+        if fresh_rows:
+            caption += ', %d new' % len(fresh_rows)
+        self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
         if self._sort_wins():
             import pair_rank
             order = pair_rank.sort_by_wins([r['path'] for r in items])

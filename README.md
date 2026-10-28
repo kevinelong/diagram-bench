@@ -444,6 +444,10 @@ cosine **0.208** - 0.008 over the bar - while its true home scored **1.000**. Th
 the argmax over all folders: that render now appears only in its own folder (1.000), and the folder it had been
 mislabelled under no longer shows it.
 
+**The open folder's column names itself.** The header carries the folder's full title, wrapped, then the count
+(`- 11 pictures`, plus `N new` for pictures the live view is offering), on the theme's text colour above the tile grid -
+so a folder is identifiable from the pane itself, not only from a truncated label back in the first column.
+
 **A folder is read newest-first.** The plan hands members over oldest-first so the folder order stays stable; the pane
 re-sorts them newest-first, which is also where a fresh render lands.
 

@@ -1839,8 +1839,13 @@ def main():
         check('and the three of them fill the pane rather than a band of it',
               cell_w * 3 >= pane_w - 24, (cell_w, pane_w))
     check('the pane is as tall as the column, not a band under it',
-          app.contents_canvas.winfo_height() >= app.gal_canvas.winfo_height() - 2,
-          (app.contents_canvas.winfo_height(), app.gal_canvas.winfo_height()))
+          app.contents_holder.winfo_height() >= app.gal_canvas.winfo_height() - 12,
+          (app.contents_holder.winfo_height(), app.gal_canvas.winfo_height()))
+    check('and its pictures fill everything below the folder name',
+          app.contents_canvas.winfo_height()
+          >= app.contents_holder.winfo_height() - app.contents_title.winfo_height() - 12,
+          (app.contents_canvas.winfo_height(), app.contents_holder.winfo_height(),
+           app.contents_title.winfo_height()))
     app.select_folder(None); root.update()
 
     print('\n-- a scrolling grid grows its tiles with the window instead of adding columns forever')
@@ -1952,6 +1957,19 @@ def main():
     check('and the seed it was made with', 'seed' in text, text)
     check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
+
+    print("\n-- the open folder's column says which folder it is (2026-10-28)")
+    if app._plan and app._plan['groups']:
+        app.select_folder(0); root.update(); time.sleep(0.1); root.update()
+        caption = app.contents_title.cget('text') or ''
+        grp = app._plan['groups'][0]
+        want = (grp.get('title') or grp.get('label') or '').strip()
+        check('the pane header is shown', bool(app.contents_title.winfo_ismapped()), app.contents_title.winfo_ismapped())
+        check('it names the folder', bool(want) and want[:24] in caption, (want[:24], caption[:60]))
+        check('and says how many pictures are in it', str(len(grp['items'])) in caption, caption)
+        check('it is not a blank or empty label', len(caption) > 10, repr(caption))
+        app.select_folder(None); root.update()
+        check('no folder open means no header', not app.contents_holder.winfo_ismapped())
 
     print("\n-- a folder is read newest-first (2026-10-28)")
     if app._plan and app._plan['groups']:
