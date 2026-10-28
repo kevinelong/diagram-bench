@@ -449,25 +449,30 @@ Recycle Bin · Ctrl+A selects all"* - instead of `ctrl+click adds · shift range
 The fold is a *visibility* group rather than a new parent: the widgets are the same ones the tests and the keyboard already
 use, so nothing about their behaviour changes when the panel is closed.
 
-## Prompting a figure into construction forms (mannequinization)
+## Prompting a figure into construction forms (mannequinization) - measured
 
-The studio vocabulary - *mannequinization, construction, structural breakdown, form blocking* - names a **process**. Our
-models have a 77-token encoder and no drawing pedagogy in it. What they can draw is the **objects** the process leaves
-behind, so the prompt describes the picture, not the method:
+*Mannequinization, construction, structural breakdown, form blocking* name a **process**. The models have a 77-token
+encoder and no drawing pedagogy in it. Measured on one seated figure, both models, strength 0.72, seed 4242, one question
+per artefact (`CONSTRUCTION-PROMPTS-2026-10-28.md` has the whole table):
 
-| pass | prompt (now a starter in the app) | base | strength |
-|---|---|---|---|
-| 1. mannequin | *an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere joints, unshaded, plain grey background* | the photo | **0.72–0.80** on klein (its measured pose threshold is 0.70), 0.72–0.85 on turbo |
-| 2. construction | *thin construction lines over the figure: centre line, a box around the ribcage, cylinders on the limbs, white background, black line only* | pass 1 | **0.55–0.65**, style `diagram` |
+| prompt shape | reads as blocks | reads as a drawing |
+|---|---|---|
+| *mannequinization: structural breakdown and form blocking into simple volumes* | **0 / 2** | 0 / 2 |
+| *a figure reduced to simple 3D blocks ... soft grey clay* | 1 / 2 | 0 / 2 |
+| *thin construction lines over the figure: centre line, box around the ribcage, cylinders on the limbs* | 0 / 2 | **2 / 2** |
+| *an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere joints, unshaded* | **2 / 2** | 0 / 2 |
 
-Why those strengths, from the measured curve: 0.40 and 0.55 are near-copies (36 % and 51 % of an unrelated pair's
-difference), 0.65–0.72 is the first band that really redraws (83–99 %), 0.84 and above has already left the source
-(156 %), and past 0.90 the pose drifts. Two passes beat one because a single pass at 0.8 tends to produce a *sculpted
-mannequin* rather than *drawn* construction marks.
+So the two starters in the app are the two winners: `mannequin` (blocks, 0.72-0.80) and `construction` (a line drawing
+with construction marks, 0.72, works in one pass on both models). Two findings worth keeping:
 
-What will not work, measured: counting the forms ("three blocks") rather than naming them; a prompt past ~50 words, because
-the encoder truncates the tail - where the negatives usually are, so put those in the **negative** field; steps above the
-ceiling; and asking for "mannequinization" with no object in the sentence.
+- **Pedagogy half-lands.** Turbo's answer to the art-school prompt was a *plaster mannequin still wearing the dress*: the
+  word's morpheme fetched a mannequin object, while "breakdown into simple volumes" did nothing. A noun can be fetched; a
+  decomposition cannot.
+- **The question decides the winner.** The blocks question scores the best construction *drawing* as a failure, because a
+  planning underdrawing keeps anatomy. Ask the question that matches the artefact wanted.
+
+Wooden is more robust than "soft clay" (the clay lost on turbo to a sculpted ribcage), and in-prompt negatives bought
+nothing - put exclusions in the negative field. Reproduce with `python tools/construction_trial.py`.
 
 ## The picture column
 
