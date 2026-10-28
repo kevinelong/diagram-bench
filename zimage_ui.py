@@ -330,6 +330,14 @@ class Theme:
             except Exception:
                 pass
         self.titlebar()
+        try:
+            # one style for the column's controls: 10 pt with real padding. The room comes from folding the options away.
+            style = ttk.Style()
+            style.configure('Big.TButton', padding=(8, 6), font=('Segoe UI', 10))
+            style.configure('Big.TCheckbutton', font=('Segoe UI', 10))
+            style.configure('Big.TCombobox', padding=(4, 4), font=('Segoe UI', 10))
+        except Exception:
+            pass
 
     def titlebar(self, window=None):
         """Ask for the Win32 caption now, and again once the window has a frame.
@@ -1418,17 +1426,23 @@ class App:
         self.title_row.grid(row=0, column=0, columnspan=2, sticky='ew')
         self.gal_title = ttk.Label(self.title_row, text='Recent (%d)' % RECENT_N)
         self.gal_title.pack(side='left')
-        self.search_box = ttk.Entry(gal, textvariable=self.search_var, width=16)
+        self.search_box = ttk.Entry(gal, textvariable=self.search_var, width=16, font=('Segoe UI', 10))
         self._tip(self.search_box, 'Search file names, prompts, styles, models, seeds and steps.')
         self.search_box.grid(row=1, column=0, sticky='ew', pady=(3, 0))
         self.search_box.bind('<KeyRelease>', self._on_search_typing)
-        self.starred_chk = ttk.Checkbutton(gal, text='\u2605 only', variable=self.starred_only,
-                                           command=self.refresh_gallery)
+        self.starred_chk = ttk.Checkbutton(gal, text='starred only', variable=self.starred_only,
+                                           command=self.refresh_gallery, style='Big.TCheckbutton')
         self.starred_chk.grid(row=1, column=1, sticky='w', pady=(3, 0))
 
         self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
-                                         command=self.toggle_groups)
+                                         command=self.toggle_groups, style='Big.TCheckbutton')
         self.group_chk.pack(side='left', padx=(8, 0))
+        # Everything above the strip except this first line folds away: it is configuration, not the work. Folding it by
+        # default is what pays for the bigger controls inside it.
+        self._options_shown = False
+        self.options_btn = ttk.Button(self.title_row, text='\u25b8 options', width=11,
+                                      command=self.toggle_options, style='Big.TButton')
+        self.options_btn.pack(side='right')
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = ttk.Frame(gal)
         holder.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
@@ -1506,53 +1520,59 @@ class App:
         self._anchor = None               # shift-click range starts here
         self._nav_cur = None              # the cell the arrow keys are on: a Path in the strip, a folder index in folders
 
-        btns = ttk.Frame(gal)
+        btns = self.btns = ttk.Frame(gal)
         btns.grid(row=3, column=0, columnspan=2, sticky='ew')     # above the strip: buttons are never clipped
         # Four rows instead of eight full-width ones. The column is barely two folder tiles wide, so one stacked button
         # per action cost ~180 px of picture height for no information; pairing them costs half of that.
         toprow = ttk.Frame(btns)
         toprow.pack(fill='x')
-        self.more_btn = ttk.Button(toprow, text='View All\u2026', command=self.open_all)
+        self.more_btn = ttk.Button(toprow, text='View all pictures\u2026', command=self.open_all, style='Big.TButton')
         self.more_btn.pack(side='left', fill='x', expand=True)
-        self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked)
+        self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked, style='Big.TButton')
         self.folders_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
 
         toolrow = ttk.Frame(btns)
         toolrow.pack(fill='x', pady=(3, 0))
-        self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery)
+        self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery,
+                                      style='Big.TButton')
         self.refresh_btn.pack(side='left')
-        self.log_btn = ttk.Button(toolrow, text='Run log\u2026', command=self.show_run_log)
+        self.log_btn = ttk.Button(toolrow, text='Session log\u2026', command=self.show_run_log, style='Big.TButton')
         self.log_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.folder_btn = ttk.Button(toolrow, text='Open dir\u2026', command=self.open_folder)
+        self.folder_btn = ttk.Button(toolrow, text='Open pictures folder\u2026', command=self.open_folder,
+                                     style='Big.TButton')
         self.folder_btn.pack(side='left', fill='x', expand=True)
-        self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False))
+        self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False),
+                                       style='Big.TButton')
         self.collapse_btn.pack(side='left', padx=(3, 0))
 
         selrow = ttk.Frame(btns)
         selrow.pack(fill='x', pady=(3, 0))
-        ttk.Label(selrow, text='order', foreground=self.theme.muted).pack(side='left')
+        ttk.Label(selrow, text='sort by', foreground=self.theme.muted, font=('Segoe UI', 10)).pack(side='left')
         # wins travel with the picture, so "Wins" is a stable order across folders and restarts
         self.sort_var = tk.StringVar(value='Recent')
         # Sequence reads a storyboard in film order (the scene numbers a multi-scene prompt records in its sidecars);
         # it falls back to recency for pictures that have none, so an ordinary gallery is unchanged
         self.sort_cb = ttk.Combobox(selrow, state='readonly', width=8, values=['Recent', 'Wins', 'Sequence'],
-                                    textvariable=self.sort_var)
+                                    textvariable=self.sort_var, style='Big.TCombobox')
         self.sort_cb.pack(side='left', padx=(3, 0))
         self.sort_cb.bind('<<ComboboxSelected>>', lambda e: self._resort())
-        self.star_btn = ttk.Button(selrow, text='\u2605', width=3, command=self.toggle_star)
+        self.star_btn = ttk.Button(selrow, text='\u2605', width=3, command=self.toggle_star, style='Big.TButton')
         self.star_btn.pack(side='left', padx=(3, 0))
-        self.sel_all_btn = ttk.Button(selrow, text='All', width=4, command=self.select_all)
+        self.sel_all_btn = ttk.Button(selrow, text='Select all', width=9, command=self.select_all, style='Big.TButton')
         self.sel_all_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.del_btn = ttk.Button(selrow, text='Delete\u2026', command=self.delete_selected, state='disabled')
+        self.del_btn = ttk.Button(selrow, text='Delete\u2026', command=self.delete_selected, state='disabled',
+                                  style='Big.TButton')
         self.del_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
 
         self.sel_label = ttk.Label(btns, text='', foreground=self.theme.accent)
         self.sel_label.pack(anchor='w', pady=(2, 0))
-        self.hint_label = ttk.Label(btns, text='ctrl+click adds \u00b7 shift ranges \u00b7 Del \u00b7 Ctrl+A',
-                                    foreground=self.theme.muted, font=('Segoe UI', 8), justify='left')
+        self.hint_label = ttk.Label(btns, text='Ctrl+click adds to the selection \u00b7 Shift+click selects a range\n'
+                                               'Delete sends pictures to the Recycle Bin \u00b7 Ctrl+A selects all',
+                                    foreground=self.theme.muted, font=('Segoe UI', 9), justify='left')
         self.hint_label.pack(anchor='w')
         gal.rowconfigure(3, weight=0)   # the buttons, fixed height
         gal.rowconfigure(4, weight=1)   # the strip takes whatever is left
+        self.toggle_options(False)      # the column opens folded: the strip gets the room, not the configuration
         self._strip_cols_seen = None
 
         self.rail = ttk.Frame(root, padding=(4, 12, 0, 10))
@@ -2812,6 +2832,33 @@ class App:
                 pass
         self.root.after_idle(restore)
 
+    def toggle_options(self, force=None):
+        """Fold the column's configuration away, or bring it back.
+
+        The first line - what the list *is* and the folders switch - stays: it answers "what am I looking at" rather than
+        "how is it configured". Everything else (search, the button rows, the sort row, the hints) is configuration and
+        costs vertical room the pictures want; measured, folding it returns ~150 px to the strip.
+        """
+        show = (not self._options_shown) if force is None else bool(force)
+        self._options_shown = show
+        group = [getattr(self, 'search_box', None), getattr(self, 'starred_chk', None), getattr(self, 'btns', None)]
+        for widget in group:
+            if widget is None or not widget.winfo_exists():
+                continue
+            if show:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        # the folder bar has its own rule: it exists only when a plan does
+        bar = getattr(self, 'folder_bar', None)
+        if bar is not None and bar.winfo_exists():
+            if show and self._plan:
+                bar.grid()
+            else:
+                bar.grid_remove()
+        if hasattr(self, 'options_btn'):
+            self.options_btn.configure(text='\u25be options' if show else '\u25b8 options')
+
     def _sort_wins(self):
         return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'
 
@@ -2842,6 +2889,33 @@ class App:
         numbered = sorted((r for r in rows if r[1]), key=lambda r: (r[1][0], r[1][1], r[2]))
         rest = sorted((r for r in rows if not r[1]), key=lambda r: r[2], reverse=True)
         return [p for p, _scene, _created in numbered + rest]
+
+    def toggle_options(self, force=None):
+        """Fold the column's configuration away, or bring it back.
+
+        The first line - what the list *is* and the folders switch - stays: it answers "what am I looking at" rather than
+        "how is it configured". Everything else (search, the button rows, the sort row, the hints) is configuration and
+        costs vertical room the pictures want; measured, folding it returns ~150 px to the strip.
+        """
+        show = (not self._options_shown) if force is None else bool(force)
+        self._options_shown = show
+        group = [getattr(self, 'search_box', None), getattr(self, 'starred_chk', None), getattr(self, 'btns', None)]
+        for widget in group:
+            if widget is None or not widget.winfo_exists():
+                continue
+            if show:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        # the folder bar has its own rule: it exists only when a plan does
+        bar = getattr(self, 'folder_bar', None)
+        if bar is not None and bar.winfo_exists():
+            if show and self._plan:
+                bar.grid()
+            else:
+                bar.grid_remove()
+        if hasattr(self, 'options_btn'):
+            self.options_btn.configure(text='\u25be options' if show else '\u25b8 options')
 
     def _sort_wins(self):
         return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'

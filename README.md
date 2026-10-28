@@ -364,6 +364,18 @@ women. Each clothed in three layers" was being scored as three, and contact shee
 being scored as count failures. Both are fixed, and an ambiguous prompt (several different counts stated) now returns
 "not measured" instead of guessing.
 
+## The first column: what it is, and how it is set up
+
+The column opens **folded**: the first line says what the list *is* (title, count, the folders switch) and a `▸ options`
+button on that line reveals everything else - the search field, View all pictures, Folders, Session log, Open pictures
+folder, the sort row and the selection hints. Measured, folding returns **~190 px** to the strip (872 -> 680 px at this
+window size), which is then spent on the controls themselves: one `Big.TButton` style at 10 pt with real padding, and
+hints written as sentences - *"Ctrl+click adds to the selection · Shift+click selects a range / Delete sends pictures to the
+Recycle Bin · Ctrl+A selects all"* - instead of `ctrl+click adds · shift ranges · Del · Ctrl+A`.
+
+The fold is a *visibility* group rather than a new parent: the widgets are the same ones the tests and the keyboard already
+use, so nothing about their behaviour changes when the panel is closed.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of

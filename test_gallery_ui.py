@@ -1405,7 +1405,8 @@ def main():
     again[0].destroy(); root.update()
 
     print('\n-- View All: multiselect that cannot close the window under you')
-    check('the button is called View All', 'View All' in str(app.more_btn['text']), str(app.more_btn['text']))
+    # the wording is allowed to get clearer ('View all pictures...'); what must not change is that it opens the view
+    check('the button that opens it exists and says so', 'view all' in str(app.more_btn['text']).lower(), str(app.more_btn['text']))
     app.clear_selection()
     app.clear_base()
     app.open_all()
@@ -1984,6 +1985,40 @@ def main():
     check('the order control offers Sequence', 'Sequence' in list(_app_sq.sort_cb['values']),
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy()
+
+    print("\n-- the column's options fold away, and the pictures get the room (2026-10-28)")
+    app.toggle_options(False); root.update(); time.sleep(0.1); root.update()
+    folded_height = app.gal_canvas.winfo_height()
+    check('the options start folded: the search field is gone',
+          not app.search_box.winfo_ismapped(), app.search_box.winfo_ismapped())
+    check('and so are the button rows', not app.btns.winfo_ismapped())
+    check('the first line stays: what the list is, and the folders switch',
+          app.gal_title.winfo_ismapped() and app.group_chk.winfo_ismapped())
+    check('the disclosure is on that first line', app.options_btn.winfo_ismapped()
+          and app.options_btn.winfo_manager() == 'pack')
+    check('it says the options are closed', '\u25b8' in str(app.options_btn.cget('text')),
+          app.options_btn.cget('text'))
+
+    app.toggle_options(True); root.update(); time.sleep(0.1); root.update()
+    check('opening it shows the search field', app.search_box.winfo_ismapped())
+    check('and the button rows', app.btns.winfo_ismapped())
+    check('and it says they are open', '\u25be' in str(app.options_btn.cget('text')),
+          app.options_btn.cget('text'))
+    open_height = app.gal_canvas.winfo_height()
+    check('folding it really returns room to the pictures', folded_height > open_height,
+          (folded_height, open_height))
+    check('the room returned is worth having: >80 px', folded_height - open_height > 80,
+          folded_height - open_height)
+
+    app.toggle_options(False); root.update(); time.sleep(0.1); root.update()
+    check('closing it folds the options again', not app.search_box.winfo_ismapped())
+    check('the selection buttons still work while folded', app.del_btn.winfo_exists())
+    # the bigger, clearer text the room paid for
+    check('the controls ask for the big style', str(app.more_btn.cget('style')) == 'Big.TButton',
+          app.more_btn.cget('style'))
+    check('and the hints are whole sentences now',
+          'Recycle Bin' in str(app.hint_label.cget('text')) and 'Ctrl+A' in str(app.hint_label.cget('text')),
+          str(app.hint_label.cget('text'))[:60])
 
     print("\n-- the picture is pinned top-right with its metadata under it, and the clip buttons below (2026-10-28)")
     if app._files:
