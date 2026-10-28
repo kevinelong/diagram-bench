@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Android adaptive icon gradient background</title>
+  <desc id="desc">Full-bleed opaque background layer, 108 by 108. No pre-applied launcher mask.</desc>
+  <defs><linearGradient id="background-gradient" gradientUnits="userSpaceOnUse" x1="12.959999999999999" y1="8.64" x2="95.04" y2="99.36"><stop stop-color="#087FA6"/><stop offset=".5" stop-color="#3C5EDB"/><stop offset="1" stop-color="#7543C6"/></linearGradient></defs>
+  <rect width="108" height="108" fill="url(#background-gradient)"/>
+  
+</svg>

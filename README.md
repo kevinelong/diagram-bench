@@ -309,6 +309,17 @@ projects through a fixed **perspective** view (so the fixture fits a homography 
 0.000 px) and it **crops to the drawing's bounds** (so the fixture draws a static border). Details and the three wrong
 first answers are in [PIN-20261021.md](PIN-20261021.md).
 
+## Platform icons
+
+The icon masters are vendored in [`assets/platform-icons/`](assets/platform-icons/) - six editable SVGs (iOS, Android,
+Windows; gradient and black/white), the Android adaptive layers, previews, and the vector reference. **Read
+[`USAGE.md`](assets/platform-icons/USAGE.md) before any build or deployment**: it says which file belongs to which
+context, the safe areas (Android's mark is 54x48 inside a 66x66 area on a 108 canvas; Windows is a 48 grid), and the part
+that gets forgotten - iOS needs an Xcode asset catalog, Android needs VectorDrawables behind an `adaptive-icon` XML, and
+Windows needs PNG/ICO with the thin rays simplified by hand for 16/24 px.
+
+`previews/windows-gradient.png` is already the window icon, set with `iconphoto(default=True)` so dialogs inherit it.
+
 ## One prompt, several scenes
 
 A prompt that marks two or more set-ups renders **one image per scene**. The split is `scenes.py`, which reads marker

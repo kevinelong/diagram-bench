@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Image generator — Windows gradient</title>
+  <desc id="desc">Transparent artwork on the Windows 48-pixel design grid, with compact rounded corners and a clear silhouette. Sun, mountains, sparkle, and connected pipeline nodes.</desc>
+  <defs><linearGradient id="color-gradient" gradientUnits="userSpaceOnUse" x1="291.17" y1="249.21" x2="702.60" y2="813.02"><stop stop-color="#0B91AE"/><stop offset=".52" stop-color="#4163D8"/><stop offset="1" stop-color="#7045BE"/></linearGradient></defs>
+  
+  <g id="foreground" transform="translate(24 24) scale(0.065625) translate(-504.5 -523.5)"><g id="image-generation-mark" fill="none" stroke="url(#color-gradient)" stroke-width="29" stroke-linecap="round" stroke-linejoin="round">
+    <path id="frame" d="M330 782H217a18 18 0 0 1-18-18V281a18 18 0 0 1 18-18h575a18 18 0 0 1 18 18v483a18 18 0 0 1-18 18H677"/>
+    <path id="mountains" d="M264 650v-15l104-101 55 27 112-104 211 178v15"/>
+    <path id="divider" d="M199 653h611"/>
+    <path id="generation-sparkle" d="M668 340c-10 33-29 52-63 60 34 9 53 28 63 60 10-32 29-51 63-60-34-8-53-27-63-60Z" stroke-width="28"/>
+    <circle id="sun" cx="356" cy="404" r="52" fill="url(#color-gradient)" stroke="none"/>
+    <path id="sun-rays" d="M356 321v12M410 345l-9 9M442 404h-12M410 458l-9-9M356 476v12M302 458l9-9M270 404h12M302 346l9 9" stroke-width="14"/>
+    <path id="pipeline-connection" d="M414 735h191"/>
+    <circle id="circular-node" cx="371" cy="741" r="43"/>
+    <rect id="square-node" x="605" y="705" width="72" height="77" rx="5"/>
+  </g></g>
+</svg>

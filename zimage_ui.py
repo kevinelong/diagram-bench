@@ -1371,6 +1371,15 @@ class App:
         self._draw = None             # (x0, y0, w, h) of the drawn image on the canvas
 
         root.title('Z-Image — prompt and picture')
+        # the platform icon masters are vendored in assets/platform-icons (see its USAGE.md): use the Windows master's
+        # 1024 px preview as the window icon, and default=True so every dialog inherits it
+        try:
+            _icon = Path(__file__).resolve().parent / 'assets' / 'platform-icons' / 'previews' / 'windows-gradient.png'
+            if _icon.is_file():
+                self._icon_image = tk.PhotoImage(file=str(_icon))
+                root.iconphoto(True, self._icon_image)
+        except Exception:
+            pass                       # an icon is decoration: never let it stop the window opening
         # the host's colours, read before any widget is built so nothing is painted twice
         self.theme = Theme(root)
         self.theme.apply()

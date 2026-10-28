@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Android adaptive icon monochrome</title>
+  <desc id="desc">Transparent, unmasked 108 by 108 adaptive icon foreground master; mark centered inside the safe area.</desc>
+  
+  
+  <g transform="translate(54 54) scale(0.084375 0.0872727273) translate(-504.5 -523.5)"><g id="image-generation-mark" fill="none" stroke="#000000" stroke-width="29" stroke-linecap="round" stroke-linejoin="round">
+    <path id="frame" d="M330 782h-56a75 75 0 0 1-75-75V338a75 75 0 0 1 75-75h461a75 75 0 0 1 75 75v369a75 75 0 0 1-75 75h-58"/>
+    <path id="mountains" d="M264 650v-15l104-101 55 27 112-104 211 178v15"/>
+    <path id="divider" d="M199 653h611"/>
+    <path id="generation-sparkle" d="M668 340c-10 33-29 52-63 60 34 9 53 28 63 60 10-32 29-51 63-60-34-8-53-27-63-60Z" stroke-width="28"/>
+    <circle id="sun" cx="356" cy="404" r="52" fill="#000000" stroke="none"/>
+    <path id="sun-rays" d="M356 321v12M410 345l-9 9M442 404h-12M410 458l-9-9M356 476v12M302 458l9-9M270 404h12M302 346l9 9" stroke-width="14"/>
+    <path id="pipeline-connection" d="M414 735h191"/>
+    <circle id="circular-node" cx="371" cy="741" r="43"/>
+    <rect id="square-node" x="605" y="705" width="72" height="77" rx="5"/>
+  </g></g>
+</svg>
