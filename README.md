@@ -351,6 +351,16 @@ chains one scene at a time on the idle card. On the screenplay in `D:/Codex/Hous
 sidecars record, then everything else newest-first - so a test render made today does not land in the middle of a scene.
 The pane and the strip both honour it.
 
+## A scene render is graded against its own scene
+
+The multi-scene run already recorded which scene each picture was - now it also asks whether the picture *is* that scene.
+When a scene image lands, a background thread runs `scene_grade.grade_scene(path, scene_text)` and writes `scene_check`
+(`answer`, `reason`, `title`, `scorer`) into the picture's sidecar, then the window says which way it went: *"scene 2 of 6
+graded: shows - <file>"*. A grader that cannot answer (no key, no service) reports **unavailable** with the reason and
+never interrupts the render.
+
+Only pictures whose sidecar carries a scene number are graded, so an ordinary render costs nothing extra.
+
 ## Asking the grader, instead of asserting
 
 `scene_grade.py` puts a question to the same vision model `vlm_score.py` uses (one scorer, so its bias cancels between

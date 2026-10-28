@@ -2016,6 +2016,63 @@ def main():
           _app_sq.sort_cb['values'])
     _app_sq.sort_var.set('Recent'); _root_sq.destroy(); tk._default_root = root
 
+    print("\n-- a scene render is graded against the scene it came from (2026-10-28)")
+    import scene_grade as _sg
+    grade_dir = Path(tempfile.mkdtemp(prefix='grade-'))
+    scene_shot = grade_dir / 'scene1.png'
+    Image.new('RGB', (64, 64), (20, 80, 40)).save(scene_shot)
+    scene_shot.with_suffix('.json').write_text(json.dumps({'prompt': 'p', 'scene': 1, 'scene_of': 3,
+                                                     'created': '2026-10-28T12:00:00'}), encoding='utf-8')
+    calls = {}
+    real_grade, real_attach = _sg.grade_scene, _sg.attach_to_sidecar
+
+    def fake_grade(path, text, title=''):
+        calls['grade'] = (Path(path).name, text, title)
+        return {'answer': 'yes', 'reason': 'lamps lit', 'title': title}
+
+    def fake_attach(path, verdict):
+        calls['attach'] = (Path(path).name, verdict.get('answer'))
+        return True
+
+    _sg.grade_scene, _sg.attach_to_sidecar = fake_grade, fake_attach
+    try:
+        while not app.ui_events.empty():
+            app.ui_events.get_nowait()
+        app._grade_scene(scene_shot, 'a pool hall with three lamps', 'SCENE ONE', 1, 3)
+        events = []
+        deadline = time.time() + 5
+        while time.time() < deadline and not events:
+            try:
+                events.append(app.ui_events.get(timeout=0.5))
+            except Exception:
+                pass
+        check('the grader is asked about this picture and this scene',
+              calls.get('grade', (None,))[1] == 'a pool hall with three lamps', calls.get('grade'))
+        check('the verdict is written beside the picture', calls.get('attach') == ('scene1.png', 'yes'),
+              calls.get('attach'))
+        check('and the answer reaches the window', events and events[0][0] == 'scene_graded'
+              and events[0][1][2] == 'yes', events[:1])
+    finally:
+        _sg.grade_scene, _sg.attach_to_sidecar = real_grade, real_attach
+
+    # a scene the grader cannot answer must not break the render
+    _sg.grade_scene = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('no key'))
+    try:
+        while not app.ui_events.empty():
+            app.ui_events.get_nowait()
+        app._grade_scene(scene_shot, 'a pool hall', 'SCENE ONE', 1, 3)
+        deadline = time.time() + 5
+        got = None
+        while time.time() < deadline and got is None:
+            try:
+                got = app.ui_events.get(timeout=0.5)
+            except Exception:
+                pass
+        check('a grader that fails reports unavailable, not a crash',
+              got and got[1][2] == 'unavailable' and 'no key' in got[1][3], got)
+    finally:
+        _sg.grade_scene = real_grade
+
     print("\n-- steps above a model's ceiling are reduced and explained (2026-10-28)")
     # 34 pictures in the gallery were drawn at 50 steps on a 4- or 9-step model: up to twelve times the compute for nothing
     app.model_var.set('flux2 klein 9b uncensored'); app._on_model_change(); root.update()

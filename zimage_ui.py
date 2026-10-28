@@ -1978,6 +1978,7 @@ class App:
         self._all_queue = None           # the ALL sweep's remaining profiles, or None
         self._all_total = 0
         self._scene_queue = None         # the remaining scenes of a multi-scene prompt, or None
+        self._scene_current = None       # (scene text, title) of the scene being rendered, for the grader
         self._scene_total = 0
         self._all_saved = None
         self._see_pending = None         # a folder waiting to be scrolled into view after the next rebuild
@@ -4094,14 +4095,33 @@ class App:
     def _run_next_scene(self):
         if not getattr(self, '_scene_queue', None):
             self._scene_queue = None
+            self._scene_current = None
             self.status.configure(text='scenes done - %d images, one per scene' % getattr(self, '_scene_total', 0))
             self._update_banner()
             return
         total = getattr(self, '_scene_total', 1)
         index = total - len(self._scene_queue) + 1
         item = self._scene_queue.pop(0)
+        # kept for the grader: when the picture lands, "does it show this scene" needs the scene, not just its number
+        self._scene_current = (item.get('text') or '', item.get('title') or '')
         self.status.configure(text='scene %d of %d · %s' % (index, total, (item['title'] or 'untitled')[:48]))
         self.generate(_prompt=item['text'], _scene=(index, total), _force_single=True)
+
+    def _grade_scene(self, path, scene_text, title, index, total):
+        """Ask the vision model whether the picture shows the scene it was made from, and write the answer beside it.
+
+        Off the UI thread (a request is seconds), and allowed to fail: without the grader the render is still a render.
+        """
+        answer, reason = 'unavailable', ''
+        try:
+            import scene_grade
+            verdict = scene_grade.grade_scene(path, scene_text, title)
+            answer = verdict.get('answer') or 'unclear'
+            reason = verdict.get('reason') or ''
+            scene_grade.attach_to_sidecar(path, verdict)
+        except Exception as e:
+            reason = '%s: %s' % (type(e).__name__, e)
+        self.ui_events.put(('scene_graded', (index, total, answer, reason, Path(path).name)))
 
     def vary(self, mode, strength=0.35):
         """Re-run this picture's prompt. 'vary' moves the seed; 'subtle' re-samples the picture itself at 0.35."""
@@ -5766,6 +5786,18 @@ class App:
                         # the live view is the open folder plus whatever outside it the folder would accept: a fresh
                         # render belongs there at once, before the debounced re-group even runs
                         self._render_contents()
+                    scene_now = getattr(self, '_scene_current', None)
+                    if scene_now and read_meta(Path(path)):
+                        # only when the sidecar recorded a scene number: a picture made outside a scene run is not graded
+                        try:
+                            index = int((read_meta(Path(path)) or {}).get('scene') or 0)
+                        except Exception:
+                            index = 0
+                        if index:
+                            threading.Thread(target=self._grade_scene,
+                                             args=(Path(path), scene_now[0], scene_now[1], index,
+                                                   getattr(self, '_scene_total', 1)),
+                                             daemon=True).start()
                     if getattr(self, '_all_queue', None):
                         self.root.after(400, self._run_next_all)   # a sweep: next model once the card is idle
                     if getattr(self, '_scene_queue', None):
@@ -5791,6 +5823,11 @@ class App:
                     self._current = Path(path)
                     self._run_recorded(path)
                     self.copy_btn.state(['!disabled'])
+                elif kind == 'scene_graded':
+                    index, total, answer, reason, name = payload
+                    write = {'yes': 'shows', 'no': 'does not show'}.get(answer, answer)
+                    self.status.configure(text='scene %s of %s graded: %s - %s' % (index, total, write, name))
+                    self.hint.configure(text=('scene %s of %s: %s the scene (%s)' % (index, total, write, reason))[:160])
                 elif kind == 'clip':
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
