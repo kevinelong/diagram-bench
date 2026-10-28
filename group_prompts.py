@@ -454,8 +454,9 @@ def label_for(prompts, members, width=60, lexicon=None):
 def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
 
-    Returns {'recent': [...], 'groups': [{'label', 'items', 'oldest'}]}: the newest `recent` pictures untouched and in
-    date order, then the folders of the older ones, oldest group first. Pictures whose prompt is empty are never put in
+    Returns {'recent': [...], 'groups': [{'label', 'items', 'oldest', 'newest'}]}: the newest `recent` pictures
+    untouched and in date order, then the folders of the older ones, ordered by their newest picture (the folder most
+    recently added to first). Pictures whose prompt is empty are never put in
     a folder - they stay in a trailing 'ungrouped' bucket, because nothing can be said about them.
     """
     order = sorted(items, key=lambda r: r.get('created') or '', reverse=True)
@@ -477,10 +478,15 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             # `label` is the short form for the selector; `title` is the same sentence uncut, for the tile
             groups.append({'label': label_for(prompts, members, lexicon=lexicon),
                            'title': label_for(prompts, members, width=0, lexicon=lexicon),
-                           'items': rows, 'oldest': rows[0].get('created') or ''})
+                           'items': rows, 'oldest': rows[0].get('created') or '',
+                           'newest': (rows[-1].get('created') or '')})
     grouped_paths = {r['path'] for g in groups for r in g['items']}
     leftovers = [r for r in with_prompt if r['path'] not in grouped_paths]
-    groups.sort(key=lambda g: g['oldest'])
+    # Folders are ordered by when they were last touched - the newest picture they hold - not by when they started.
+    # A folder order built on the oldest member never moves, which is stable but puts a folder that just received a
+    # render in the position it had when it was created. Ties fall back to the label so the order stays deterministic.
+    groups.sort(key=lambda g: g['label'])
+    groups.sort(key=lambda g: g.get('newest') or '', reverse=True)
     out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + without,
            'threshold': threshold, 'recent_n': recent}
     if keep_lexicon and with_prompt:

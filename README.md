@@ -228,9 +228,10 @@ in one folder.
   scene in one folder.
 
 **What you see on load:** the newest 18 pictures stay **ungrouped and in date order** for immediate work, while the
-grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). Folders are ordered oldest first, a
-folder needs at least two pictures so a one-off is not dressed up as a category, and a picture with no prompt is never
-folded - nothing can be said about it.
+grouping of everything older runs in the background (0.5-0.7 s for 1,810 pictures). **Folders are ordered by their
+newest picture** - the one added to most recently comes first, which is what "last modified" means for a folder - with
+the label as the tie-break so the order stays deterministic. A folder needs at least two pictures so a one-off is not
+dressed up as a category, and a picture with no prompt is never folded - nothing can be said about it.
 
 **Measured on the real gallery:** 1,810 pictures -> **56 folders**, 1,732 folded, 18 recent untouched, 60 ungrouped,
 **0.5 s** of background work, folder sizes 303 / 196 / 154 / 142 / 100 / 68 / 64 / 56 / 53 / 42. Folder names are the
@@ -443,6 +444,11 @@ in a mean of **4.4 folders**, one in **12 of 85**, and a render reported as misc
 cosine **0.208** - 0.008 over the bar - while its true home scored **1.000**. The question is singular, so the rule is
 the argmax over all folders: that render now appears only in its own folder (1.000), and the folder it had been
 mislabelled under no longer shows it.
+
+**The caption follows the same theme as the window.** `winfo_id()` is Tk's *client* child (`TkChild`); the caption
+belongs to its `TkTopLevel` parent, which does not exist until the window is mapped, and DWM rejects the child with
+`E_HANDLE`. So the frame is resolved with `GetAncestor(winfo_id(), GA_ROOT)` at call time, and the request is repeated
+on `<Map>` and once 250 ms after construction.
 
 **The open folder's column names itself.** The header carries the folder's full title, wrapped, then the count
 (`- 11 pictures`, plus `N new` for pictures the live view is offering), on the theme's text colour above the tile grid -

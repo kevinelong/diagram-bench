@@ -83,7 +83,43 @@ def labels_for(texts):
     return groups, labels
 
 
+def test_folder_order_follows_newest_member():
+    """A folder is ordered by when it was last touched, not by when it started (2026-10-28).
+
+    Reported defect: the folder column started with the oldest folder. Built the old way a folder that had just
+    received a render stayed where it was created, so the column never reflected recent activity. The corpus keeps
+    the newest 18 pictures outside the folders (the recency carve-out), so the "late" picture that lifts the
+    lighthouse folder is deliberately older than those 18 but newer than everything grouped.
+    """
+    poodle = 'a black poodle standing on a leather couch in a studio with soft light'
+    lighthouse = 'a lighthouse on a rocky coast at dusk, wide shot, muted palette'
+    car = 'a red sports car parked on a stone bridge in the rain at night'
+    rows = [{'path': r'C:\x\star%d.png' % i, 'prompt': 'a night sky of stars over a desert, long exposure %d' % i,
+             'created': '2026-10-25T10:%02d:00' % i} for i in range(18)]
+    rows.append({'path': r'C:\x\late.png', 'prompt': lighthouse, 'created': '2026-10-20T09:00:00'})
+    for subject, day in ((poodle, '05'), (car, '02'), (lighthouse, '01')):
+        rows += [{'path': r'C:\x\g-%s-%d.png' % (day, j), 'prompt': subject,
+                  'created': '2026-10-%sT10:%02d:00' % (day, j)} for j in range(20)]
+    plan = gp.plan(rows)
+    print('order:', [(g['label'][:22], g['oldest'][:10], g['newest'][:10]) for g in plan['groups']])
+    check('the corpus makes three folders', len(plan['groups']) == 3, [len(g['items']) for g in plan['groups']])
+    check('the folder touched most recently comes first', 'lighthouse' in plan['groups'][0]['label'],
+          plan['groups'][0]['label'][:40])
+    check('and it is ordered by its newest member, not its oldest',
+          plan['groups'][0]['oldest'].startswith('2026-10-01')
+          and plan['groups'][0]['newest'].startswith('2026-10-20'),
+          (plan['groups'][0]['oldest'], plan['groups'][0]['newest']))
+    check('the folder added to on the 5th is next', 'poodle' in plan['groups'][1]['label'],
+          plan['groups'][1]['label'][:40])
+    check('and the one untouched since the 2nd is last', 'car' in plan['groups'][-1]['label'],
+          plan['groups'][-1]['label'][:40])
+    newests = [g['newest'] for g in plan['groups']]
+    check('the order is newest first throughout',
+          all(newests[i] >= newests[i + 1] for i in range(len(newests) - 1)), newests)
+
+
 def main():
+    test_folder_order_follows_newest_member()
     ap = argparse.ArgumentParser()
     ap.add_argument('--real', action='store_true', help='also group the real gallery, read-only, and time it')
     args = ap.parse_args()

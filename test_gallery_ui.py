@@ -1955,8 +1955,17 @@ def main():
     check('the picture reports its pixels', 'x' in text and text.split('x')[0].isdigit(), text)
     check('and its file size on the same band', any(text.count(u) for u in ('k', 'M')), text)
     check('and the seed it was made with', 'seed' in text, text)
-    check('a title bar can be themed per window', app.theme.titlebar(app.root) in (True, False))
     app.select_folder(None); root.update()
+
+    print("\n-- the caption is asked for on the frame, and asked again once it exists (2026-10-28)")
+    import ctypes as _ct
+    _fr = _ct.windll.user32.GetAncestor(root.winfo_id(), 2)
+    _cls = _ct.create_unicode_buffer(64)
+    _ct.windll.user32.GetClassNameW(_fr, _cls, 64)
+    check('winfo_id() is the client child, and the frame is its TkTopLevel parent',
+          _cls.value == 'TkTopLevel' and _fr != root.winfo_id(), _cls.value)
+    check('the theme can hand that frame to DWM once the window exists',
+          app.theme._apply_titlebar() is True, app.theme._apply_titlebar())
 
     print("\n-- the open folder's column says which folder it is (2026-10-28)")
     if app._plan and app._plan['groups']:

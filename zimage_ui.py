@@ -331,6 +331,27 @@ class Theme:
         self.titlebar()
 
     def titlebar(self, window=None):
+        """Ask for the Win32 caption now, and again once the window has a frame.
+
+        `winfo_id()` is the *client* child (`TkChild`); the caption belongs to its `TkTopLevel` parent, which does not
+        exist until the window is mapped - so a call made during construction lands on a handle DWM rejects
+        (`E_HANDLE`, and the fallback then hits the child, which it also rejects). Hence: resolve at call time, and
+        repeat on `<Map>` and once shortly after.
+
+        """
+        target = window or self.root
+        applied = self._apply_titlebar(target)
+        try:
+            target.bind('<Map>', lambda _e: self._apply_titlebar(target), add='+')
+        except Exception:
+            pass
+        try:
+            target.after(250, lambda: self._apply_titlebar(target))
+        except Exception:
+            pass
+        return applied
+
+    def _apply_titlebar(self, window=None):
         """Win32 title bar, done the way Windows does it: dark mode, and the accent when the user asked for it there.
 
         Four DWM attributes, each best-effort because a build that does not know one must still get the others:
@@ -346,7 +367,10 @@ class Theme:
         target = window or self.root
         try:
             import ctypes
-            hwnd = ctypes.windll.user32.GetParent(target.winfo_id()) or target.winfo_id()
+            # GA_ROOT: the frame that owns the caption, not the client child Tk hands out from winfo_id()
+            hwnd = ctypes.windll.user32.GetAncestor(target.winfo_id(), 2)
+            if not hwnd:
+                return False
             handle = ctypes.c_void_p(hwnd)
 
             def attribute(index, value):
