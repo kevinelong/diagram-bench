@@ -111,6 +111,95 @@ def shorten_title(text, words=10):
     return text
 
 
+GRID_MOVES = (('Left', 'left'), ('Right', 'right'), ('Up', 'up'), ('Down', 'down'),
+              ('Prior', 'pageup'), ('Next', 'pagedown'), ('Home', 'home'), ('End', 'end'),
+              ('Control-Home', 'all-home'), ('Control-End', 'all-end'))
+
+
+def grid_move(index, count, cols, move, rows=1):
+    """Where the W3C APG layout-grid pattern takes the current cell, in a row-major grid of `count` cells.
+
+    Three lists answer the arrow keys - the strip, View All and the folder browser - and they must answer them the same
+    way, so the movement itself lives here once instead of in each of them. The pattern
+    (https://www.w3.org/WAI/ARIA/apg/patterns/grid/, "Keyboard Interaction For Layout Grids") says:
+
+    * left/right are one cell and **wrap across rows** - which for a row-major index is simply +1/-1, clamped at the two
+      ends of the list, and is why the owner's "wrap to the next row" request is the same thing as the standard;
+    * up/down keep the column and **never wrap**: below the last full row there is no cell in that column, so the move
+      is refused rather than jumping sideways into a short final row;
+    * page up/down keep the column and move by whole visible rows, clamping to the last row that still has that column;
+    * home/end are the ends of the *current row*, ctrl+home/ctrl+end the ends of the whole list.
+
+    `index` may be -1 (nothing current yet): the first press lands on the first cell, as the strip has always done, and
+    ctrl+end/end from nothing land on the last cell because that is what those keys are asked for. Returns the new index.
+    """
+    try:
+        count, cols, rows = int(count), max(1, int(cols)), max(1, int(rows))
+    except Exception:
+        return 0
+    if count <= 0:
+        return None
+    if not 0 <= index < count:
+        # no current cell: the edge keys keep their meaning, every other key starts the walk at the beginning
+        return count - 1 if move in ('end', 'all-end') else 0
+    row = index // cols
+    col = index % cols
+    if move == 'right':
+        return min(count - 1, index + 1)
+    if move == 'left':
+        return max(0, index - 1)
+    if move == 'down':
+        below = index + cols
+        return below if below < count else index
+    if move == 'up':
+        above = index - cols
+        return above if above >= 0 else index
+    if move in ('pageup', 'pagedown'):
+        last_row = (count - 1) // cols
+        step = rows if move == 'pagedown' else -rows
+        target = min(last_row, max(0, row + step))
+        # a short last row does not have this column: step back rather than slide left into whatever is there
+        while target > 0 and target * cols + col >= count:
+            target -= 1
+        return target * cols + col
+    if move == 'home':
+        return row * cols
+    if move == 'end':
+        return min(count - 1, row * cols + cols - 1)
+    if move == 'all-home':
+        return 0
+    if move == 'all-end':
+        return count - 1
+    return index
+
+
+def grid_visible_rows(height, pitch):
+    """How many whole rows a viewport of `height` shows, given the measured distance between two rows.
+
+    Page down has to move "one visible set", and the set is a property of the window as it is sized right now - a
+    maximised View All shows eight rows of 190 px tiles, the strip perhaps four - so this is measured, never assumed.
+    """
+    try:
+        height, pitch = int(height), int(pitch)
+    except Exception:
+        return 1
+    if height <= 0 or pitch <= 0:
+        return 1
+    return max(1, height // pitch)
+
+
+def grid_bind_moves(widget, handler):
+    """Bind the layout-grid movement keys - plain and shift-extended - on one widget.
+
+    Shift is bound separately because Tk will not let a `<Left>` binding answer `<Shift-Left>`. The same table feeds all
+    three lists, so none of them can quietly offer a different subset of the pattern.
+    """
+    for seq, move in GRID_MOVES:
+        widget.bind('<%s>' % seq, lambda e, m=move: handler(e, m))
+        if not seq.startswith('Control-'):
+            widget.bind('<Shift-%s>' % seq, lambda e, m=move: handler(e, m))
+
+
 class Theme:
     """The colours the user already chose, instead of colours invented here.
 
@@ -878,12 +967,26 @@ class ScrollGrid(ttk.Frame):
     """
 
     def __init__(self, master, make_tile, caption=None, batch=60, tile_min=STRIP_TILE_MIN, pad=6,
-                 background=None, tile_target=180, muted=None):
+                 background=None, tile_target=180, muted=None, accent=None, sel_ring=True,
+                 on_mark=None, on_activate=None, on_select_all=None):
         super().__init__(master)
         # colours come from the caller (the window's Theme), so a grid built by a test still works
         background = background or (ttk.Style().lookup('TFrame', 'background') or '#f4f4f5')
         self.muted = muted or (ttk.Style().lookup('TLabel', 'foreground') or '#555')
+        self.accent = accent or (ttk.Style().lookup('TLabel', 'foreground') or '#0a84ff')
         self.background = background
+        # Keyboard state. `focus_key` is the cell the arrow keys are on, and it is drawn as a ring around the whole cell
+        # - label and caption - because a caption that swallows the keyboard would be invisible feedback. When the
+        # owner keeps the selection itself (View All, whose Delete button reads `App.selected`) it passes `on_mark` and
+        # `sel_ring=False`; otherwise the grid keeps its own chosen set. See `_mark`.
+        self.focus_key = None
+        self.chosen = set()
+        self.anchor = None
+        self.sel_ring = bool(sel_ring)
+        self.on_mark = on_mark              # (key, 'set' | 'extend' | 'toggle') -> None, the owner applies it
+        self.on_activate = on_activate      # (key) -> None, Enter
+        self.on_select_all = on_select_all  # () -> None, Ctrl+A
+        self.keys = []
         self.make_tile = make_tile       # (parent, item, size) -> Label, click already bound by the caller
         self.caption = caption           # (item) -> str or ''
         self.batch = batch
@@ -912,6 +1015,14 @@ class ScrollGrid(ttk.Frame):
         for w in (self.canvas, self.inner):
             w.bind('<MouseWheel>', self._wheel)
         self.bind('<Map>', lambda e: self.after(60, self._apply_resize))
+        # The keys go on the canvas, not on a bind_all: a press in the search box or in a dialog must never move the
+        # grid, and a widget-level binding cannot fire unless the grid itself holds the keyboard.
+        self.canvas.configure(takefocus=1)
+        grid_bind_moves(self.canvas, self._on_move)
+        self.canvas.bind('<space>', lambda e: self._on_toggle())
+        self.canvas.bind('<Return>', lambda e: self._on_enter())
+        self.canvas.bind('<KP_Enter>', lambda e: self._on_enter())
+        self.canvas.bind('<Control-a>', lambda e: self._on_all())
 
     # -- public
     def set_items(self, items):
@@ -930,6 +1041,22 @@ class ScrollGrid(ttk.Frame):
         if n != self.shown:
             self.shown = max(0, min(int(n), len(self.items)))
             self._layout(rebuild=True)
+
+    def set_focus(self, key, scroll=False):
+        """Park the keyboard cursor on one cell - how the folder browser follows the folder that is already open.
+
+        Without it the ring would sit on "All pictures" while the right-hand grid showed some other folder, and the
+        first arrow press would then start from the wrong place.
+        """
+        if key not in self.cells:
+            return
+        self.focus_key = key
+        if self.on_mark is None:
+            self.chosen = {key}
+            self.anchor = key
+        self._paint_focus()
+        if scroll:
+            self._see(key)
 
     # -- layout
     def _metrics(self):
@@ -956,21 +1083,31 @@ class ScrollGrid(ttk.Frame):
         for w in self.inner.winfo_children():
             w.destroy()
         self.cells = {}
+        self.keys = []
         for i, item in enumerate(self.items[:self.shown]):
-            cell = ttk.Frame(self.inner)
+            # a tk.Frame, not a ttk one, because only the classic widget draws a highlight ring - the ring is how the
+            # grid says which cell the arrow keys are on, and it has to survive the owner's own selection painting
+            cell = tk.Frame(self.inner, background=self.background, highlightthickness=0)
             cell.grid(row=i // cols, column=i % cols, padx=self.pad // 2, pady=self.pad // 2, sticky='n')
             lab = self.make_tile(cell, item, tile)
             lab.pack()
             self._bind_wheel(lab)
+            self._bind_cell(lab, item['key'])
             text = self.caption(item) if self.caption else ''
             if text:
                 cap = tk.Label(cell, text=text, font=('Segoe UI', 8), foreground=self.muted,
                                background=self.background, wraplength=max(80, tile - 8), justify='center')
                 cap.pack()
                 self._bind_wheel(cap)
+                self._bind_cell(cap, item['key'])
             self.cells[item['key']] = lab
+            self.keys.append(item['key'])
+        # a rebuild keeps the cursor where it was, and puts it on the first cell when it has nowhere to be
+        if self.focus_key not in self.cells:
+            self.focus_key = self.keys[0] if self.keys else None
         self.canvas.itemconfigure(self._window, width=self.canvas.winfo_width())
         self.root_after_scrollregion()
+        self._paint_focus()
 
     def root_after_scrollregion(self):
         box = self.inner.bbox('all')
@@ -979,6 +1116,157 @@ class ScrollGrid(ttk.Frame):
 
     def _bind_wheel(self, widget):
         widget.bind('<MouseWheel>', self._wheel)
+
+    # -- keyboard (W3C APG layout grid) ---------------------------------------
+    def _bind_cell(self, widget, key):
+        """A click anywhere in a cell moves the keyboard cursor there and gives the grid the keyboard.
+
+        The owner's own click handler is already bound on the tile and still runs first - this one is added on top
+        (`add='+'`), so a mouse click keeps its selection meaning and simply also tells the keyboard where it is.
+        """
+        widget.bind('<Button-1>', lambda e, k=key: self._clicked(k), add='+')
+
+    def _clicked(self, key):
+        """Pointer and keyboard agree after a click; nothing more, because the click's selection is the owner's call."""
+        self.focus_key = key
+        if self.on_mark is None:
+            # the grid keeps its own selection here, so the click sets it the way a plain click elsewhere would
+            self.chosen = {key}
+            self.anchor = key
+        self._paint_focus()
+
+    def _on_move(self, event, move):
+        """One movement key: move the cursor, mark the new cell, scroll it into view.
+
+        Returns 'break' always when there is something to move over, because Tk's Canvas class binding for the arrow
+        keys would otherwise scroll the viewport underneath the cursor.
+        """
+        if not self.keys:
+            return None
+        shift = bool(getattr(event, 'state', 0) & 0x0001)
+        index = self.keys.index(self.focus_key) if self.focus_key in self.keys else -1
+        new = grid_move(index, len(self.keys), self.cols, move, rows=self._visible_rows())
+        if new is None:
+            return None
+        self.focus_key = self.keys[new]
+        # page up/down is defined by where the visible set lands: the new current row becomes a leading visible row
+        self._see(self.focus_key, 'top' if move in ('pageup', 'pagedown') else 'nearest')
+        extending = shift and move not in ('home', 'end', 'all-home', 'all-end')
+        self._mark(self.focus_key, 'extend' if extending else 'set')
+        if new >= len(self.keys) - 1:
+            self._maybe_more()          # at the last laid-out cell: pull the next batch in, as scrolling would
+        return 'break'
+
+    def _on_toggle(self):
+        """Space toggles the current cell, the same gesture the strip uses."""
+        if not self.keys:
+            return None
+        if self.focus_key not in self.keys:
+            self.focus_key = self.keys[0]
+        self._mark(self.focus_key, 'toggle')
+        return 'break'
+
+    def _on_enter(self):
+        """Enter activates the current cell: load the picture, open the folder."""
+        if not self.keys or self.on_activate is None:
+            return None
+        if self.focus_key not in self.keys:
+            self.focus_key = self.keys[0]
+        self.on_activate(self.focus_key)
+        return 'break'
+
+    def _on_all(self):
+        """Ctrl+A takes everything that is laid out, which is what "visible" means in every list here."""
+        if self.on_select_all is not None:
+            self.on_select_all()
+        elif self.sel_ring:
+            self.chosen = set(self.keys)
+            self.anchor = self.keys[0] if self.keys else None
+            self._paint_focus()
+        return 'break'
+
+    def _mark(self, key, mode):
+        """Apply one selection intent, to the owner when it owns the selection and locally when it does not."""
+        if self.on_mark is not None:
+            self.on_mark(key, mode)
+            return
+        if mode == 'toggle':
+            if key in self.chosen:
+                self.chosen.discard(key)
+            else:
+                self.chosen.add(key)
+            self.anchor = key
+        elif mode == 'extend' and self.anchor in self.keys and key in self.keys:
+            i, j = self.keys.index(self.anchor), self.keys.index(key)
+            i, j = min(i, j), max(i, j)
+            self.chosen = set(self.keys[i:j + 1])
+        else:
+            self.chosen = {key}
+            self.anchor = key
+        self._paint_focus()
+
+    def _paint_focus(self):
+        """Ring the current cell (thicker) and the chosen cells (thinner), never rebuilding a thumbnail.
+
+        The ring is on the cell frame so it surrounds the caption as well - the caption is part of the cell, and a
+        keyboard cursor that stops at the picture is ambiguous when two tiles share a filename prefix.
+        """
+        for key, lab in self.cells.items():
+            cell = lab.master
+            current = (key == self.focus_key)
+            chosen = self.sel_ring and key in self.chosen
+            try:
+                cell.configure(highlightthickness=3 if current else (2 if chosen else 0),
+                               highlightbackground=self.accent)
+            except Exception:
+                pass
+
+    def _visible_rows(self):
+        """Rows the viewport shows, from the distance between the first cell and the one a row below it."""
+        first = self.cells.get(self.keys[0]) if self.keys else None
+        pitch = 0
+        if first is not None and len(self.keys) > self.cols:
+            below = self.cells.get(self.keys[self.cols])
+            if below is not None:
+                pitch = below.master.winfo_y() - first.master.winfo_y()
+        if pitch <= 0 and first is not None:
+            pitch = first.master.winfo_height()
+        return grid_visible_rows(self.canvas.winfo_height(), pitch)
+
+    def _see(self, key, align='nearest'):
+        """Scroll so the cell under the keyboard is on screen - and never when it already is.
+
+        `align='top'` is what page up/down needs: the APG puts the new current row among the first visible rows, so
+        a whole visible set of movement shows up as a whole visible set of scroll. Everything else scrolls the least
+        it can, which is what keeps the picture under the cursor from jumping around.
+        """
+        lab = self.cells.get(key)
+        if lab is None:
+            return
+        cell = lab.master
+        try:
+            self.canvas.update_idletasks()
+        except Exception:
+            return
+        total = max(self.inner.winfo_height(), 0)
+        view_h = self.canvas.winfo_height()
+        if total <= 0 or view_h <= 0:
+            return
+        top = cell.winfo_y()
+        height = max(1, cell.winfo_height())
+        view_top = self.canvas.canvasy(0)
+        if align == 'top':
+            target = top - self.pad
+        elif top < view_top - 1:
+            target = top - self.pad
+        elif top + height > view_top + view_h + 1:
+            target = top + height + self.pad - view_h
+        else:
+            return
+        target = max(0.0, min(float(max(0, total - view_h)), float(target)))
+        if abs(target - view_top) < 1.0:
+            return
+        self.canvas.yview_moveto(max(0.0, min(1.0, target / float(total))))
 
     # -- events
     def _on_configure(self, event=None):
@@ -1144,9 +1432,10 @@ class App:
         self.root.bind_all('<MouseWheel>', self._on_any_wheel, add='+')
         self.gal_bar.configure(command=self._on_strip_scrollbar)
         self.gal_canvas.configure(takefocus=1)
-        for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
-                        ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1)),
-                        ('<space>', self._nav_toggle_key), ('<Return>', self._nav_open_key)):
+        # The whole layout-grid table, from the one list the three views share: arrows wrap across rows and clamp
+        # vertically, page up/down move a visible set, home/end are the row and ctrl+home/end the list.
+        grid_bind_moves(self.gal_canvas, self._nav_move_key)
+        for seq, fn in (('<space>', self._nav_toggle_key), ('<Return>', self._nav_open_key)):
             self.gal_canvas.bind(seq, fn)
         for c in range(RECENT_COLS + 12):
             self.recent.columnconfigure(c, weight=0)
@@ -1159,6 +1448,7 @@ class App:
         self._all_widgets = {}            # same, for the "More..." window
         self.selected = []                # ordered list of paths marked for action
         self._anchor = None               # shift-click range starts here
+        self._nav_cur = None              # the cell the arrow keys are on: a Path in the strip, a folder index in folders
 
         btns = ttk.Frame(gal)
         btns.grid(row=3, column=0, columnspan=2, sticky='ew')     # above the strip: buttons are never clipped
@@ -1938,13 +2228,17 @@ class App:
             return '%s\n%d pictures' % (shorten_title(group.get('title') or group['label']), len(group['items']))
 
         left = ScrollGrid(body, folder_tile, caption=folder_caption, batch=40, tile_target=150,
-                          background=self.theme.window, muted=self.theme.muted)
+                          background=self.theme.window, muted=self.theme.muted, accent=self.theme.accent,
+                          on_activate=lambda key: pick(None if key == 'all' else int(key)))
         left.grid(row=0, column=0, sticky='nsew')
         right = ScrollGrid(body, picture_tile, caption=lambda item: item['path'].name[:26], batch=80,
-                           tile_target=190, background=self.theme.window, muted=self.theme.muted)
+                           tile_target=190, background=self.theme.window, muted=self.theme.muted,
+                           accent=self.theme.accent, on_activate=self._load_from_browser)
         right.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
 
         def pick(index):
+            # the grid's cursor follows the open folder, so the first arrow press starts from the folder on screen
+            left.set_focus('all' if index is None else str(index))
             self.select_folder(index)
             chosen.configure(text='All pictures' if index is None else self._folder_text(index))
             paths = self._all_files() if index is None else [
@@ -1960,6 +2254,15 @@ class App:
         left.set_items(items)
         pick(self._active_folder)
         win.protocol('WM_DELETE_WINDOW', self._close_folder_browser)
+        # the keyboard starts on the folder column, where Up/Down walk the folders and Enter opens one; the picture
+        # column takes it back with a click, since each grid's keys are bound to that grid's own canvas
+        def focus_folders():
+            try:
+                if win.winfo_exists() and left.cells:
+                    left.canvas.focus_set()
+            except Exception:
+                pass                                    # the window closed before the timer fired
+        win.after(120, focus_folders)
 
     def _close_folder_browser(self):
         win = getattr(self, '_folder_win', None)
@@ -2540,6 +2843,7 @@ class App:
         self._tile_widgets = {}
         width = max(190, self.gal_canvas.winfo_width() - 10)
         cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
+        self._folder_cols = cols          # the keyboard reads the same number the renderer just used
         sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
@@ -2573,8 +2877,22 @@ class App:
             title.pack(fill='x', pady=(1, 0))
             self._tip(title, full_title)
             for w in (tile, body, pic, title, meta):
-                w.bind('<Button-1>', lambda e, i=index: self.select_folder(i))
+                w.bind('<Button-1>', lambda e, i=index: self._folder_clicked(i))
+        self._paint_folder_cursor()
         self.root.after_idle(self._on_strip_resize)
+
+    def _folder_clicked(self, index):
+        """A click on a folder tile: open it, park the keyboard cursor on it, and hand the strip the arrows.
+
+        `select_folder` is also called by the prediction and by the browser, so the focus belongs to the click, not to
+        the selection - those other callers must not pull the keyboard out of the prompt box.
+        """
+        self._nav_cur = index
+        self.select_folder(index)
+        try:
+            self.gal_canvas.focus_set()
+        except Exception:
+            pass
 
     def _strip_metrics(self):
         """Columns and tile size for the strip, from the width it actually has.
@@ -2731,11 +3049,47 @@ class App:
         except Exception:
             return False
 
+    def _strip_cells(self):
+        """(keys, cols, tiles): the strip's keyboard order, its column count, and one widget per cell.
+
+        The strip has two modes and they behave differently enough to be worth naming here: with folders on the cells
+        are folder indexes and the tile frames, otherwise they are Paths and the tile labels. Both report the column
+        count their renderer actually used, never a recomputation that could disagree with the layout on screen.
+        """
+        if self._folders_view_active():
+            tiles = self._folder_tiles()
+            return list(range(len(tiles))), max(1, getattr(self, '_folder_cols', 2) or 1), tiles
+        keys = [p for p in self._files[:RECENT_N] if p in self._tile_widgets]
+        tiles = [self._tile_widgets[p] for p in keys]
+        return keys, max(1, self._strip_cols()), tiles
+
+    def _folder_tiles(self):
+        """The folder tiles that are laid out right now, in index order (a grid_info-less child is not a cell)."""
+        try:
+            return [w for w in self.recent.winfo_children() if w.grid_info()]
+        except Exception:
+            return []
+
+    def _nav_current(self):
+        """The cell the keyboard is on: the cursor, else the last thing selected, else nothing."""
+        keys, _cols, _tiles = self._strip_cells()
+        if self._nav_cur in keys:
+            return self._nav_cur
+        if self.selected and self.selected[-1] in keys:
+            return self.selected[-1]
+        return None
+
+    def _nav_move_key(self, event, move):
+        """The bound handler: arrows only reach the strip when the strip has the keyboard."""
+        if self._typing() or not self._strip_has_focus():
+            return None
+        return self._nav_move(move, extend=bool(getattr(event, 'state', 0) & 0x0001))
+
     def _nav_key(self, _event, dx, dy):
         """Arrow keys reach the gallery only from the gallery: never while the prompt box has the keyboard."""
         if self._typing() or not self._strip_has_focus():
             return None
-        return self._nav(dx, dy)
+        return self._nav(dx, dy, extend=bool(getattr(_event, 'state', 0) & 0x0001))
 
     def _nav_toggle_key(self, event=None):
         if self._typing() or not self._strip_has_focus():
@@ -2747,23 +3101,122 @@ class App:
             return None
         return self._nav_open()
 
-    def _nav(self, dx, dy):
-        """Move the selection one tile, so the strip is usable without the mouse."""
-        order = [p for p in self._files[:RECENT_N] if p in self._tile_widgets]
-        if not order:
+    def _nav(self, dx, dy, extend=False):
+        """Move the selection one tile, so the strip is usable without the mouse.
+
+        Kept in (dx, dy) because that is how the click paths and the suite describe a step; the movement itself is
+        `_nav_move`, which is the same function the two full-screen grids run.
+        """
+        move = {(1, 0): 'right', (-1, 0): 'left', (0, 1): 'down', (0, -1): 'up'}.get((dx, dy), 'none')
+        return self._nav_move(move, extend=extend)
+
+    def _nav_move(self, move, extend=False):
+        """One layout-grid movement in the strip, whichever mode it is showing.
+
+        In the picture list the cursor and the selection are the same thing - that is how the strip has always shown
+        where you are, and shift extends the range from the anchor the way shift-click does. In folder mode the strip
+        has no multi-selection (its one selection is the open folder), so a plain arrow only rings the tile and Enter
+        opens it; opening a folder on every arrow press would re-render the contents pane for movement alone.
+        """
+        keys, cols, tiles = self._strip_cells()
+        if not keys:
             return 'break'
-        cur = self.selected[-1] if self.selected else None
-        i = order.index(cur) if cur in order else -1
-        new = 0 if i < 0 else max(0, min(len(order) - 1, i + dx + dy * self._strip_cols()))
-        self.selected = [order[new]]
-        self._anchor = order[new]
-        self._paint()
+        cur = self._nav_current()
+        index = keys.index(cur) if cur in keys else -1
+        new = grid_move(index, len(keys), cols, move, rows=self._strip_visible_rows(tiles, cols))
+        if new is None:
+            return 'break'
+        key = keys[new]
+        folders = self._folders_view_active()
+        if not folders and extend and self._anchor in keys:
+            i, j = keys.index(self._anchor), new
+            if i > j:
+                i, j = j, i
+            self.selected = list(keys[i:j + 1])
+        elif not folders:
+            self.selected = [key]
+            self._anchor = key
+        self._nav_cur = key
+        if folders:
+            self._paint_folder_cursor()
+        else:
+            self._paint()
+        self._see_strip_cell(tiles[new], 'top' if move in ('pageup', 'pagedown') else 'nearest')
+        if new >= len(keys) - 1:
+            self._maybe_more('strip')       # the last laid-out cell: pull the next batch in, as scrolling would
         return 'break'
 
+    def _strip_visible_rows(self, tiles, cols):
+        """Rows the strip's viewport shows, measured from two laid-out tiles rather than assumed."""
+        pitch = 0
+        if len(tiles) > cols:
+            try:
+                pitch = tiles[cols].winfo_y() - tiles[0].winfo_y()
+            except Exception:
+                pitch = 0
+        if pitch <= 0 and tiles:
+            try:
+                pitch = tiles[0].winfo_height() + 2
+            except Exception:
+                pitch = 0
+        return grid_visible_rows(self.gal_canvas.winfo_height(), pitch)
+
+    def _see_strip_cell(self, tile, align='nearest'):
+        """Scroll the strip so a cell under the keyboard is visible, and only then.
+
+        The invariant the resize handlers protect - a resize never moves the view - also applies here: a cell that is
+        already fully visible is left alone, so pressing a key that does not change rows never nudges the list.
+        """
+        canvas = self.gal_canvas
+        try:
+            self.recent.update_idletasks()
+            canvas.update_idletasks()
+        except Exception:
+            return
+        total = max(self.recent.winfo_height(), 0)
+        view_h = canvas.winfo_height()
+        if total <= 0 or view_h <= 0:
+            return
+        canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
+        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        view_top = canvas.canvasy(0)
+        if align == 'top':
+            target = top - 8.0
+        elif top < view_top - 1:
+            target = top - 8.0
+        elif top + height > view_top + view_h + 1:
+            target = top + height + 8.0 - view_h
+        else:
+            return
+        target = max(0.0, min(float(max(0, total - view_h)), float(target)))
+        if abs(target - view_top) < 1.0:
+            return
+        canvas.yview_moveto(max(0.0, min(1.0, target / float(total))))
+
+    def _paint_folder_cursor(self):
+        """Ring the folder tile the keyboard is on, without repainting a single contact sheet.
+
+        The folder tiles already use their 1 px frame for "this folder is open", so the cursor is a second, outer ring
+        in the accent - movement is visible without ever being mistaken for the open folder.
+        """
+        if not self._folders_view_active():
+            return
+        for index, tile in enumerate(self._folder_tiles()):
+            try:
+                current = (self._nav_cur == index)
+                tile.configure(highlightthickness=2 if current else 0,
+                               highlightbackground=self.theme.accent)
+            except Exception:
+                pass
+
     def _nav_toggle(self, event=None):
-        cur = self.selected[-1] if self.selected else None
+        """Space toggles the current cell; a folder tile has nothing to toggle, so it opens instead."""
+        cur = self._nav_current()
         if cur is None:
             return self._nav(0, 0)
+        if self._folders_view_active():
+            return self._nav_open()
+        self._nav_cur = cur
         if cur in self.selected:
             self.selected.remove(cur)
         else:
@@ -2772,7 +3225,20 @@ class App:
         return 'break'
 
     def _nav_open(self, event=None):
-        if self.selected:
+        """Enter activates the current cell: open the folder, or load the picture the strip is on.
+
+        A folder tile's activation is `select_folder`, exactly what clicking it does; a picture loads into the big view
+        through `select_file`, which is the strip's existing open path (it looks, and restores the prompt - it arms no
+        edit, as a click does not).
+        """
+        cur = self._nav_current()
+        if self._folders_view_active() and cur is not None and self._plan:
+            if 0 <= cur < len(self._plan['groups']):
+                self.select_folder(cur)
+                return 'break'
+        if cur is not None:
+            self.select_file(cur)
+        elif self.selected:
             self.select_file(self.selected[-1])
         return 'break'
 
@@ -3391,6 +3857,7 @@ class App:
         """
         path = Path(path)
         if not browser:
+            self._nav_cur = path          # a click puts the keyboard cursor where the mouse is
             try:
                 self.gal_canvas.focus_set()  # so arrows and Space drive the strip after a click
             except Exception:
@@ -3461,6 +3928,32 @@ class App:
             if lab is not None and lab.winfo_exists():
                 lab.configure(text='%d selected' % n if n else '')
 
+    def _browser_mark(self, key, mode):
+        """Keyboard selection inside View All, in the same vocabulary the mouse uses.
+
+        View All's selection is `App.selected` because the window's Delete and Load buttons read it, so the grid hands
+        the intent over instead of keeping a second copy that could disagree with the buttons.
+        """
+        order = [p for p in self._browser_files if p in self._all_widgets]
+        if not order:
+            return
+        key = Path(key)
+        if mode == 'toggle':
+            if key in self.selected:
+                self.selected.remove(key)
+            else:
+                self.selected.append(key)
+            self._anchor = key
+        elif mode == 'extend' and self._anchor in order and key in order:
+            i, j = order.index(self._anchor), order.index(key)
+            if i > j:
+                i, j = j, i
+            self.selected = order[i:j + 1]
+        else:
+            self.selected = [key]
+            self._anchor = key
+        self._paint()
+
     def select_all(self):
         """Select every image in the window in play; pressing it again clears."""
         if self._all_widgets:
@@ -3477,6 +3970,7 @@ class App:
     def clear_selection(self):
         self.selected = []
         self._anchor = None
+        self._nav_cur = None             # no cursor either: the next arrow starts the walk from the first cell
         self._paint()
 
     # -- gallery: delete -----------------------------------------------------
@@ -3695,8 +4189,13 @@ class App:
 
         # One grid, shared with the folder browser: columns follow the window, the tile grows to fill it, the wheel
         # scrolls under the pointer, and the next batch is appended at the bottom instead of laying out the lot.
+        # The keyboard is the same layout-grid table as the strip; the selection stays App's (`_all_widgets` is what
+        # `_paint`, Delete and Load read), so the grid only reports intent and paints the cursor ring itself.
         grid = ScrollGrid(win, make_tile, caption=lambda item: item['path'].name[:26], batch=90,
-                          tile_target=190, background=self.theme.window, muted=self.theme.muted)
+                          tile_target=190, background=self.theme.window, muted=self.theme.muted,
+                          accent=self.theme.accent, sel_ring=False,
+                          on_mark=self._browser_mark, on_activate=self._load_from_browser,
+                          on_select_all=lambda: (self.select_all(), self._paint()))
         grid.pack(side='top', fill='both', expand=True, padx=8, pady=(4, 0))
 
         def render(*_):
@@ -3723,6 +4222,15 @@ class App:
         ttk.Button(foot, text='Delete', command=lambda: (self.delete_selected(), render())).pack(
             side='left', padx=(6, 0))
         render()
+        # the window opens with the keyboard on the grid, so an arrow press works before anything is clicked; the
+        # search box takes the keyboard back the moment it is clicked, and the grid's keys are widget-bound there
+        def focus_grid():
+            try:
+                if win.winfo_exists() and grid.cells:
+                    grid.canvas.focus_set()
+            except Exception:
+                pass                                    # the window closed before the timer fired
+        win.after(120, focus_grid)
 
     def _show_resolution(self):
         """Pixels, file size and the seed, under the picture - the three facts a render is usually asked about."""

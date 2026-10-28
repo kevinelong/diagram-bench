@@ -341,7 +341,7 @@ where this app stands:
 | honour contrast themes | **partly** - system colours are used for chrome; the photo panes stay photographic |
 | system font, system icons | **done** for text (Segoe UI, which is what Tk's default resolves to on Windows) |
 | native window behaviour: maximise, snap layouts, rounded corners | **done** - the window is a plain Tk toplevel, so DWM owns the frame and snap |
-| keyboard access to everything, mnemonics | **partly** - arrows/space/Enter/Delete/Ctrl+A/Esc in the gallery |
+| keyboard access to everything, mnemonics | **partly** - the APG layout-grid keys in all three lists (strip, View All, folder browser), plus Delete/Ctrl+A/Esc; no mnemonics |
 | native file and folder dialogs | **done** (`tkinter.filedialog`, Explorer) |
 | a responsive layout down to small windows, always scrollable | **done** - every list scrolls, tiles reflow |
 | visible state for long operations, cancel | **done** - progress bar, ticks, Stop |
@@ -880,6 +880,30 @@ There is no undo inside the window, but the delete itself is reversible in Explo
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
 carrying the same state bits Tk sends), asserts 49 selection, delete and older-control checks, and screenshots each
 state: `python test_gallery_ui.py --shots <dir>`.
+
+### Keyboard in the gallery
+
+Three lists answer the keyboard the same way - the **Recent** strip (both modes: pictures and, with folders on, folder
+tiles), the **View All** window, and the two columns of the prompt-folder browser. They follow the W3C APG *layout
+grid* pattern (<https://www.w3.org/WAI/ARIA/apg/patterns/grid/>), which is why movement is horizontal-wrap and
+vertical-clamp rather than a plain index step:
+
+| key | effect |
+|---|---|
+| **left / right** | one cell; the right-hand end of a row wraps to the first cell of the next row, and the left-hand end to the last cell of the previous row |
+| **up / down** | one cell in the same column; at the top or bottom it does not move, and a short last row is never entered sideways |
+| **PgUp / PgDn** | one whole visible set of rows, keeping the column, then scrolled so the new row is among the first visible ones |
+| **Home / End** | first / last cell of the *current row* |
+| **Ctrl+Home / Ctrl+End** | first / last cell of the whole list |
+| **Space** | toggles the current cell (opens a folder tile - a folder list has one selection, the open folder) |
+| **Enter** | activates it: loads the picture, or opens the folder |
+| **Shift+arrows** | extends the selection from the anchor, as shift+click does |
+| **Ctrl+A** | selects everything laid out |
+
+The keys are bound to the list itself, never to the whole application, so typing in the prompt box or in the View All
+search field is untouched. A click puts the cursor where the mouse is and hands the list the keyboard; movement scrolls
+only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
+the view.
 
 ## How much do seeds actually vary? (`variety_probe.py`)
 
