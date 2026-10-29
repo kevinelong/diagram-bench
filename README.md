@@ -927,6 +927,14 @@ per step, which adds grain and is the real "randomisation" knob), **strength** f
 individually reproducible and the VRAM peak stays that of a single image. Unticking it asks ComfyUI for one batch,
 about 8x faster (6 s vs 50 s for 9-up at 256 px) with a much higher peak.
 
+**A layout on a base image is a series, not one picture.** Until 2026-10-28 both layers collapsed a base edit to a single
+image - the window set `batch = 1`, the engine `total = 1` - so picking 4/9/16-up after "use as base" looked stuck at one
+and done. Now the layout applies to a restyle and the engine runs the tiles one at a time with consecutive seeds
+(`tile_plan`); a mask fill and an outpaint stay one image, because those are edits of one region rather than a set of
+alternatives. Measured: 4-up charcoal at strength 0.72 from one photograph took 85.9 s and produced four distinct studies
+on seeds 777-780 plus a 2x2 sheet. At 0.72 the room and seating can drift a little between tiles; that is the strength
+that makes the medium land, so pick the tile whose composition you want rather than expecting all four to match.
+
 **rephrase** sits directly under the prompt box and rewrites it with synonyms - no model, no server, so it always works.
 Two boxes beside it decide what it does:
 

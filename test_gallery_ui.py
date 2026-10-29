@@ -898,6 +898,29 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- a layout on a base image is a series, not one image')
+    ok, seeds16 = zui.tile_plan(16, 100, 1, has_base=True)
+    check('a base image keeps the whole layout', ok == 16, str(ok))
+    check('and every tile gets its own seed', seeds16 == list(range(100, 116)), str(seeds16[:3]))
+    ok1, seeds1 = zui.tile_plan(1, 100, 1, has_base=True)
+    check('one tile is still one image on one seed', (ok1, seeds1) == (1, [100]), str((ok1, seeds1)))
+    ok0, _ = zui.tile_plan(0, 100, 1)
+    check('a zero count is clamped to one', ok0 == 1, str(ok0))
+
+    series_png = tmp / 'series-base.png'
+    Image.new('RGB', (48, 48), 'red').save(series_png)
+    app._set_base(series_png); app.layout_var.set('16-up (4x4)'); app.seq_var.set(False)
+    app.style_var.set('none'); app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    sent = app.engine.calls[-1][1]
+    check('the window asks the engine for 16 tiles from a base', sent.get('batch') == 16, str(sent.get('batch')))
+    check('the base travels with it', bool(sent.get('base_path')), str(sent.get('base_path')))
+    check('and the hint promises the series, not a single edit',
+          'variations' in app.hint['text'] and 'layout ignored' not in app.hint['text'], app.hint['text'])
+    app.layout_var.set('single'); app.seq_var.set(True); app.clear_base()
+    app.refresh_gallery(); app.busy = False
+    series_png.unlink(missing_ok=True)
+
     print('\n-- drawing-media styles, and the strength a base image gets from its style')
     for name in ('charcoal', 'pencil', 'blue pencil'):
         check('%s exists and carries a medium' % name, name in zui.STYLES and bool(zui.STYLES.get(name)), name)

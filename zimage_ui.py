@@ -704,6 +704,19 @@ class GenerationCancelled(Exception):
     """Raised inside the worker when the user pressed Stop; the partial run is discarded."""
 
 
+def tile_plan(batch, seed, seed_step, has_base=False):
+    """How many tiles a request produces, and the seed of each.
+
+    A batch request cannot vary the seed - one latent batch is drawn from one seed - so any count above one is run
+    sequentially. A base image is no longer an exception: N variations of the same picture differ by seed, which is
+    exactly what a restyle wants (sixteen charcoals to choose between). Until 2026-10-28 both layers collapsed a base
+    edit to one image, so 4/9/16-up with a base looked "stuck at one and done".
+    """
+    total = max(1, int(batch or 1))
+    step = max(1, int(seed_step or 1))
+    return total, [seed + i * step for i in range(total)]
+
+
 class Engine:
     """Server lifecycle plus one-generation-at-a-time generation, all off the UI thread."""
 
@@ -872,15 +885,16 @@ class Engine:
                     self.events.put(('status', 'mask uploaded: %s' % mask_name))
                 client_id = self._listen_progress() if self.progress else None
 
-                total = 1 if base_name else max(1, batch)
+                total, seeds = tile_plan(batch, seed, seed_step, has_base=bool(base_name))
                 runs = range(total) if (sequential or base_name) else [0]
                 paths, raws = [], []
                 for run_i in runs:
                     if self._cancel.is_set():
                         raise GenerationCancelled()
                     # every tile gets its own seed: seed, seed+step, seed+2*step ... A batch request cannot do this -
-                    # one latent batch is drawn from one seed - which is why sequential is the default.
-                    this_seed = seed + run_i * max(1, int(seed_step)) if (sequential and not base_name) else seed
+                    # one latent batch is drawn from one seed - which is why sequential is the default. A base image used
+                    # to keep one seed for every tile, which made a "series" of one repeated picture.
+                    this_seed = seeds[run_i] if (sequential or base_name) else seed
                     run_steps, run_cfg, value = steps, cfg, None
                     if sweep and sweep.get('values'):
                         value = sweep['values'][run_i % len(sweep['values'])]
@@ -5702,8 +5716,10 @@ class App:
             outpaint = tuple(self._pads)
             edit_base = self._current
 
-        # an edit yields exactly one result, so an N-up layout does not apply
-        batch = 1 if (edit_base or mask_path or outpaint or _force_single) else self._batch()
+        # A mask fill or an outpaint yields exactly one result, so an N-up layout does not apply to them. A restyle from a
+        # base image does apply: 4/9/16-up on a base is a set of variations to choose between, and the engine runs them
+        # one at a time with consecutive seeds.
+        batch = 1 if (mask_path or outpaint or _force_single) else self._batch()
         model = _profile or (self.model_var.get() if hasattr(self, 'model_var') else zg.DEFAULT_MODEL)
 
         if not self._history or self._history[-1] != prompt:
@@ -5724,9 +5740,10 @@ class App:
             self.hint.configure(text='expanding %s by %s px'
                                      % (self._short_name(Path(edit_base).name), list(outpaint)))
         elif self.base_path:
+            first = int(self.seed.get())
+            many = ('  (%d variations, seeds %d..%d)' % (batch, first, first + batch - 1)) if batch > 1 else ''
             self.hint.configure(text='starting from %s%s at strength %.2f%s'
-                                % (self.base_path.name, self._base_age_note(), self.denoise.get(),
-                                   '  (layout ignored: an edit is one image)' if self._batch() > 1 else ''))
+                                % (self.base_path.name, self._base_age_note(), self.denoise.get(), many))
         else:
             self.hint.configure(text='')
         if batch == 1:
@@ -5737,14 +5754,17 @@ class App:
                 self.hint.configure(text='this shape peaked at %.1f GiB (%s) - close to the %.1f GiB on this card. '
                                          'Lower the size, or use one image at a time.'
                                          % (vram / 1024.0, src, VRAM_TOTAL_MIB / 1024.0))
-            if not self.seq_var.get():
+            # a base image is always run tile by tile with consecutive seeds (tile_plan), whatever the tick says, so the
+            # one-batch wording would be a lie for it
+            varies = self.seq_var.get() or bool(self.base_path)
+            if not varies:
                 self.hint.configure(text='one batch shares seed %s across all %d tiles - tick "one image at a time" '
                                          'for a different seed per tile' % (seed, batch))
             cols = 2 if batch == 4 else 4 if batch == 16 else 3
             self.status.configure(text='queued… %d images at %d px -> %d px sheet, %s'
                                   % (batch, size, size * cols + (cols - 1) * 6,
                                      'seeds %d-%d one at a time' % (seed, seed + batch - 1)
-                                     if self.seq_var.get() else 'one batch of %d' % batch))
+                                     if varies else 'one batch of %d' % batch))
         try:
             steps = int(self.steps_var.get())
         except (AttributeError, ValueError):
