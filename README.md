@@ -347,6 +347,38 @@ Each render records `scene` / `scene_of` in its sidecar, the banner says how man
 chains one scene at a time on the idle card. On the screenplay in `D:/Codex/House Rules 2026 v3/Pool Hall Misfits/`,
 `scenes.detect` finds **86 set-ups** (the authored count) with a median of 254 words each.
 
+### A shot list you can hand to an editor
+
+`scenes.detect` decides what a set-up **is**; `shotlist.py` turns each one into a card with an identity:
+
+```
+python shotlist.py --script screenplay.txt --film "THE LAST POCKET" --code TLP \
+                   --out shotlist.json --markdown shotlist.md
+```
+
+```json
+{"film": "THE LAST POCKET", "code": "TLP", "shots": [
+  {"id": "S01-0001", "scene": 1, "scene_title": "SCENE ONE - OPENING",
+   "slug": "1. EXT. PORT MERIDIAN / INT. THE LAST POCKET - NIGHT",
+   "place": "EXT. PORT MERIDIAN / INT. THE LAST POCKET", "time": "NIGHT",
+   "camera": "Start against rain-streaked glass, then travel beside the rail.",
+   "prompt": "ISA rolls a ferry token across her knuckles. A sleeve crease remains on her cheek.",
+   "prompt_truncated": false, "source_words": 44, "full_text": "...",
+   "elements": [], "checks": []}]}
+```
+
+There is **one** notion of a set-up: the boundaries come from `scenes.detect`, so a card cannot disagree with what Generate
+would have split. The shape itself is the one a 2026-10-28 prototype produced - two of its cards survived in temp and are
+copied into `test_shotlist.py` as the golden values, since they were the only specification that existed. Reading them back
+settled three things: `source_words` counts the **card's own text** (the prototype reported 67 against a 14-word prompt),
+`time` is everything after the **first** dash of a slug (`INT. ROOM - UNDER THE RAIL - CONTINUOUS` keeps the tail), and the
+card's text starts at its **slug**, not at the `SCENE ...` header above it. The prototype's own text also ran on into the
+next scene's header - the boundary leak `scenes.py` documents fixing - so a re-parse reports 44 words where the prototype
+said 67, and that difference is the fix.
+
+`elements` and `checks` are emitted as empty lists because that is what the prototype emitted: they were never filled, and
+their meaning is not recoverable from the surviving output, so inventing one would be a second specification.
+
 **`order: Sequence`** reads a storyboard in film order: numbered pictures first, by the `scene` / `scene_of` their
 sidecars record, then everything else newest-first - so a test render made today does not land in the middle of a scene.
 The pane and the strip both honour it.
