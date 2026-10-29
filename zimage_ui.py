@@ -4090,7 +4090,7 @@ class App:
         win = tk.Toplevel(self.root)
         win.title('The prompt asks for two things')
         win.transient(self.root)
-        shown = ' and '.join('%s "%s"' % (a, b) for a, b in clashes[:2])
+        shown = '; '.join('"%s" and "%s"' % (a, b) for a, b in clashes[:2])
         ttk.Label(win, justify='left', wraplength=470,
                   text=('This prompt asks for both %s.\n\n'
                         'Both are sent, and the render follows one of them - measured: a charcoal style with "black line '

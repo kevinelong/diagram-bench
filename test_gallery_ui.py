@@ -962,6 +962,41 @@ def main():
     app.style_var.set('none'); app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
     app._clash_answered = None; app.busy = False; root.update()
 
+    print('\n-- the clash dialog has two ways out and names both halves')
+    # an earlier block stubbed ask_prompt_clash on the instance; drop the override so the real dialog builds
+    app.__dict__.pop('ask_prompt_clash', None)
+    snap = {}
+    real_wait = app.root.wait_window
+
+    def fake_wait(win):
+        texts = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                try:
+                    t = str(child.cget('text'))
+                except Exception:
+                    t = ''
+                if t:
+                    texts.append(t)
+                walk(child)
+
+        walk(win)
+        snap['texts'] = texts
+        win.destroy()
+
+    app.root.wait_window = fake_wait
+    try:
+        answer = app.ask_prompt_clash([('black line only', 'charcoal')],
+                                      'black line only, white background', [(0, 15)])
+    finally:
+        app.root.wait_window = real_wait
+    joined = ' | '.join(snap.get('texts') or [])
+    check('it offers both outs', any(t.startswith('Remove') for t in snap['texts'])
+          and 'Keep and generate' in snap['texts'], joined[:100])
+    check('and names the pair it is about', '"black line only"' in joined and '"charcoal"' in joined, joined[:120])
+    check('closing it means keep', answer == 'keep', answer)
+
     print('\n-- a layout on a base image is a series, not one image')
     ok, seeds16 = zui.tile_plan(16, 100, 1, has_base=True)
     check('a base image keeps the whole layout', ok == 16, str(ok))
