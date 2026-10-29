@@ -1028,8 +1028,10 @@ STARTER_PROMPTS = [
     # 77-token encoder has never seen; what it can draw is the nouns: mannequin, boxes, cylinders, joints, no shading.
     ('mannequin', "an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere "
                   "joints, unshaded, plain grey background"),
-    ('construction', 'thin construction lines over the figure: centre line, a box around the ribcage, cylinders on the '
-                     'limbs, white background, black line only'),
+    # "in the same pose" is load-bearing: the construction studies came back frontal until the prompt named the pose, and
+    # then held it at 0.72 with the guides still drawn (measured 2026-10-28), so the starter says it too.
+    ('construction', 'thin construction lines over the figure in the same pose: centre line, a box around the ribcage, '
+                     'cylinders on the limbs, white background, black line only'),
     # a genre needs its own words in the prompt (measured: a genre suffix alone stays a photograph)
     ('blueprint', 'engineering blueprint of a chair: white lines on a blue ground, orthographic, front and side'),
 ]

@@ -498,7 +498,8 @@ generate" - highlighting the box's own half (the style's words are not the box's
 dialog's job). Escape keeps, and the question is asked once per prompt text.
 
 To keep the pose in a restyle, **the prompt has to name it**: construction studies came back frontal until "in the same
-seated pose" was added, and then held at 0.72 with the blue guides still drawn. The strength that makes a medium land is
+seated pose" was added, and then held at 0.72 with the blue guides still drawn - so the `construction` starter itself now
+says "in the same pose". The strength that makes a medium land is
 also the strength that lets composition drift, so what must not move has to be said.
 
 Two caveats worth knowing before trusting a style: a **genre** (`icon`, `diagram`, `blueprint`) needs its genre words in
