@@ -75,3 +75,52 @@ Both paths, through the real window and the real engine, 16 tiles at 384 px:
 | 16-up, one batch | **17.1 s** | 16 tiles on seed 1234, plus a 1554x1554 contact sheet (4 x 4 + 2 px gutters) |
 
 The extra PNG after the 16 tiles is the assembled sheet, not a stray render.
+
+## Backlog closed: combinations that had never been rendered
+
+Ten probes in one pass (`tools/construction_media_trial.py`), one question for the medium and one for the content.
+
+| probe | medium | content | what it actually is |
+|---|---|---|---|
+| **diagram style + the construction words**, klein 0.78 | **yes** | yes | **thin black outline on white** - the genre lands when the *prompt* carries it |
+| the same, turbo 0.78 | no | yes | a photograph with a line-art overlay - turbo will not take the genre |
+| **blue pencil + construction over the blocks**, klein 0.72 | **yes** | yes | **the artist's artefact**: blue-pencil construction lines on a block figure |
+| charcoal + construction over the blocks, klein 0.72 | no | yes | reads as *graphite* - see the contradiction below |
+| pencil 0.72, klein | yes | no | hatching arrives, the seated figure drifts away |
+| pencil 0.78, turbo | yes | yes | confirms the +0.06 offset for a third medium |
+| blue pencil 0.78, turbo | no | yes | blue pencil is a klein strength; turbo inks the dress and stops |
+| icon 0.78, klein | no | yes | a suffix cannot make an icon of a photograph |
+| blueprint 0.78, klein | no | yes | white overlay lines on a photograph |
+| watercolour 0.72 and 0.78, klein | 1 of 3 | **no** | **the weakest style shipped**: an illustration, and the content drifts |
+
+Four consequences, all of them things the earlier pass could not see:
+
+1. **A genre needs its words in the prompt.** `diagram` alone failed at 0.78 ("an illustrated portrait scene with
+   labels"); `diagram` **plus** the construction words produced a thin-line diagram on white. The starters already carry
+   those words, which is why they work.
+2. **A contradiction inside the prompt is a real failure mode.** Charcoal plus "black line only, white background" came
+   back as graphite: the construction words and the charcoal suffix fight each other. The style guard checks *prompt against
+   style*, not *prompt against prompt*; that second guard does not exist, so this has to be known rather than caught.
+3. **For a construction study, blue pencil is the medium that works** on klein (0.72, over a block figure). Charcoal over
+   blocks loses its charcoal to the "black line only" words.
+4. **Watercolour is documented as unreliable**, not silently shipped as if it worked: 0.72 and 0.78 both drift the content,
+   and only one of three renders read as watercolour at all.
+
+## Failures now say what failed
+
+`: `workflow failed`` became `workflow failed: <node type>: <exception message>`, read out of ComfyUI's history entry. Two
+renders failed during this pass (`RuntimeError: workflow failed`) and neither reproduced on an immediate retry with the same
+seed and parameters - transient server faults, not parameters - but the next one will say which node and why.
+
+## The 16-up smoke, and a bug in the smoke itself
+
+`tools/smoke_16up.py` closes the test gap between the suite (which checks the dispatch against a stub) and a real run:
+
+| path | wall time | tiles | seeds | sheet |
+|---|---|---|---|---|
+| one batch | **13.6 s** | 16 | one (1234) | 1554 x 1554 |
+| one at a time | 129.3 s | 16 | 1234-1249 | 1554 x 1554 |
+
+The first run of the smoke reported 129 s *and* varying seeds for the "one batch" path. The app was right; the smoke was
+wrong - `app.seq_var.set(not a.sequential)` inverted its own flag. Fixed and re-measured, which is how the 13.6 s row exists
+at all. A verification tool that has not been verified is just a second source of doubt.

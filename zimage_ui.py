@@ -826,12 +826,29 @@ class Engine:
             if pid in h:
                 entry = h[pid]
                 if entry.get('status', {}).get('status_str') == 'error':
-                    raise RuntimeError('workflow failed')
+                    # "workflow failed" alone is undiagnosable - it cost a guess about whether a failure was a bug, an
+                    # OOM or a transient server fault. ComfyUI puts the node and the exception in the status messages.
+                    raise RuntimeError('workflow failed: %s' % self._history_error(entry))
                 imgs = [i for out in (entry.get('outputs') or {}).values() for i in out.get('images', [])]
                 if imgs:
                     return imgs
             time.sleep(0.3)
         raise RuntimeError('timed out waiting for the image')
+
+    @staticmethod
+    def _history_error(entry):
+        """The node and exception out of a failed history entry, in one line."""
+        try:
+            for kind, data in entry.get('status', {}).get('messages') or []:
+                if kind == 'execution_error':
+                    node = data.get('node_type') or data.get('node_id') or '?'
+                    text = (data.get('exception_message') or data.get('exception_type') or 'no message').strip()
+                    return '%s: %s' % (node, ' '.join(text.split())[:200])
+                if kind == 'execution_interrupted':
+                    return 'interrupted'
+        except Exception:
+            pass
+        return 'no detail in the history entry'
 
     def _download(self, img):
         q = urllib.parse.urlencode({'filename': img['filename'], 'subfolder': img.get('subfolder', ''),

@@ -490,6 +490,12 @@ intact. The genre styles (`icon`, `diagram`, `blueprint`) sit at 0.78, because a
 0.78 produced "an illustrated portrait scene with labels", which is why the genre words live in the prompt (the
 `construction` starter) instead.
 
+Two caveats worth knowing before trusting a style: a **genre** (`icon`, `diagram`, `blueprint`) needs its genre words in
+the prompt as well - `diagram` alone rendered "an illustrated portrait scene with labels", while `diagram` plus the
+construction words rendered a thin-line diagram - and **watercolour is the weak one**, drifting the content at both 0.72 and
+0.78 (one render in three read as watercolour at all). Contradictory words fail too: charcoal plus "black line only, white
+background" comes back as graphite (`STYLE-STRENGTH-2026-10-28.md` has the tables).
+
 The strength is also **model-specific**: turbo reads charcoal as "an oil painting" at 0.65 and 0.72 and only draws charcoal
 at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweeping `ALL` takes the larger number. A style
 never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
@@ -932,7 +938,8 @@ image - the window set `batch = 1`, the engine `total = 1` - so picking 4/9/16-u
 and done. Now the layout applies to a restyle and the engine runs the tiles one at a time with consecutive seeds
 (`tile_plan`); a mask fill and an outpaint stay one image, because those are edits of one region rather than a set of
 alternatives. Measured: 4-up charcoal at strength 0.72 from one photograph took 85.9 s and produced four distinct studies
-on seeds 777-780 plus a 2x2 sheet. At 0.72 the room and seating can drift a little between tiles; that is the strength
+on seeds 777-780 plus a 2x2 sheet. `python tools/smoke_16up.py` re-checks the whole path end to end (13.6 s in one batch,
+129.3 s one at a time, sheet 1554x1554) and exits non-zero on any failure. At 0.72 the room and seating can drift a little between tiles; that is the strength
 that makes the medium land, so pick the tile whose composition you want rather than expecting all four to match.
 
 **rephrase** sits directly under the prompt box and rewrites it with synonyms - no model, no server, so it always works.
