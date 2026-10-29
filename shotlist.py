@@ -94,6 +94,29 @@ def _unit_card(text_unit, running_scene):
     }
 
 
+def prompt_for(card, words=50):
+    """A card's text cut to what the encoder actually reads, at a sentence end when one falls inside the budget.
+
+    The prototype's cards carried a hand-written one-liner. A parsed card carries the scene's whole action block - median
+    154 words on The Last Pocket, 198 of 199 cards past the cap - so the renderer has to cut, and the cut should be a
+    sentence rather than a word in the middle. A card with no action line falls back to its slug, then to its camera note:
+    an empty prompt would render the fallback prompt and look like a working card.
+    """
+    text = (card.get('prompt') or '').strip()
+    if not text:
+        text = ' '.join(b for b in ((card.get('slug') or ''), (card.get('camera') or '')) if b).strip()
+    if not text:
+        return ''
+    parts = text.split()
+    if len(parts) <= words:
+        return ' '.join(parts)
+    head = ' '.join(parts[:words])
+    cut = max(head.rfind('. '), head.rfind('; '), head.rfind('? '), head.rfind('! '))
+    if cut >= len(head) // 2:
+        head = head[:cut + 1]
+    return head.strip(' ,;')
+
+
 def parse(text, film='', code=''):
     """Screenplay text -> {'film', 'code', 'shots'}. One card per set-up, ids S<scene>-<n>."""
     found = scenes.detect(text)
@@ -105,6 +128,7 @@ def parse(text, film='', code=''):
         seen[scene] = seen.get(scene, 0) + 1
         is_title = bool(scenes.HEADER.match(title)) if title else False
         shots.append({
+            'card': index,
             'id': 'S%02d-%04d' % (scene, seen[scene]),
             'scene': scene,
             'scene_title': title if is_title else '',

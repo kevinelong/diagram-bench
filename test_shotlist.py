@@ -95,6 +95,35 @@ def main():
     check('no slug, so the whole text is the prompt', plain[0]['slug'] == '' and plain[0]['prompt'] == 'a red fox in snow',
           '%r/%r' % (plain[0]['slug'], plain[0]['prompt']))
 
+    print('\n-- the card carries its running position')
+    check('cards are numbered in script order', [c['card'] for c in doc['shots']] == [1, 2],
+          str([c['card'] for c in doc['shots']]))
+    repeated = shotlist.parse('7. INT. A - NIGHT\n\nOne.\n\n1. INT. B - DAY\n\nTwo.\n\n7. INT. C - NIGHT\n\nThree.\n')
+    ids = [c['id'] for c in repeated['shots']]
+    check('a film numbered twice still has unique ids', len(ids) == len(set(ids)) == 3, str(ids))
+    check('and the running position disambiguates them', [c['card'] for c in repeated['shots']] == [1, 2, 3],
+          str([c['card'] for c in repeated['shots']]))
+
+    print('\n-- cutting a card to what an encoder reads')
+    long_card = {'prompt': ('She sets the glass down. ' * 20).strip(), 'slug': 'INT. ROOM', 'camera': ''}
+    cut = shotlist.prompt_for(long_card, words=20)
+    check('a long block is cut inside the budget', len(cut.split()) <= 21, '%d words' % len(cut.split()))
+    check('and at a sentence end, not mid-word', cut.endswith('.'), repr(cut[-24:]))
+    check('a short block is passed through untouched',
+          shotlist.prompt_for({'prompt': 'A hand on the felt.'}) == 'A hand on the felt.')
+    check('a card with no action falls back to its slug',
+          shotlist.prompt_for({'prompt': '', 'slug': 'INT. THE LAST POCKET', 'camera': 'Low.'}) == 'INT. THE LAST POCKET Low.')
+    check('a card with nothing at all gives an empty prompt, not a crash',
+          shotlist.prompt_for({}) == '')
+
+    print('\n-- the file name a card gets')
+    import zimage_ui
+    name = zimage_ui.shot_filename('20261029-090000', 'TLP_S01-0001', 1024, 768, 7)
+    check('the stamp, the id, the size and the seed are all there',
+          name == '20261029-090000_TLP_S01-0001_1024x768_seed7.png', name)
+    check('the gallery can still parse the seed', int(name.rsplit('_seed', 1)[1].split('_')[0].split('.')[0]) == 7, name)
+    check('and the size', name.split('_')[-2] == '768x0' or '1024x768' in name, name)
+
     print('\n-- writing it out')
     tmp = Path(tempfile.mkdtemp(prefix='shotlist-test-'))
     out, md = tmp / 'shotlist.json', tmp / 'shotlist.md'

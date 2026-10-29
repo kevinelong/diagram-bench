@@ -181,6 +181,12 @@ def main():
     shot(root, '01-start')
 
     print('\n-- an automatically opened folder is scrolled into view and drawn in reverse video (2026-10-27)')
+    # The startup grouping runs on a debounce, so sampling the plan once made this check a race: it passed on a fast run
+    # and failed on a slow one (seen 2026-10-29). Wait for the groups, then judge them.
+    for _ in range(120):
+        if app._plan and app._plan.get('groups'):
+            break
+        app._poll(); root.update(); time.sleep(0.05)
     real_groups2 = list(app._plan['groups']) if app._plan else []
     if real_groups2:
         if getattr(app, '_regroup_job', None):
@@ -897,6 +903,39 @@ def main():
     app.style_var.set('none')
     app.negative.delete('1.0', 'end')
     app.busy = False
+
+    print('\n-- a shot list renders one card per shot, named after its id')
+    shot_doc = {'film': 'THE LAST POCKET', 'code': 'TLP', 'shots': [
+        {'id': 'S01-0001', 'card': 1, 'scene': 1, 'place': 'EXT. PORT MERIDIAN', 'time': 'NIGHT',
+         'prompt': 'ISA rolls a ferry token across her knuckles.', 'slug': '1. EXT. PORT MERIDIAN - NIGHT'},
+        {'id': 'S02-0001', 'card': 2, 'scene': 2, 'place': 'INT. THE LAST POCKET', 'time': 'CONTINUOUS',
+         'prompt': 'KES places a second coin beside hers.', 'slug': '2. INT. THE LAST POCKET - CONTINUOUS'},
+    ]}
+    shot_path = tmp / 'shotlist.json'
+    shot_path.write_text(json.dumps(shot_doc), encoding='utf-8')
+    app.busy = False; app.engine.calls.clear()
+    started = app.start_shotlist(shot_path)
+    root.update()
+    check('the shot list starts', started is True, str(started))
+    args_, kw_ = app.engine.calls[-1]
+    check('the first card goes out now', 'ISA rolls' in args_[0], args_[0][:40])
+    check('its id names the file', kw_.get('name') == 'S01-0001', str(kw_.get('name')))
+    check('and it is card 1 of 2', (kw_.get('scene'), kw_.get('of')) == (1, 2),
+          str((kw_.get('scene'), kw_.get('of'))))
+    check('the queue holds the rest', len(app._scene_queue or []) == 1, str(len(app._scene_queue or [])))
+    app.busy = False; app.engine.calls.clear()
+    app._run_next_scene(); root.update()
+    args2, kw2 = app.engine.calls[-1]
+    check('the next card goes out with its own id', kw2.get('name') == 'S02-0001', str(kw2.get('name')))
+    check('and its own words', 'KES places' in args2[0], args2[0][:40])
+    check('the queue is empty now', not app._scene_queue, str(app._scene_queue))
+    app.busy = False; app.engine.calls.clear()
+    app._run_next_scene(); root.update()
+    check('a finished queue says so and stops', not app.engine.calls and 'done' in app.status['text'].lower(),
+          app.status['text'][:40])
+    check('a missing file is a sentence, not a traceback', app.start_shotlist(tmp / 'nope.json') is False,
+          app.hint['text'][:50])
+    shot_path.unlink(missing_ok=True)
 
     print('\n-- a picture made from a folder base is visible at once')
     saved_plan, saved_group, saved_soon = app._plan, app.group_var.get(), app._regroup_soon

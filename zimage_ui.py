@@ -717,6 +717,15 @@ class GenerationCancelled(Exception):
     """Raised inside the worker when the user pressed Stop; the partial run is discarded."""
 
 
+def shot_filename(stamp, name, width, height, seed, suffix=''):
+    """`<stamp>_<name>_<w>x<h>_seed<n><suffix>.png`.
+
+    The id goes in front of the size and seed because the gallery parses both: `_seed` and `%dx%d` have to survive, or a
+    card's own file stops being restorable from its name. Measured against the gallery's restore path.
+    """
+    return '%s_%s_%dx%d_seed%d%s.png' % (stamp, name, width, height, seed, suffix)
+
+
 def prompt_clashes(text):
     """Word pairs in one prompt that ask for different things. Returns [(a, b), ...] for the banner and the hint."""
     low = (text or '').lower()
@@ -882,7 +891,7 @@ class Engine:
 
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
-                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1,
+                 outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1, name=None,
                  scene=None, of=None):
         """One image, or a sheet of N.
 
@@ -967,7 +976,8 @@ class Engine:
                         except Exception:
                             real_w, real_h = width, height
                         suffix = '' if total == 1 else ('_%02d' % (run_i + k + 1))
-                        path = out / ('%s_%dx%d_seed%d%s.png' % (stamp, real_w, real_h, this_seed, suffix))
+                        path = out / (shot_filename(stamp, name, real_w, real_h, this_seed, suffix) if name
+                                      else '%s_%dx%d_seed%d%s.png' % (stamp, real_w, real_h, this_seed, suffix))
                         path.write_bytes(raw)
                         paths.append(path)
                         raws.append(raw)
@@ -4341,7 +4351,8 @@ class App:
         self._scene_total = len(found)
         first = found[0]
         self.status.configure(text='scene 1 of %d · %s' % (self._scene_total, (first['title'] or 'untitled')[:48]))
-        self.generate(_prompt=first['text'], _scene=(1, self._scene_total), _force_single=True)
+        self.generate(_prompt=first['text'], _scene=(1, self._scene_total), _force_single=True,
+                      _shot=first.get('id'))
 
     def _run_next_scene(self):
         if not getattr(self, '_scene_queue', None):
@@ -4356,7 +4367,41 @@ class App:
         # kept for the grader: when the picture lands, "does it show this scene" needs the scene, not just its number
         self._scene_current = (item.get('text') or '', item.get('title') or '')
         self.status.configure(text='scene %d of %d · %s' % (index, total, (item['title'] or 'untitled')[:48]))
-        self.generate(_prompt=item['text'], _scene=(index, total), _force_single=True)
+        self.generate(_prompt=item['text'], _scene=(index, total), _force_single=True, _shot=item.get('id'))
+
+    def start_shotlist(self, path):
+        """Queue one render per card of a shot list, first one now, each file named after its card id.
+
+        The cards come from `shotlist.py`, the same shape the 2026-10-28 prototype produced. Their text is a whole action
+        block (median 154 words on The Last Pocket), so each is cut with `shotlist.prompt_for` before it reaches a 50-word
+        encoder - the cut is visible in the status line's word count rather than silent.
+        """
+        try:
+            import shotlist
+            doc = json.loads(Path(path).read_text(encoding='utf-8'))
+        except Exception as e:
+            self.hint.configure(text='cannot read %s: %s' % (Path(path).name, type(e).__name__))
+            return False
+        cards = doc.get('shots') or []
+        if not cards:
+            self.hint.configure(text='%s has no cards' % Path(path).name)
+            return False
+        self._shotlist_doc = doc
+        self._scene_total = len(cards)
+
+        def as_unit(card):
+            text = shotlist.prompt_for(card)
+            label = ' '.join(x for x in (card.get('id') or '', (card.get('place') or '')[:40]) if x)
+            return {'text': text, 'title': label, 'id': card.get('id')}
+
+        first = as_unit(cards[0])
+        self._scene_queue = [as_unit(c) for c in cards[1:]]
+        self.text.delete('1.0', 'end')
+        self.text.insert('1.0', first['text'])
+        self.status.configure(text='card 1 of %d · %s · %d words of the card'
+                              % (self._scene_total, first['title'] or 'untitled', len(first['text'].split())))
+        self.generate(_prompt=first['text'], _scene=(1, self._scene_total), _force_single=True, _shot=first.get('id'))
+        return True
 
     def _grade_scene(self, path, scene_text, title, index, total):
         """Ask the vision model whether the picture shows the scene it was made from, and write the answer beside it.
@@ -5780,7 +5825,7 @@ class App:
     def _batch(self):
         return {'single': 1, '4-up (2x2)': 4, '9-up (3x3)': 9, '16-up (4x4)': 16}.get(self.layout_var.get(), 1)
 
-    def generate(self, _profile=None, _force_single=False, _prompt=None, _scene=None):
+    def generate(self, _profile=None, _force_single=False, _prompt=None, _scene=None, _shot=None):
         """Render once.
 
         `_profile` and `_force_single` exist for the ALL sweep, which drives this per model. `_prompt` and `_scene` exist
@@ -5956,7 +6001,8 @@ class App:
                              sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,
                              hires=hires, hires_denoise=0.45, sweep=sweep,
                              seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1),
-                             scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None))
+                             scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None),
+                             name=_shot)
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()
@@ -6024,7 +6070,9 @@ class App:
                     self.busy = False
                     self.gen_btn.state(['!disabled'])
                     self.status.configure(text='ready — type a prompt and press Enter')
-                    if self.args.auto:
+                    if getattr(self.args, 'shotlist', ''):
+                        self.start_shotlist(self.args.shotlist)
+                    elif self.args.auto:
                         self.generate()
                 elif kind == 'queued':
                     self.status.configure(text='generating…')
@@ -6322,6 +6370,7 @@ def main(argv):
     ap.add_argument('--initial', default='', help='pre-fill the prompt box')
     ap.add_argument('--initial-file', default='', help='pre-fill from a text file (avoids shell quoting of a long prompt)')
     ap.add_argument('--auto', action='store_true', help='generate once as soon as the server is ready')
+    ap.add_argument('--shotlist', default='', help='render one card per shot from a shotlist.json, named after each id')
     args = ap.parse_args(argv)
 
     # Per-monitor DPI awareness, before the window exists. Without it Windows scales the finished window as a bitmap,

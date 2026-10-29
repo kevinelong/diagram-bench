@@ -379,6 +379,25 @@ said 67, and that difference is the fix.
 `elements` and `checks` are emitted as empty lists because that is what the prototype emitted: they were never filled, and
 their meaning is not recoverable from the surviving output, so inventing one would be a second specification.
 
+### Rendering a shot list, one card per shot
+
+```
+python zimage_ui.py --shotlist shotlist.json
+```
+
+Each card is rendered in order on the idle card, and **its file is named after its id** -
+`20261029-085216_TLP_S01-0001_512x512_seed900.png` - so a cut can be assembled from the directory. `shot_filename()` keeps
+`_seed` and `%dx%d` in the name, because the gallery parses both to restore a picture.
+
+Cards carry the scene's **whole action block** (median 154 words on The Last Pocket, 198 of 199 past the encoder's budget),
+so each is cut by `shotlist.prompt_for` at a sentence end inside ~50 words before it is sent; a card with no action line
+falls back to its slug and camera note. Measured end to end on the real screenplay: **199 cards**, two rendered in **41 s**
+(512 px, klein), the second named `..._S02-0001_...`, queue drained.
+
+One thing the real film taught: it numbers its slugs **1..8 repeatedly** (eight act sequences), so `scene` repeats while
+`card` is the running position and ids stay unique (`S07-0025` is card *n* of a later act's scene 7). `card` exists for
+exactly that - ordering and naming never depend on the writer's numbering being global.
+
 **`order: Sequence`** reads a storyboard in film order: numbered pictures first, by the `scene` / `scene_of` their
 sidecars record, then everything else newest-first - so a test render made today does not land in the middle of a scene.
 The pane and the strip both honour it.
