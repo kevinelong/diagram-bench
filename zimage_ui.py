@@ -544,7 +544,7 @@ STYLE_CONFLICT_WORDS = ('oil painting', 'watercolour painting', 'watercolor pain
 # render follows one of them non-deterministically. The style guard compares the prompt with the style it is paired with;
 # this compares the text with itself, and it only ever advises - a contradiction is a style choice, so nothing blocks.
 PROMPT_CLASHES = (
-    ('black line only', ('charcoal', 'watercolour', 'watercolor', 'chalk', 'pastel', 'smudge', 'smudged', 'ink wash')),
+    ('black line only', ('charcoal', 'watercolour', 'watercolor', 'chalk', 'pastel', 'ink wash')),
     ('white background', ('photograph', 'photo', 'photorealistic', 'depth of field', 'natural light')),
     ('line drawing', ('photograph', 'photo', 'photorealistic')),
     ('flat colour', ('photograph', 'photo', 'cinematic', 'film grain')),
@@ -4092,9 +4092,13 @@ class App:
         win = tk.Toplevel(self.root)
         win.title('The prompt asks for two things')
         win.transient(self.root)
-        shown = '; '.join('"%s" and "%s"' % (a, b) for a, b in clashes[:2])
+        groups = {}
+        for a, b in clashes:
+            groups.setdefault(a, []).append(b)
+        shown = '; '.join('"%s" together with %s' % (a, ', '.join('"%s"' % b for b in bs))
+                          for a, bs in list(groups.items())[:2])
         ttk.Label(win, justify='left', wraplength=470,
-                  text=('This prompt asks for both %s.\n\n'
+                  text=('This prompt asks for %s in the same sentence.\n\n'
                         'Both are sent, and the render follows one of them - measured: a charcoal style with "black line '
                         'only" came back as graphite.\n'
                         'The words are highlighted in the prompt. What should happen?' % shown)
