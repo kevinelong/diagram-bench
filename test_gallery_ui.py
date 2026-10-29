@@ -898,6 +898,39 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- a picture made from a folder base is visible at once')
+    saved_plan, saved_group, saved_soon = app._plan, app.group_var.get(), app._regroup_soon
+    pics = list(app._files)[:2]
+    if len(pics) == 2:
+        app._regroup_soon = lambda: None
+        app.group_var.set(True)
+        app._plan = {'groups': [{'label': 'one', 'items': [{'path': str(pics[0])}]},
+                                {'label': 'two', 'items': [{'path': str(pics[1])}]}],
+                     'recent': [], 'ungrouped': []}
+        app._render_folder_bar(); app.select_folder(0)
+        check('a folder is open first', app._active_folder == 0, str(app._active_folder))
+        fresh = tmp / 'fresh-unfiled.png'
+        Image.new('RGB', (32, 32), 'teal').save(fresh)
+        app._base_from_gallery = False
+        feed_image(app, fresh)
+        check('a picture with no gallery base leaves the folder alone', app._active_folder == 0, str(app._active_folder))
+        app._base_from_gallery = True
+        feed_image(app, fresh)
+        check('a folder base closes the folder so the result can be seen', app._active_folder is None,
+              str(app._active_folder))
+        check('and the hint says why it is unfiled', 'unfiled' in app.hint['text'], app.hint['text'])
+        app._show_new_results()
+        check('with no folder open it changes nothing', app._active_folder is None, str(app._active_folder))
+        fresh.unlink(missing_ok=True)
+        app._base_from_gallery = False
+        app.select_folder(None)
+        app._plan = saved_plan
+        app.group_var.set(saved_group)
+        app._regroup_soon = saved_soon
+        app._render_folder_bar(); app.refresh_gallery(); app.busy = False
+    else:
+        check('two pictures exist for this check', False, str(len(pics)))
+
     print('\n-- a prompt that contradicts itself is named, not blocked')
     pairs = zui.prompt_clashes('thin construction lines, black line only, white background, charcoal drawing on '
                                'textured paper')

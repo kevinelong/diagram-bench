@@ -516,6 +516,21 @@ at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweep
 never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
 slider still holds what we put there.
 
+## A picture made from a folder base is visible at once
+
+Newly generated pictures are deliberately **unfiled**: the plan keeps a recent bucket ("recent N stay ungrouped"), because a
+picture one second old has no siblings to be grouped with yet. With a folder open, the contents pane shows that folder's
+members - so a brand-new picture was in the gallery and invisible at the same time.
+
+The fix moves the **view**, never the membership: when the base came from a click in the gallery (`_base_from_gallery`) and a
+folder is open, the folder closes so the strip shows the new pictures, newest first, and the hint says *"new pictures are
+unfiled until the grouping next runs, so the folder is closed to show them - the folder bar opens it again"*. Filing a fresh
+picture into the folder you were browsing would have corrupted its counts and made its label a lie; the grouping has a
+measured membership check and is not bent for a display convenience.
+
+A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
+was asked for.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of

@@ -2473,6 +2473,29 @@ class App:
                                  sum(len(g['items']) for g in plan['groups']) + len(plan['ungrouped']) + len(plan['recent']),
                                  plan.get('seconds') or 0, len(plan['recent'])))
 
+    def _show_new_results(self):
+        """Make a just-made picture visible when a folder is open.
+
+        A new picture stays *unfiled* by design - the plan keeps a recent bucket, "recent N stay ungrouped", because a
+        picture one second old has no siblings to be grouped with yet. With a folder open, its contents pane shows that
+        folder's members only, so a brand-new picture is in the gallery and invisible at the same time. Bending the
+        grouping to admit it would corrupt the counts and the label, and the folder would be lying about its contents.
+
+        So the *view* moves, not the membership: the folder closes and the strip shows the new pictures, newest first,
+        with one click back to the folder on the folder bar.
+        """
+        if not getattr(self, '_base_from_gallery', False):
+            return False          # only the case this exists for: a base chosen by clicking a picture in a folder
+        if not self._folders_view_active() or self._active_folder is None:
+            return False
+        try:
+            self.select_folder(None)
+        except Exception:
+            return False
+        self.hint.configure(text='new pictures are unfiled until the grouping next runs, so the folder is closed '
+                                 'to show them - the folder bar opens it again')
+        return True
+
     def _render_folder_bar(self):
         """A folder *button*, not a dropdown: it names what is open and it opens the full-screen folder browser.
 
@@ -6097,6 +6120,7 @@ class App:
                     self.hint.configure(text='saved; %s; %s' % (base_note, note))
                     self._current = Path(path)
                     self._run_recorded(path)
+                    self._show_new_results()
                     self.copy_btn.state(['!disabled'])
                 elif kind == 'scene_graded':
                     index, total, answer, reason, name = payload
