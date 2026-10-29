@@ -1030,6 +1030,8 @@ STARTER_PROMPTS = [
                   "joints, unshaded, plain grey background"),
     ('construction', 'thin construction lines over the figure: centre line, a box around the ribcage, cylinders on the '
                      'limbs, white background, black line only'),
+    # a genre needs its own words in the prompt (measured: a genre suffix alone stays a photograph)
+    ('blueprint', 'engineering blueprint of a chair: white lines on a blue ground, orthographic, front and side'),
 ]
 
 
@@ -4060,6 +4062,58 @@ class App:
         self.root.wait_window(win)
         return choice['value']
 
+    @staticmethod
+    def _rival_spans(prompt, words):
+        """Whole-word ranges in the prompt box for the words that clash. Words only present in the style suffix are not
+        in the box, so there is nothing to remove there - 'clear style' is the style dialog's job."""
+        low = (prompt or '').lower()
+        found = []
+        for word in words:
+            start = 0
+            while True:
+                at = low.find(word, start)
+                if at < 0:
+                    break
+                end = at + len(word)
+                whole = (at == 0 or not low[at - 1].isalnum()) and (end >= len(low) or not low[end].isalnum())
+                if whole and not any(a <= at < b for a, b in found):
+                    found.append((at, end))
+                start = end
+        return sorted(found)
+
+    def ask_prompt_clash(self, clashes, prompt, spans):
+        """Name both halves and offer to drop the rival words. Escape keeps: dropping typed words is the aggressive act.
+
+        Measured reason to ask at all: "black line only, white background" plus a charcoal suffix came back as graphite.
+        """
+        words = sorted({prompt[a:b] for a, b in spans})
+        win = tk.Toplevel(self.root)
+        win.title('The prompt asks for two things')
+        win.transient(self.root)
+        shown = ' and '.join('%s "%s"' % (a, b) for a, b in clashes[:2])
+        ttk.Label(win, justify='left', wraplength=470,
+                  text=('This prompt asks for both %s.\n\n'
+                        'Both are sent, and the render follows one of them - measured: a charcoal style with "black line '
+                        'only" came back as graphite.\n'
+                        'The words are highlighted in the prompt. What should happen?' % shown)
+                  ).pack(anchor='w', padx=14, pady=(14, 8))
+        choice = {'value': 'keep'}
+        row = ttk.Frame(win)
+        row.pack(fill='x', padx=14, pady=(4, 14))
+
+        def pick(value):
+            choice['value'] = value
+            win.destroy()
+
+        ttk.Button(row, text='Remove %s and generate' % ('them' if len(words) > 1 else 'it'),
+                   command=lambda: pick('remove')).pack(side='left')
+        ttk.Button(row, text='Keep and generate', command=lambda: pick('keep')).pack(side='left', padx=(6, 0))
+        win.protocol('WM_DELETE_WINDOW', lambda: pick('keep'))
+        win.grab_set()
+        win.focus_set()
+        self.root.wait_window(win)
+        return choice['value']
+
     def _apply_style(self, prompt, style_name):
         """Append the style suffix exactly once: a prompt that already ends with it is left alone.
 
@@ -5746,6 +5800,26 @@ class App:
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', prompt)
                     self.hint.configure(text='removed %s from the prompt' % ', '.join(removed))
+
+            # A prompt that contradicts itself gets the same courtesy: both halves named, and the box's half offered for
+            # removal. Asked once per prompt text, so pressing Generate again does not reopen it.
+            clashes = prompt_clashes(prompt + ' ' + self._style_suffix(chosen_style))
+            if clashes and getattr(self, '_clash_answered', None) != prompt:
+                box_words = [b for _a, b in clashes if b in prompt.lower()] + \
+                            [a for a, _b in clashes if a in prompt.lower()]
+                spans = self._rival_spans(prompt, box_words)
+                if spans:
+                    self._mark_conflicts(spans, prompt)
+                    answer = self.ask_prompt_clash(clashes, prompt, spans)
+                    self._mark_conflicts([])
+                    self._clash_answered = prompt
+                    if answer == 'remove':
+                        removed = sorted({prompt[a:b] for a, b in spans})
+                        prompt = self._strip_spans(prompt, spans)
+                        self.text.delete('1.0', 'end')
+                        self.text.insert('1.0', prompt)
+                        self.hint.configure(text='removed %s; the prompt no longer asks for two things at once'
+                                                 % ', '.join(removed))
 
         # ALL is a sweep of models, not of scenes: it runs after the style question has been answered, and never splits
         if _profile is None and getattr(self, 'model_var', None) is not None \

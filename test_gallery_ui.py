@@ -914,12 +914,53 @@ def main():
     fg = str(app.banner['foreground'])
     check('and it is the warning colour, not the plain one',
           fg in ('#ffc24b', '#9a6400') and fg != str(app.theme.text), '%s vs text %s' % (fg, app.theme.text))
-    app.busy = False; app.engine.calls.clear(); app.generate(); root.update()
-    check('generate says it again in the hint', 'they fight' in app.hint['text'], app.hint['text'])
+    kept_clash = []
+    app.ask_prompt_clash = lambda clashes, prompt, spans: (kept_clash.append(clashes), 'keep')[1]
+    app.busy = False; app.engine.calls.clear(); app._clash_answered = None
+    app.generate(); root.update()
+    check('the dialog offers the choice', kept_clash and kept_clash[0][0] == ('black line only', 'charcoal'),
+          str(kept_clash))
     check('and still dispatches - advice never blocks', len(app.engine.calls) == 1, str(len(app.engine.calls)))
     app.style_var.set('none')
     app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')   # the next block needs a prompt to dispatch
     app.busy = False; root.update()
+
+    print('\n-- the contradiction guard can remove the rival words')
+    check('the spans are the words in the box only',
+          zui.App._rival_spans('thin construction lines, black line only, white background', ['black line only']) ==
+          [(25, 40)], str(zui.App._rival_spans('thin construction lines, black line only, white background',
+                                               ['black line only'])))
+    check('a word only in the style suffix yields no span',
+          zui.App._rival_spans('black line only', ['charcoal']) == [],
+          str(zui.App._rival_spans('black line only', ['charcoal'])))
+
+    asked = {'n': 0}
+    app.ask_prompt_clash = lambda clashes, prompt, spans: (asked.__setitem__('n', asked['n'] + 1), 'remove')[1]
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'thin construction lines, black line only, white background')
+    app.style_var.set('charcoal'); app._clash_answered = None
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    sent = app.engine.calls[-1][0][0]
+    check('remove takes the rival words out of what is sent', 'black line only' not in sent, sent[:70])
+    check('and keeps the style', sent.endswith(zui.STYLES['charcoal']), sent[-60:])
+    check('the box itself loses them too', 'black line only' not in app.text.get('1.0', 'end'), app.text.get('1.0', 'end'))
+    check('the dialog was asked once', asked['n'] == 1, str(asked['n']))
+    app.busy = False; app.engine.calls.clear(); app._clash_answered = app.text.get('1.0', 'end').strip()
+    app.generate(); root.update()
+    check('pressing Generate again does not reopen it', asked['n'] == 1, str(asked['n']))
+
+    app.ask_prompt_clash = lambda clashes, prompt, spans: (asked.__setitem__('n', asked['n'] + 1), 'keep')[1]
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'thin construction lines, black line only, white background')
+    app.style_var.set('charcoal'); app._clash_answered = None
+    app.busy = False; app.engine.calls.clear()
+    app.generate(); root.update()
+    kept = app.engine.calls[-1][0][0]
+    check('keep sends the prompt as typed', 'black line only' in kept and kept.endswith(zui.STYLES['charcoal']),
+          kept[:70])
+    app.style_var.set('none'); app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')
+    app._clash_answered = None; app.busy = False; root.update()
 
     print('\n-- a layout on a base image is a series, not one image')
     ok, seeds16 = zui.tile_plan(16, 100, 1, has_base=True)

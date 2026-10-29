@@ -157,3 +157,24 @@ a charcoal suffix returned graphite.
 Writing it surfaced two things worth keeping: `Theme` had no `warning` colour (added, light and dark), and `cget` returns a
 Tcl object, so the test compares `str(...)` and by value - a Windows theme change rebuilds `app.theme`, while the banner
 keeps the colour it was given.
+
+## Round 3: the guard acts, and watercolour is cleared of the charge
+
+**Watercolour as text-to-image works.** The same suffix that failed five times over a photograph produced a genuine
+watercolour - soft washes, paper texture, painterly edges - from text alone at 1,024 px. So the style is sound; what fails
+is *restyling a photograph*, which is a different job and is now described as such.
+
+**The contradiction guard now offers the fix**, not just the diagnosis. `_rival_spans` finds the clashing words that are in
+the prompt box (the style's own words are not the box's to drop - clearing the style is the style dialog's job), the box
+highlights them, and the dialog offers *"Remove it/them and generate"* against *"Keep and generate"*. Escape keeps, because
+dropping words someone typed is the aggressive action, and the question is asked **once per prompt text** so pressing
+Generate again does not reopen it.
+
+Also: a `blueprint` starter now carries its own genre words, the way the `diagram` and `icon` starters do - a genre suffix
+alone stays a photograph (measured), so the words have to be in the prompt.
+
+Checks added: the spans come only from the box, a suffix-only rival yields none, remove takes the words out of what is sent
+while keeping the style, keep sends the prompt as typed, and the dialog is asked exactly once. Suite exit 0.
+
+Two of my own mistakes were caught by the suite rather than by review: the first version of the clash test triggered the
+**real** modal dialog and hung the run for ten minutes (stubbed now), and my span expectation was off by one character.

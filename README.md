@@ -493,7 +493,9 @@ intact. The genre styles (`icon`, `diagram`, `blueprint`) sit at 0.78, because a
 A prompt that **contradicts itself** is named rather than blocked: `PROMPT_CLASHES` compares the text (plus the style's
 own suffix) for rival pairs - "black line only" against charcoal or watercolour, "white background" against a photograph -
 and the banner says *"asks for both 'black line only' and 'charcoal'"* in the warning colour, with the same sentence in the
-hint when Generate is pressed. It advises only; a contradiction is a style choice.
+hint when Generate is pressed. Pressing Generate then offers the fix - **"Remove it and generate"** against "Keep and
+generate" - highlighting the box's own half (the style's words are not the box's to drop; clearing the style is the style
+dialog's job). Escape keeps, and the question is asked once per prompt text.
 
 To keep the pose in a restyle, **the prompt has to name it**: construction studies came back frontal until "in the same
 seated pose" was added, and then held at 0.72 with the blue guides still drawn. The strength that makes a medium land is
@@ -501,8 +503,9 @@ also the strength that lets composition drift, so what must not move has to be s
 
 Two caveats worth knowing before trusting a style: a **genre** (`icon`, `diagram`, `blueprint`) needs its genre words in
 the prompt as well - `diagram` alone rendered "an illustrated portrait scene with labels", while `diagram` plus the
-construction words rendered a thin-line diagram - and **watercolour is the weak one**, drifting the content at both 0.72 and
-0.78 (one render in three read as watercolour at all). Contradictory words fail too: charcoal plus "black line only, white
+construction words rendered a thin-line diagram - and **watercolour is the weak one as a restyle**, drifting the content at both 0.72 and
+0.78 - though from text alone it produces a genuine watercolour (washes, paper, soft edges), so the style is sound and the
+*failed job* is restyling a photograph. Contradictory words fail too: charcoal plus "black line only, white
 background" comes back as graphite (`STYLE-STRENGTH-2026-10-28.md` has the tables).
 
 The strength is also **model-specific**: turbo reads charcoal as "an oil painting" at 0.65 and 0.72 and only draws charcoal
