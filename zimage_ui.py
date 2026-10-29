@@ -258,6 +258,8 @@ class Theme:
         self.tooltip_bg = _mix(self.window, '#3a3a3a' if self.dark else '#ffffe0', 0.9)
         self.win_mark = '#9be2b4' if self.dark else '#1a6b2a'
         self.error = '#ff7b72' if self.dark else '#c0392b'
+        # for advice rather than failure - a prompt that contradicts itself, a default that drifts from the source
+        self.warning = '#ffc24b' if self.dark else '#9a6400'
 
     # -- where the values come from
     def _system(self, name):
@@ -537,6 +539,17 @@ STYLE_CONFLICT_WORDS = ('oil painting', 'watercolour painting', 'watercolor pain
                         '3d render', 'vector icon', 'charcoal', 'graphite', 'pencil', 'pen and ink', 'chalk',
                         'pastel', 'blueprint')
 
+# Pairs that contradict each other inside *one* prompt. Measured 2026-10-28: "thin construction lines ... black line only,
+# white background" plus a charcoal suffix came back as **graphite** - the line words and the medium words fight, and the
+# render follows one of them non-deterministically. The style guard compares the prompt with the style it is paired with;
+# this compares the text with itself, and it only ever advises - a contradiction is a style choice, so nothing blocks.
+PROMPT_CLASHES = (
+    ('black line only', ('charcoal', 'watercolour', 'watercolor', 'chalk', 'pastel', 'smudge', 'smudged', 'ink wash')),
+    ('white background', ('photograph', 'photo', 'photorealistic', 'depth of field', 'natural light')),
+    ('line drawing', ('photograph', 'photo', 'photorealistic')),
+    ('flat colour', ('photograph', 'photo', 'cinematic', 'film grain')),
+)
+
 STYLES = {
     'none': '',
     'photo': 'photograph, natural light, shallow depth of field',
@@ -702,6 +715,18 @@ def read_meta(png):
 
 class GenerationCancelled(Exception):
     """Raised inside the worker when the user pressed Stop; the partial run is discarded."""
+
+
+def prompt_clashes(text):
+    """Word pairs in one prompt that ask for different things. Returns [(a, b), ...] for the banner and the hint."""
+    low = (text or '').lower()
+    found = []
+    for a, rivals in PROMPT_CLASHES:
+        if a in low:
+            for b in rivals:
+                if b in low and (a, b) not in found:
+                    found.append((a, b))
+    return found
 
 
 def tile_plan(batch, seed, seed_step, has_base=False):
@@ -5432,12 +5457,20 @@ class App:
         vram_text = '   ·   VRAM ≈ %.1f/%.1f GiB' % (vram / 1024.0, VRAM_TOTAL_MIB / 1024.0) if vram else ''
         if vram and vram > VRAM_TOTAL_MIB - 400:
             colour = self.theme.error
+        # a prompt that contradicts itself is worth saying once, in the line that describes what Generate will do
+        try:
+            clash = prompt_clashes(self.text.get('1.0', 'end') + ' ' + self._style_suffix(style))
+        except Exception:
+            clash = []
+        clash_text = ('   ·   asks for both %r and %r' % clash[0]) if clash else ''
+        if clash:
+            colour = self.theme.warning
         self.banner.configure(text='%s   ·   %s · %s steps · %s · %s px · %s   ·   '
-                                   'style %s   ·   seed %s%s%s'
+                                   'style %s   ·   seed %s%s%s%s'
                                    % (mode, model, self.steps_var.get(), self.sampler_var.get(),
                                       self.size_var.get(), what, style, self.seed.get(),
                                       ' (held)' if getattr(self, 'hold_seed_var', None)
-                                      and self.hold_seed_var.get() else '', vram_text),
+                                      and self.hold_seed_var.get() else '', vram_text, clash_text),
                               foreground=colour)
 
     # -- persistence, starters, prompt history -------------------------------
@@ -5789,6 +5822,10 @@ class App:
         steps = self._clamp_steps(model, steps)
         style = self.style_var.get() if hasattr(self, 'style_var') else 'none'
         full_prompt = self._apply_style(prompt, style)
+        clash = prompt_clashes(full_prompt)
+        if clash:
+            self.hint.configure(text='this prompt asks for both %s and %s - they fight, and the render follows one of them'
+                                     % clash[0])
         self._follow_prediction(full_prompt)
         cfg = zg.MODELS.get(model, {}).get('cfg', 1.0)
         negative = self.negative.get('1.0', 'end').strip() if hasattr(self, 'negative') else ''

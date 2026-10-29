@@ -490,6 +490,15 @@ intact. The genre styles (`icon`, `diagram`, `blueprint`) sit at 0.78, because a
 0.78 produced "an illustrated portrait scene with labels", which is why the genre words live in the prompt (the
 `construction` starter) instead.
 
+A prompt that **contradicts itself** is named rather than blocked: `PROMPT_CLASHES` compares the text (plus the style's
+own suffix) for rival pairs - "black line only" against charcoal or watercolour, "white background" against a photograph -
+and the banner says *"asks for both 'black line only' and 'charcoal'"* in the warning colour, with the same sentence in the
+hint when Generate is pressed. It advises only; a contradiction is a style choice.
+
+To keep the pose in a restyle, **the prompt has to name it**: construction studies came back frontal until "in the same
+seated pose" was added, and then held at 0.72 with the blue guides still drawn. The strength that makes a medium land is
+also the strength that lets composition drift, so what must not move has to be said.
+
 Two caveats worth knowing before trusting a style: a **genre** (`icon`, `diagram`, `blueprint`) needs its genre words in
 the prompt as well - `diagram` alone rendered "an illustrated portrait scene with labels", while `diagram` plus the
 construction words rendered a thin-line diagram - and **watercolour is the weak one**, drifting the content at both 0.72 and

@@ -29,6 +29,36 @@ CONSTRUCTION = ('thin construction lines over the figure: centre line, a box aro
 CONTENT = 'Is the picture a seated woman in a dress, in a chair, with her legs crossed?'
 
 
+def round2():
+    """The three candidates the first round left open.
+
+    W  watercolour with an object anchor instead of three adjectives - it was the one style that did not land.
+    G  a genre style *with* its genre words in the prompt (diagram worked that way; icon and blueprint were never tried).
+    P  a construction study that asks for the source pose by name, since both winners came back frontal.
+    """
+    anchored = 'watercolour on rough cold-press paper, visible brush strokes, paper showing through'
+    icon_words = 'flat vector icon of a seated woman: simple shapes, flat colour, plain white background'
+    blueprint_words = 'engineering blueprint of a seated woman: white lines on a blue ground, orthographic'
+    pose_blue = ('thin construction lines over the figure in the same seated pose: centre line, a box around the ribcage, '
+                 'cylinders on the limbs, blue pencil underdrawing on white paper')
+    watercolour_q = 'Is this a watercolour painting - visible brush strokes on textured paper - rather than a photograph?'
+    icon_q = 'Is this a flat vector icon - simple shapes, flat colour, plain background - rather than a photograph?'
+    blueprint_q = 'Is this an engineering blueprint - white lines on a blue ground - rather than a photograph?'
+    blue_q = 'Is this drawn in blue pencil lines?'
+    return [
+        ('W1 watercolour anchored at 0.72, klein', SUBJECT + ', ' + anchored, 'figure', 0.72, KLEIN, watercolour_q,
+         CONTENT),
+        ('W2 watercolour anchored at 0.78, klein', SUBJECT + ', ' + anchored, 'figure', 0.78, KLEIN, watercolour_q,
+         CONTENT),
+        ('G1 icon + genre words at 0.78, klein', icon_words, 'figure', 0.78, KLEIN, icon_q, CONTENT),
+        ('G2 blueprint + genre words at 0.78, klein', blueprint_words, 'figure', 0.78, KLEIN, blueprint_q, CONTENT),
+        ('P1 blue pencil construction + named pose at 0.72, klein', pose_blue, 'mannequin', 0.72, KLEIN, blue_q,
+         'Is the figure seated, with one arm resting down and the legs crossed to one side?'),
+        ('P2 blue pencil construction + named pose at 0.65, klein', pose_blue, 'mannequin', 0.65, KLEIN, blue_q,
+         'Is the figure seated, with one arm resting down and the legs crossed to one side?'),
+    ]
+
+
 def plan():
     """(label, prompt, base, strength, model, medium question, content question)"""
     diagram_q = ('Is this a technical line diagram of a figure - thin black lines on a plain white background - rather '
@@ -65,6 +95,7 @@ def main():
     ap.add_argument('--out', default=r'C:/Users/kevin/AppData/Local/Temp/construction-media')
     ap.add_argument('--size', type=int, default=1024)
     ap.add_argument('--seed', type=int, default=4245)
+    ap.add_argument('--round2', action='store_true', help='the three follow-up candidates instead of the first ten')
     a = ap.parse_args()
 
     out = Path(a.out)
@@ -76,7 +107,7 @@ def main():
         raise SystemExit('start the server first')
 
     rows = []
-    for label, prompt, base, strength, model, q_medium, q_content in plan():
+    for label, prompt, base, strength, model, q_medium, q_content in (round2() if a.round2 else plan()):
         steps = 4 if model == KLEIN else 9
         print('\n-- %s' % label, flush=True)
         while not engine.events.empty():

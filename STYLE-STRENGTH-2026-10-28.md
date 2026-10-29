@@ -124,3 +124,36 @@ seed and parameters - transient server faults, not parameters - but the next one
 The first run of the smoke reported 129 s *and* varying seeds for the "one batch" path. The app was right; the smoke was
 wrong - `app.seq_var.set(not a.sequential)` inverted its own flag. Fixed and re-measured, which is how the 13.6 s row exists
 at all. A verification tool that has not been verified is just a second source of doubt.
+
+## Round 2: the three candidates, closed
+
+| probe | medium | content/pose | verdict |
+|---|---|---|---|
+| watercolour **anchored** ("rough cold-press paper, visible brush strokes, paper showing through") 0.72 and 0.78 | **no, no** | no, no | the wording is not the problem - watercolour does not restyle a photograph at these strengths on klein |
+| icon **+ genre words** 0.78 | **yes** | n/a | a flat vector illustration of the sitter - the genre lands, exactly as `diagram` did |
+| blueprint **+ genre words** 0.78 | **yes** | n/a | same |
+| blue pencil + construction **+ "in the same seated pose"** 0.72 | **yes** | **yes** | blocks, blue guides and **the seated pose held** |
+| the same at 0.65 | no | yes | 0.65 is below the strength where a medium appears at all |
+
+Three conclusions:
+
+1. **Naming the pose is what keeps the pose.** Both earlier construction winners came back frontal because nothing asked for
+   the seat; adding "in the same seated pose" held it at 0.72 while still laying down the blue guides. The strength that
+   makes a medium land cannot also be expected to preserve composition - the prompt has to say what must not move.
+2. **The genre rule generalises**: `diagram`, `icon` and `blueprint` all landed their genre once the *prompt* carried the
+   genre words. The content question is the wrong measure for a genre change (an icon of a scene is not the scene) - the
+   icons kept the sitter, which is what an icon is.
+3. **Watercolour is not fixable by wording at 0.72-0.78.** Two different suffixes, two strengths, five renders: it stays an
+   illustration. It probably works as a text-to-image look, which is untested; as a photo restyle it is the weak style and the
+   docs now say so.
+
+## A guard for a prompt that contradicts itself
+
+`PROMPT_CLASHES` names the rival pairs, `prompt_clashes()` finds them in the text **plus the style suffix**, and the result
+shows in the banner (in the warning colour) and once in the hint when Generate is pressed. It advises and never blocks - a
+contradiction is a style choice, not an error. The pair that started it, measured: *"black line only, white background"* with
+a charcoal suffix returned graphite.
+
+Writing it surfaced two things worth keeping: `Theme` had no `warning` colour (added, light and dark), and `cget` returns a
+Tcl object, so the test compares `str(...)` and by value - a Windows theme change rebuilds `app.theme`, while the banner
+keeps the colour it was given.

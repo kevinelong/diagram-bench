@@ -898,6 +898,29 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- a prompt that contradicts itself is named, not blocked')
+    pairs = zui.prompt_clashes('thin construction lines, black line only, white background, charcoal drawing on '
+                               'textured paper')
+    check('the measured contradiction is found', ('black line only', 'charcoal') in pairs, str(pairs))
+    check('a clean prompt has none', zui.prompt_clashes('a photograph of a mug on a wooden table') == [],
+          str(zui.prompt_clashes('a photograph of a mug on a wooden table')))
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'thin construction lines, black line only, white background')
+    app.style_var.set('charcoal'); root.update()
+    check('the banner names both halves', 'black line only' in app.banner['text'] and 'charcoal' in app.banner['text'],
+          app.banner['text'])
+    # by value and through str(): cget returns a Tcl object, and a Windows theme change rebuilds app.theme, while the
+    # banner keeps the colour it was given
+    fg = str(app.banner['foreground'])
+    check('and it is the warning colour, not the plain one',
+          fg in ('#ffc24b', '#9a6400') and fg != str(app.theme.text), '%s vs text %s' % (fg, app.theme.text))
+    app.busy = False; app.engine.calls.clear(); app.generate(); root.update()
+    check('generate says it again in the hint', 'they fight' in app.hint['text'], app.hint['text'])
+    check('and still dispatches - advice never blocks', len(app.engine.calls) == 1, str(len(app.engine.calls)))
+    app.style_var.set('none')
+    app.text.delete('1.0', 'end'); app.text.insert('1.0', 'a fox')   # the next block needs a prompt to dispatch
+    app.busy = False; root.update()
+
     print('\n-- a layout on a base image is a series, not one image')
     ok, seeds16 = zui.tile_plan(16, 100, 1, has_base=True)
     check('a base image keeps the whole layout', ok == 16, str(ok))
