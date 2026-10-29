@@ -178,3 +178,21 @@ while keeping the style, keep sends the prompt as typed, and the dialog is asked
 
 Two of my own mistakes were caught by the suite rather than by review: the first version of the clash test triggered the
 **real** modal dialog and hung the run for ten minutes (stubbed now), and my span expectation was off by one character.
+
+## The pose word has to be specific
+
+Same seed, same base, same strength (klein, 0.72, over the seated block figure), only the phrase changed:
+
+| phrase in the prompt | pose held? | grader |
+|---|---|---|
+| "in the same **pose**" | **no** | "seated with arms down, but legs are not crossed" |
+| "in the same **seated** pose" | **yes** | "seated mannequin with arm down and crossed legs" |
+
+So the generic phrase is not enough - the pose has to be *named*. The `construction` starter therefore says "in the same
+seated pose", and the comment beside it says to swap "seated" for whatever your base needs rather than dropping back to the
+generic wording. The first version of that starter shipped the generic phrase, and a render over the seated base (an arm
+raised, legs missing) is what caught it: an edit made from a measurement is not the same as the measurement.
+
+Both starters were then rendered as shipped: the construction starter produced a block figure with construction lines, and
+the new blueprint starter ("engineering blueprint of a chair: white lines on a blue ground, orthographic, front and side")
+produced white lines on blue.

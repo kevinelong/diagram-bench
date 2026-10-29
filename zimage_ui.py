@@ -1028,10 +1028,12 @@ STARTER_PROMPTS = [
     # 77-token encoder has never seen; what it can draw is the nouns: mannequin, boxes, cylinders, joints, no shading.
     ('mannequin', "an articulated wooden artist's mannequin in the same pose: boxy ribcage, cylindrical limbs, sphere "
                   "joints, unshaded, plain grey background"),
-    # "in the same pose" is load-bearing: the construction studies came back frontal until the prompt named the pose, and
-    # then held it at 0.72 with the guides still drawn (measured 2026-10-28), so the starter says it too.
-    ('construction', 'thin construction lines over the figure in the same pose: centre line, a box around the ribcage, '
-                     'cylinders on the limbs, white background, black line only'),
+    # The pose word must be *specific*. On one seed over the seated block figure: "in the same pose" came back "seated
+    # with arms down, but legs are not crossed", while "in the same **seated** pose" held it ("seated mannequin with arm
+    # down and crossed legs"). Measured 2026-10-28. Change "seated" for the word your own base needs - "standing",
+    # "running" - but do not drop back to "the same pose": that is the weaker phrasing, measured.
+    ('construction', 'thin construction lines over the figure in the same seated pose: centre line, a box around the '
+                     'ribcage, cylinders on the limbs, white background, black line only'),
     # a genre needs its own words in the prompt (measured: a genre suffix alone stays a photograph)
     ('blueprint', 'engineering blueprint of a chair: white lines on a blue ground, orthographic, front and side'),
 ]
