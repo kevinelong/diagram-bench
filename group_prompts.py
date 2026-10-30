@@ -32,7 +32,10 @@ DEFAULT_THRESHOLD = 0.20
 FAMILY_THRESHOLD = 0.10
 # The share of the shorter root's words that must appear in the longer one for the two to be one family. Measured on the
 # gallery: one character written two ways sits at 0.88-0.90 containment while unrelated prompts fall far below it.
-FAMILY_CONTAINMENT = 0.85
+# How alike two roots must be to be one family. Measured on the real gallery: 0.50 merges wordings of one scene (as low
+# as 0.53 for two descriptions of six women by a pool) without chaining unrelated roots together; 0.55 leaves that pair
+# apart and 0.45 pulls the two largest families into one.
+ROOT_LINK = 0.50
 # Cosine alone is not enough: a three-word prompt ("a woman not a lady") sharing one word with a long character prompt
 # scores 0.46, because normalisation hides how little it says. An absolute idf floor cannot fix that - idf shrinks with
 # the corpus, so five identical prompts in a five-document lexicon share almost no weight - but *coverage* can: how
@@ -416,12 +419,6 @@ def _names_the_same_thing(a, b, min_words=2):
     return len(short) < len(long_) and long_[:len(short)] == short
 
 
-def _median_idf(token_sets, lexicon):
-    """The middle idf of the words these prompts use - the line between 'unusual here' and 'ordinary here'."""
-    values = sorted(lexicon['idf'].get(w, 0.0) for toks in token_sets.values() for w in toks)
-    return values[len(values) // 2] if values else 0.0
-
-
 def shared_prefix(texts):
     """The opening that every one of `texts` shares, at least 40 characters long, or ''.
 
@@ -664,13 +661,13 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
         families = {}
         root_list = list(roots)
         if len(root_list) > 1:
-            # Roots are joined when one's words are largely the other's: the same character written out twice - "android
-            # robot cyborg crazy fierce ... butch powerful" against "fierce mature butch powerful large muscled" - sits at
-            # cosine 0.76-0.80, too far for a threshold, yet 90 % of the shorter root's words are inside the longer one.
-            # Containment on the roots only (they are whole prompts, so a template has already been cut) with a bar on how
-            # much that is, and on how many of the shared words are unusual in this gallery.
-            root_tokens = {text: set(tokens(text)) for text in root_list}
-            median = _median_idf(root_tokens, lexicon)
+            # Roots are joined when they describe the same scene, judged on their own idf cosine at a generous floor. The
+            # rules tried before this one each failed a real case: containment merged roots that merely shared a heading
+            # ("a full-body character concept sheet from multiple angles") and refused roots that paraphrase each other
+            # ("exactly six adult women sit in a single shallow semicircle ..." against "... sit cross-legged ..."), while
+            # linking on a shared opening chained a quarter of the gallery into one family. Measured at 0.50 on the real
+            # gallery: 68 families, largest 173 (unchanged), and every case previously reported is now one folder.
+            vectors = {text: vector(text, lexicon) for text in root_list}
             parent = {text: text for text in root_list}
 
             def find(a):
@@ -680,26 +677,9 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
                 return a
 
             for i, text_a in enumerate(root_list):
-                ta = root_tokens[text_a]
-                if len(ta) < 4:
-                    continue
                 for text_b in root_list[i + 1:]:
-                    tb = root_tokens[text_b]
-                    if len(tb) < 4:
-                        continue
-                    shared = ta & tb
-                    if len(shared) < 6 or len(shared) / float(min(len(ta), len(tb))) < FAMILY_CONTAINMENT:
-                        continue
-                    # What makes two roots one subject is that the shorter one is *almost entirely inside* the longer: it is
-                    # the same sentence at a different length ("life drawing model reference, photograph, ..." against
-                    # "life-drawing model reference, photograph, ..."). An idf gate cannot do this job here - half this
-                    # gallery shares the camera vocabulary ("photo", "model", "natural light", "depth of field"), so those
-                    # words are only *two* above the median and the useful link was being refused on a technicality.
-                    shorter = ta if len(ta) <= len(tb) else tb
-                    differing = len(shorter - (ta & tb))
-                    if differing > max(2, int(0.05 * len(shorter))):
-                        continue
-                    parent[find(text_b)] = find(text_a)
+                    if cosine(vectors[text_a], vectors[text_b]) >= ROOT_LINK:
+                        parent[find(text_b)] = find(text_a)
             for text in root_list:
                 families[text] = find(text)
         for i, text in enumerate(root_list):

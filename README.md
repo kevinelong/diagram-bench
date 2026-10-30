@@ -661,6 +661,27 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## Families are joined by root similarity, at one measured floor
+
+Asked whether two folders that both begin `exactly six adult women sit…` should be one - one wording says "in a single
+shallow semicircle along the far edge of a large circular reflecting pool", the other "cross-legged on separate dark linen
+mats behind a round reflective pool". They are one scene, and the rules tried before this point each failed a real case:
+containment merged roots that merely shared a heading, refused roots that paraphrase each other (containment 0.6 here), and a
+shared-opening link chained a quarter of the gallery into one family (**252 pictures**).
+
+One rule remains: roots are joined when their own idf cosine is at least `ROOT_LINK = 0.50`. Swept on the real gallery -
+0.45 pulls the two largest families into one, 0.55 leaves this pair apart, 0.50 merges it without chaining.
+
+| case | before | now |
+|---|---|---|
+| `exactly six adult women sit…` (both wordings) | 2 folders | **1 folder of 14** |
+| `life drawing` / `live model` | 61 | **1 folder** |
+| the sigil scene | 1 | **1 (9)** |
+| the cyborg character | 1 | **1 (19)** |
+| `pictured are women` | 1 | **1 (39)** |
+| folders in total | 65 | **49** |
+| largest family | 173 | **173** (unchanged) |
+
 ## A family link must rest on the shorter prompt being inside the longer
 
 Asked whether synonyms would merge `life drawing`, `life-drawing`, `figure drawing` and `live figure` into one folder. They
