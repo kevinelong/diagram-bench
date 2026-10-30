@@ -1669,7 +1669,7 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(6):
+        for col in range(3):
             self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
@@ -1680,22 +1680,22 @@ class App:
         # header, so a folder open in the second column had no way in from there
         self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
                                           state='disabled')
-        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=3)
+        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=(3, 0))
         # a picture can carry its own provenance (a ComfyUI graph or an A1111 block), so a folder imported from another
         # pipeline can regain its categories without a human retyping prompts
         self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
-        self.contents_rec_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
+        self.contents_rec_btn.grid(row=1, column=0, sticky='we', padx=(0, 3), pady=(3, 0))
         self.contents_gal_btn = ttk.Button(self.contents_btns, text='Gallery\u2026',
                                            command=self.gallery_start)
-        self.contents_gal_btn.grid(row=0, column=5, sticky='we', padx=(3, 0))
+        self.contents_gal_btn.grid(row=1, column=1, sticky='we', padx=3, pady=(3, 0))
         self._tip(self.contents_gal_btn, 'Walk this folder one picture at a time, numbered, wrapping, nothing deleted. '
                                          'Arrows: right/down forward, left/up back, Esc stops.')
         self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
-        self.contents_cap_btn.grid(row=0, column=4, sticky='we', padx=(3, 0))
+        self.contents_cap_btn.grid(row=1, column=2, sticky='we', padx=(3, 0), pady=(3, 0))
         self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=1, column=0, columnspan=6, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=2, column=0, columnspan=3, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
