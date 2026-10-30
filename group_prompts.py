@@ -25,6 +25,10 @@ import re
 from collections import Counter
 
 DEFAULT_THRESHOLD = 0.20
+# Roots are whole prompts, so two roots that look alike are usually two runs of one scene; pictures drift further apart
+# than that when they are edited. Measured: at the picture threshold one family swallowed 69 series, which is a folder
+# nobody can read, so the roots are held to a tighter standard of "the same scene".
+FAMILY_THRESHOLD = 0.10
 # Cosine alone is not enough: a three-word prompt ("a woman not a lady") sharing one word with a long character prompt
 # scores 0.46, because normalisation hides how little it says. An absolute idf floor cannot fix that - idf shrinks with
 # the corpus, so five identical prompts in a five-document lexicon share almost no weight - but *coverage* can: how
@@ -421,7 +425,7 @@ def shared_prefix(texts):
     return prefix[:cut + 1] if cut > 0 else ''
 
 
-def label_for(prompts, members, width=60, lexicon=None):
+def label_for(prompts, members, width=60, lexicon=None, roots=None):
     """A folder name taken from the member that best represents the folder - never invented, never a bare fragment.
 
     It used to be the *oldest* member's prompt, which is how a folder of 303 pictures ended up called "less intense
@@ -430,6 +434,11 @@ def label_for(prompts, members, width=60, lexicon=None):
     minority cannot name it. A prompt with fewer than three content words is never chosen while a fuller one exists.
     """
     texts = [(prompts[m] or '').strip() for m in members]
+    # a family carries its roots: the instruction that last touched a picture is not what the folder is about
+    if roots:
+        root_texts = [' '.join(r.split()) for r in roots if r and str(r).strip()]
+        if root_texts:
+            texts = root_texts
     if not texts:
         return '(no prompt recorded)'
     try:
@@ -609,6 +618,48 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     # "this new picture belongs to that folder", and fitting it on a reduced set quietly broke both.
     every_prompt = [r['prompt'] for r in with_prompt]
     lexicon = fit_lexicon(every_prompt + [(r.get('prompt') or '') for r in head]) if every_prompt else None
+
+    # A picture is filed under the prompt its SERIES started from, not under the instruction that last touched it. An edit
+    # ("add guns, ammo, knives, weapons and armor") describes a change, not a subject, so on its own it makes a folder of
+    # five pictures that plainly belong with the pictures they were edited from. The root is recorded (sidecar
+    # `lineage_root`), so the roots are clustered once - the same rule, one level up - and every picture follows its root's
+    # family. Pictures without a root are grouped by their own text, as before.
+    roots = {}
+    for r in with_prompt:
+        root = ' '.join((r.get('root') or '').split())
+        if root:
+            roots.setdefault(root, []).append(r)
+    if roots:
+        families = {}
+        root_list = list(roots)
+        if len(root_list) > 1:
+            pseudo = [{'path': 'root:%d' % i, 'prompt': text, 'created': ''} for i, text in enumerate(root_list)]
+            fam = plan(pseudo, threshold=FAMILY_THRESHOLD, recent=0, min_group=1, keep_lexicon=False)
+            for g in fam['groups']:
+                for r in g['items']:
+                    families[int(r['path'].split(':')[1])] = g['label']
+        for i, text in enumerate(root_list):
+            families.setdefault(i, text)
+        by_family = {}
+        for i, text in enumerate(root_list):
+            by_family.setdefault(families[i], []).extend(roots[text])
+        family_paths = set()
+        for label, rows_here in by_family.items():
+            rows_here.sort(key=lambda r: r.get('created') or '')
+            family_paths.update(r['path'] for r in rows_here)
+            if len(rows_here) < min_group:
+                continue
+            counts = {stated_count(r.get('prompt')) for r in rows_here} - {None}
+            label_prompts = ([without_counts(r['prompt']) for r in rows_here] if len(counts) > 1
+                             else [r['prompt'] for r in rows_here])
+            groups.append({'label': label_for(label_prompts, range(len(label_prompts)), lexicon=lexicon,
+                                              roots=[r.get('root') for r in rows_here]),
+                           'title': label_for(label_prompts, range(len(label_prompts)), width=0, lexicon=lexicon,
+                                              roots=[r.get('root') for r in rows_here]),
+                           'items': rows_here, 'oldest': rows_here[0].get('created') or '',
+                           'newest': (rows_here[-1].get('created') or ''),
+                           'series': len({tuple(r.get('lineage') or [r['prompt']]) for r in rows_here})})
+        with_prompt = [r for r in with_prompt if r['path'] not in family_paths]
     # An "exact prompt" pre-pass used to bucket identical prompts before this pass ran. It was wrong in the direction that
     # matters: an exact bucket *absorbs* its rows, so a near-duplicate one word away ("... diverse naked women ...") went
     # into a different bucket and could never be clustered with it - five folders of one subject. The similarity pass sees

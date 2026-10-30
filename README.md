@@ -643,6 +643,36 @@ a review closed, and folder tiles were chosen by **newest four distinct** regard
 Wins themselves were already durable: `pair_rank` writes `wins/losses/ties/bouts` into each picture's own `.json`, so the
 order holds across folders and restarts.
 
+## Several base pictures, combined by the prompt
+
+`ReferenceLatent` sets the guiding latent for an edit model, and chaining one per picture sets one per reference. Measured
+(`tools/ref_probe.py`, fixed seed, swapping only the *second* reference's content): the picture changes by **29.2 %** of
+sampled pixels on z-image turbo and **49.4 %** on flux2 klein 9b - both engines take more than one reference, so no engine
+switch is needed today. `MULTI_REFERENCE` records it anyway: an engine that cannot combine is refused, or the window
+switches to one that can and says so, rather than silently rendering one of the selected pictures.
+
+Behaviour, which the graph keeps deliberately distinct:
+
+| selection | what happens |
+|---|---|
+| one picture, Use as Base | img2img of it; `denoise` still means "how far from that picture" |
+| several pictures, Use as Base | a **new** picture guided by each (one `ReferenceLatent` per picture), sampling from an empty latent at strength 1.0; a batch is clamped to 1, because a batch would only repeat the same combined picture |
+
+Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
+arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
+
+## A folder is a family: it belongs where its series started
+
+Reported: "add guns, ammo, knives, weapons and armor" sat as its own folder of five pictures, which plainly belonged with
+the pictures they were edited from. An edit instruction names a *change*, not a subject. Each picture now carries
+`lineage_root` (see below), the roots are clustered once at a tighter threshold (`FAMILY_THRESHOLD = 0.10`, because two
+roots that look alike are usually two runs of one scene), and every picture follows its root's family.
+
+Measured on the real gallery: the `figure model posing for room of art students` family is **57 pictures** and holds its
+comicbook and "add guns" descendants; `shehulk`, the cyborg wordings and `space pirate lady cat` stay separate; 57 folders
+in total. Each folder also carries `series` (how many distinct prompt chains it holds), which is what a two-tier view would
+show; the flat list shows the family.
+
 ## The prompt chain is recorded, not traced
 
 Grouping cannot recover intent from wording when the *form* changes. Measured on the real gallery: the prompt

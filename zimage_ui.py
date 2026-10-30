@@ -593,6 +593,11 @@ STYLE_STRENGTH = {
 # kept as `lineage_root`, because a folder family is named by where the series started.
 LINEAGE_MAX = 32
 
+# Measured with tools/ref_probe.py: chain one ReferenceLatent per picture, then swap the *second* reference's content at a
+# fixed seed - z-image turbo 29.2 % of sampled pixels changed, flux2 klein 9b 49.4 %. Both therefore accept several
+# references. The table exists so an engine that cannot be added later is refused rather than silently given one picture.
+MULTI_REFERENCE = {'z-image turbo': True, 'flux2 klein 9b uncensored': True}
+
 MODEL_STRENGTH_OFFSET = {'flux2 klein 9b uncensored': 0.00, 'z-image turbo': 0.06, zg.ALL_MODEL: 0.06}
 
 # Measured cost of one sequential request at 4 steps, on this box, with the model cache disabled. The cost is flat
@@ -931,7 +936,7 @@ class Engine:
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0, prompt_full=None,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
                  outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1, name=None,
-                 scene=None, of=None):
+                 scene=None, of=None, base_images=None):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -940,6 +945,7 @@ class Engine:
         """
         self._cancel.clear()
         self.last_workflow = None
+        base_images = [str(b) for b in (base_images or []) if b]
 
         def work():
             try:
@@ -953,7 +959,8 @@ class Engine:
                         'outpaint': list(outpaint) if outpaint else None,
                         'hires': (hires if hires > 1.0 else None),
                         'hires_denoise': (hires_denoise if hires > 1.0 else None),
-                        'scene': scene, 'scene_of': of}
+                        'scene': scene, 'scene_of': of,
+                        'base_images': (base_images or None)}
                 # The chain of prompts that produced this picture: copied from the base's own record and extended with
                 # this step, so it never has to be reconstructed (a walk over base_image breaks as soon as a base is
                 # deleted or moved, and an enhanced draft then loses the wording it came from). `prompt_full` is what was
@@ -973,6 +980,15 @@ class Engine:
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name, scale_base = None, None
+                # every reference is uploaded first, so the graph only names pictures the server already has
+                ref_names = []
+                for extra in base_images:
+                    try:
+                        ref_names.append(zg.upload_image('http://%s:%d' % (self.host, self.port), Path(extra)))
+                    except Exception as e:
+                        self.events.put(('error', 'could not upload reference %s: %s: %s'
+                                         % (Path(extra).name, type(e).__name__, e)))
+                        return
                 if base_path:
                     base_name = zg.upload_image('http://%s:%d' % (self.host, self.port), base_path)
                     self.events.put(('status', 'base image uploaded: %s' % base_name))
@@ -1020,7 +1036,8 @@ class Engine:
                                      batch=(1 if (sequential or base_name) else total),
                                      sampler=sampler, negative=negative, profile=profile,
                                      mask=mask_name, outpaint=outpaint,
-                                     hires=hires, hires_denoise=hires_denoise, scale_base=scale_base)
+                                     hires=hires, hires_denoise=hires_denoise, scale_base=scale_base,
+                                     base_images=ref_names)
                     self.last_workflow = wf
                     outs = self._queue_wait(wf)
                     for k, img in enumerate(outs):
@@ -2509,7 +2526,7 @@ class App:
         parts = [path.name]
         try:
             meta = json.loads(path.with_suffix('.json').read_text(encoding='utf-8'))
-            for key in ('prompt', 'style', 'model', 'negative', 'sweep', 'base_image', 'mask'):
+            for key in ('prompt', 'style', 'model', 'negative', 'sweep', 'base_image', 'base_images', 'mask'):
                 value = meta.get(key)
                 if value:
                     parts.append(str(value))
@@ -5948,15 +5965,22 @@ class App:
         Its prompt and seed come back with it, so an edit starts from what produced the picture rather than
         from whatever happens to be in the prompt box.
         """
-        path = self.selected[-1] if self.selected else self._current
-        if path is None:
+        chosen = [p for p in (self.selected or []) if p] or ([self._current] if self._current else [])
+        if not chosen:
             self.hint.configure(text='click a thumbnail first, then Use as Base')
             return
+        path = chosen[-1] if len(chosen) == 1 else chosen[0]
         self.select_file(path)
         self._set_base(path, from_gallery=True)
+        # every selected picture goes with it: more than one becomes a combined render, one stays an edit
+        self._bases = chosen
         self._paint()
-        self.status.configure(text='editing %s at strength %.2f - Enter sends it to the model'
-                              % (self._short_name(Path(path).name), self.denoise.get()))
+        if len(chosen) > 1:
+            self.status.configure(text='combining %d pictures - say in the prompt how they go together, Then Enter'
+                                  % len(chosen))
+        else:
+            self.status.configure(text='editing %s at strength %.2f - Enter sends it to the model'
+                                  % (self._short_name(Path(path).name), self.denoise.get()))
 
     def open_all(self):
         """Every image, scrolling, with the same search and star filters as the strip."""
@@ -6296,6 +6320,7 @@ class App:
 
     def clear_base(self):
         self.base_path = None
+        self._bases = []                 # the other references go with it, or a later render would still combine them
         if hasattr(self, 'clear_base_btn'):
             self.clear_base_btn.state(['disabled'])
         self._base_from_gallery = False
@@ -6864,6 +6889,20 @@ class App:
             sweep = {'param': choice, 'values': vals}
             self.hint.configure(text='sweeping %s across %d tiles: %s%s'
                                      % (choice, n, vals[:4], '...' if len(vals) > 4 else ''))
+        bases = [b for b in (getattr(self, '_bases', None) or []) if b]
+        if len(bases) > 1:
+            if not MULTI_REFERENCE.get(model, False):
+                alternate = next((name for name in zg.ALL_ORDER if MULTI_REFERENCE.get(name)), None)
+                if alternate is None:
+                    self.hint.configure(text='%s takes one picture; nothing here can combine several' % model)
+                    return
+                # switching engines rather than silently dropping the extra pictures, and saying so
+                self.model_var.set(alternate)
+                self.hint.configure(text='%s takes one picture - switched to %s, which combines several'
+                                         % (model, alternate))
+                model = alternate
+                steps = self._steps_ceiling(model) or steps
+            self.hint.configure(text='combining %d pictures with %s' % (len(bases), model))
         hires, self._pending_hires = self._pending_hires, 0.0
         self.run_started_at = time.time()
         self._run_desc = '%s px · %s steps · %s' % (size, steps, model)
@@ -6876,7 +6915,8 @@ class App:
                              hires=hires, hires_denoise=0.45, sweep=sweep,
                              seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1),
                              scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None),
-                             name=_shot, prompt_full=prompt)
+                             name=_shot, prompt_full=prompt,
+                             base_images=(bases if len(bases) > 1 else None))
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()
