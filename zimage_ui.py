@@ -629,7 +629,7 @@ def save_settings(data):
 
 THUMB_DIR = '.thumbs'
 SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
-THUMB_PX = 168
+THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show them larger than the old size
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
 RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
 RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
@@ -691,7 +691,24 @@ def thumb_for(png, cache_root=None, build=True):
     else:
         out = cache / (png.stem + '.jpg')
     try:
-        if out.exists() and out.stat().st_mtime >= png.stat().st_mtime:
+        # The cache is keyed by name and validated by mtime, which says nothing about the *size* it was built at. A
+        # marker records the size in force, so changing THUMB_PX rebuilds instead of serving stale, blurrier thumbnails.
+        marker = cache / '.px'
+        size_note = str(int(THUMB_PX))
+        try:
+            recorded = marker.read_text(encoding='utf-8').strip()
+        except OSError:
+            recorded = ''
+        stale_size = recorded != size_note
+        if stale_size:
+            marker.write_text(size_note, encoding='utf-8')
+            # and the old file must go: once the marker is right, the mtime check would happily keep serving a thumb
+            # built at the previous size (found by the test that builds at one size then changes it)
+            try:
+                out.unlink()
+            except OSError:
+                pass
+        if not stale_size and out.exists() and out.stat().st_mtime >= png.stat().st_mtime:
             return out
         if not build:
             return None          # a paint path asks what exists; the building happens off the UI thread
@@ -1652,7 +1669,7 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(5):
+        for col in range(6):
             self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
@@ -1668,12 +1685,17 @@ class App:
         # pipeline can regain its categories without a human retyping prompts
         self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
         self.contents_rec_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
+        self.contents_gal_btn = ttk.Button(self.contents_btns, text='Gallery\u2026',
+                                           command=self.gallery_start)
+        self.contents_gal_btn.grid(row=0, column=5, sticky='we', padx=(3, 0))
+        self._tip(self.contents_gal_btn, 'Walk this folder one picture at a time, numbered, wrapping, nothing deleted. '
+                                         'Arrows: right/down forward, left/up back, Esc stops.')
         self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
         self.contents_cap_btn.grid(row=0, column=4, sticky='we', padx=(3, 0))
         self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=1, column=0, columnspan=5, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=6, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -3162,8 +3184,13 @@ class App:
         chosen = [p for p in (self.selected or []) if p in set(cells)]
         self.review_start(paths=(chosen or cells))
 
-    def review_start(self, index=None, paths=None):
-        """Review the selected folder (or the biggest one) as most-similar-first A/B pairs, full screen."""
+    def review_start(self, index=None, paths=None, mode=None):
+        """Review the selected folder (or the biggest one) full screen: A/B pairs by default, or `mode='gallery'`.
+
+        Gallery mode used to be reachable only by opening the A/B window and switching the radio, which is not where
+        anybody would look for "walk through these pictures".
+        """
+        self._pending_review_mode = mode or 'rank'
         if not self._plan:
             self.hint.configure(text='turn folders on first - A/B review works inside a prompt folder')
             return
@@ -3221,7 +3248,8 @@ class App:
         info.grid(row=0, column=0, columnspan=4, sticky='ew', pady=(0, 4))
         mode_row = ttk.Frame(bar)
         mode_row.grid(row=1, column=0, columnspan=4, sticky='ew', pady=(0, 3))
-        self._review_mode = tk.StringVar(value='rank')
+        self._review_mode = tk.StringVar(value=getattr(self, '_pending_review_mode', None) or 'rank')
+        self._pending_review_mode = 'rank'
         ttk.Radiobutton(mode_row, text='Rank - mark a winner, delete nothing', value='rank',
                         variable=self._review_mode, command=self._review_relabel).pack(side='left')
         ttk.Radiobutton(mode_row, text='Gallery - one at a time, nothing deleted', value='gallery',
@@ -3255,7 +3283,10 @@ class App:
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
-        self._review_show_next()
+        if self._review_mode.get() == 'gallery':
+            self._review_relabel()          # one picture, the badge, Prev/Next - not the pair layout
+        else:
+            self._review_show_next()
 
 
     def _review_fit(self, lbl, path=None, redraw_only=False):
@@ -3286,6 +3317,14 @@ class App:
         if total <= 0:
             return ''
         return '%d / %d%s' % (index + 1, total, '  FIN' if index == total - 1 else '')
+
+    def gallery_start(self):
+        """Walk the open folder (or the whole source) one picture at a time."""
+        cells = list(getattr(self, '_content_order', []) or []) or list(self._files)
+        if len(cells) < 2:
+            self.hint.configure(text='nothing to walk here - open a folder with pictures in it')
+            return
+        self.review_start(paths=cells, mode='gallery')
 
     def gallery_series(self):
         """The pictures this review is about, in order - the folder's own list, not the pair schedule."""
