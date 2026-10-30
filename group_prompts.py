@@ -93,6 +93,9 @@ _CAPS_LABEL = re.compile(r'(?:^|\n|\u2022|\*)\s*([A-Z][A-Z0-9 \'&/\-]{2,40}?)\s*
 _BULLET_LABEL = re.compile(r"(?:\u2022|\*)\s*([A-Z][A-Za-z /'&\-]{1,40}?)\s*:\s*")
 _LABEL_ONLY_LINE = re.compile(r"(?m)^\s*(?:[\u2022\-\*]\s*)?([A-Z][A-Za-z /'&\-]{1,40}?)\s*:\s*$")
 _SLUG = re.compile(r'(?m)^\s*(?:INT|EXT|INT\./EXT\.)\s*\.?\s*$')
+# A prompt may carry the page it was copied from ("...(http://www.oafe.net/yo/mcxfs.php)"). That is not the subject, and
+# it once named a folder.
+_URL = re.compile(r'\(?\bhttps?://[^\s)]+\)?', re.I)
 _SENTENCE_OPENERS = ('the', 'a', 'an', 'on', 'in', 'at', 'around', 'beside', 'behind', 'with', 'this', 'these', 'her',
                      'his', 'their', 'it', 'there')
 
@@ -108,14 +111,27 @@ def _is_header(match, caps_only=False):
     return not caps_only                 # title case, only where the position already says "section" (line/bullet)
 
 
+# The character-sheet block: "shehulk • Multiple Angles: Front, side, 3/4 front, and back views. • Proportions: Guides
+# showing the character's height using head-count measurements ... • Expressions ... • Poses and Gestures ...". It is a
+# template, identical for every character, and it carried enough rare words to merge shehulk, a turtle and a space-pirate
+# cat into one folder of 47 prompts. Everything from the first section on is not about the subject.
+_SHEET_SECTION = re.compile(
+    r'(?:\u2022|\n|^)\s*(?:Multiple Angles|Proportions|Expressions|Poses? and Gestures|Signature Actions?'
+    r'|Design Notes|Silhouette|Line ?up|Head ?count|Character Sheet)\b', re.I)
+
+
 def strip_headers(text):
     """Drop generic section labels from a prompt, leaving the sentences that actually describe the picture."""
     t = text or ''
+    # a template block describes the *sheet*, not the character: cut it before its first section
+    head = _SHEET_SECTION.split(t, maxsplit=1)[0]
+    if head.strip():
+        t = head
     t = _CAPS_LABEL.sub(lambda m: '\n' if _is_header(m, caps_only=True) else m.group(0), t)
     t = _LABEL_ONLY_LINE.sub(lambda m: '' if _is_header(m) else m.group(0), t)
     t = _BULLET_LABEL.sub(lambda m: '\n' if _is_header(m) else m.group(0), t)
     t = _SLUG.sub(' ', t)
-    return t
+    return _URL.sub(' ', t)
 
 
 def tokens(text):
@@ -460,6 +476,12 @@ def label_for(prompts, members, width=60, lexicon=None):
         best = top[0] if top else 0
 
     text = ' '.join(texts[best].split())
+    # a sheet template describes the sheet; the name must be the character it is a sheet of ("shehulk" was named after a
+    # bullet, "• Proportions: Guides showing the character's height ...")
+    text = _URL.sub(' ', text)
+    sheet_head = _SHEET_SECTION.split(text, maxsplit=1)[0].strip(' \u2022-')
+    if len(tokens(sheet_head)) >= 1:
+        text = sheet_head
     for _ in range(6):                     # DESCRIPTION:\nA portrait...  ->  A portrait...
         m = re.match(r"^(?:[\u2022\-\*]\s*)?([A-Z][A-Za-z /'-]{1,40}?)\s*:\s*", text)
         if not m or len(m.group(1).split()) > 4:
@@ -489,10 +511,10 @@ def label_for(prompts, members, width=60, lexicon=None):
     # members share a long opening, the folder is named by the part that differs.
     opening = shared_prefix(texts)
     if len(opening) >= 40:
-        flat = ' '.join(texts[best].split())
+        flat = _URL.sub(' ', ' '.join(texts[best].split()))
         tail = flat[len(opening):].strip(' .,;:-') if len(flat) > len(opening) else ''
         if len(tail) < 12:
-            longest = max(texts, key=len)
+            longest = _URL.sub(' ', max(texts, key=len))
             tail = ' '.join(longest.split())[len(opening):].strip(' .,;:-')
         if len(tail) >= 12:
             head = '\u2026' + tail
