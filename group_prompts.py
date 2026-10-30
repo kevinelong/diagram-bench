@@ -510,6 +510,15 @@ def split_by_stated_count(rows):
     return [sorted(members, key=lambda r: r.get('created') or '') for _count, members in parts]
 
 
+def source_key(prompt):
+    """The source prompt as a key: whitespace and case collapsed, trailing punctuation ignored.
+
+    Two pictures made from the *same* prompt belong in one folder, whatever the similarity threshold says about the rest -
+    the prompt is the strongest evidence there is, and it must not be diluted into a neighbour.
+    """
+    return ' '.join((prompt or '').split()).strip().strip('.').lower()
+
+
 def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
 
@@ -527,9 +536,33 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     with_prompt.sort(key=lambda r: r.get('created') or '')
 
     groups = []
-    if with_prompt:
+    # Exact source prompts first: every picture from the same prompt is one folder, before any similarity clustering runs
+    # and before the stated-count split - "same prompt" outranks "looks similar", and it is what a user means by a folder.
+    buckets = {}
+    for row in with_prompt:
+        buckets.setdefault(source_key(row.get('prompt')), []).append(row)
+    rest = []
+    for key, rows in buckets.items():
+        if len(rows) >= min_group:
+            rows.sort(key=lambda r: r.get('created') or '')
+            prompts_here = [r['prompt'] for r in rows]
+            groups.append({'label': label_for(prompts_here, range(len(rows))),
+                           'title': label_for(prompts_here, range(len(rows)), width=0),
+                           'items': rows, 'oldest': rows[0].get('created') or '',
+                           'newest': rows[-1].get('created') or '', 'exact': True})
+        else:
+            rest.extend(rows)
+    rest.sort(key=lambda r: r.get('created') or '')
+    # The corpus statistics are fitted on *every* prompt, including the exactly-matched ones: the lexicon is what the
+    # prediction and live_append use to recognise "this new picture belongs to that folder", and fitting it on a reduced
+    # set (this used to be the case) quietly broke both.
+    every_prompt = [r['prompt'] for r in with_prompt]
+    # the lexicon is the corpus statistic prediction and live_append rely on: fitted (and stored) whenever there are
+    # prompts at all, never only when some rows happen to be left over for the similarity pass
+    lexicon = fit_lexicon(every_prompt + [(r.get('prompt') or '') for r in head]) if every_prompt else None
+    with_prompt = rest
+    if with_prompt and lexicon is not None:
         prompts = [r['prompt'] for r in with_prompt]
-        lexicon = fit_lexicon(prompts + [(r.get('prompt') or '') for r in head])
         for members in group_texts(prompts, threshold=threshold, lexicon=lexicon):
             if len(members) < min_group:
                 continue
@@ -555,7 +588,7 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     groups.sort(key=lambda g: g.get('newest') or '', reverse=True)
     out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + without,
            'threshold': threshold, 'recent_n': recent}
-    if keep_lexicon and with_prompt:
+    if keep_lexicon and lexicon is not None:
         out['_lexicon'] = lexicon      # the open-folder view re-matches new pictures against the same corpus statistics
     return out
 

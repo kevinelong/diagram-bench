@@ -22,7 +22,12 @@ from PIL import Image
 os.environ.setdefault('ZIMAGE_SETTINGS_DIR', tempfile.mkdtemp(prefix='modes-set-'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pair_rank  # noqa: E402
+import pair_review  # noqa: E402
 import zimage_ui as zui  # noqa: E402
+
+# The review saves its decisions under pair_review.STATE_DIR keyed by the member names, so a second run of this test would
+# load the first run's decisions and fail "nothing was decided" - and inflate the tie counters. Its own state, every run.
+pair_review.STATE_DIR = Path(tempfile.mkdtemp(prefix='modes-state-'))
 
 FAILS = []
 
@@ -105,6 +110,25 @@ def main():
     app.review_stop()
     root.update()
     check('stopping closes it', app._review is None, str(app._review))
+
+    print('\n-- and in rank mode Down is still a tie')
+    app.review_start(paths=[str(p) for p in sorted(folder.glob('*.png'))], mode='rank')
+    for _ in range(400):
+        app._poll(); root.update(); time.sleep(0.02)
+        if getattr(app, '_review', None):
+            break
+    r2 = getattr(app, '_review', None)
+    check('the pair window opens', bool(r2) and r2.get('pair') is not None)
+    if r2:
+        import pair_review
+        a, b = r2['pair']
+        app._review_arrow('down'); root.update()
+        chosen = (r2['state'].get('decisions') or {}).get(pair_review._pair_id(a, b), {}).get('choice')
+        check('Down records a tie', chosen == 'tie', str(chosen))
+        check('and both pictures count the tie',
+              [pair_rank.record_of(p)['ties'] for p in (a, b)] == [1, 1],
+              str([pair_rank.record_of(p)['ties'] for p in (a, b)]))
+        app.review_stop(); root.update()
     try:
         root.destroy()
     except Exception:

@@ -151,6 +151,28 @@ def main():
     check('and the group is named from their prompt', 'lighthouse' in (groups_after[0][0] if groups_after else '').lower(),
           str(groups_after))
 
+    print('\n-- an original prompt in the file wins over a caption that arrived later')
+    later = tmp / 'later'
+    later.mkdir()
+    p = png(later / 'shot.png', prompt=json.dumps(OUR_GRAPH))
+    p.with_suffix('.json').write_text(json.dumps({'image': str(p), 'caption': 'A caption added afterwards.',
+                                                  'topic': 'afterwards', 'imported': 'caption', 'wins': 7}),
+                                     encoding='utf-8')
+    rs.main(['--folder', str(later), '--apply'])
+    merged = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+    check('the prompt from the picture is adopted',
+          merged.get('prompt') == 'a wooden mannequin in the same seated pose', str(merged.get('prompt'))[:50])
+    check('the later caption is kept in its own field', merged.get('caption') == 'A caption added afterwards.',
+          str(merged.get('caption')))
+    check('and nothing else is lost', merged.get('wins') == 7 and merged.get('topic') == 'afterwards',
+          '%s / %s' % (merged.get('wins'), merged.get('topic')))
+    check('the provenance of the prompt is recorded', merged.get('prompt_from') == 'comfy-workflow',
+          str(merged.get('prompt_from')))
+    second = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+    rs.main(['--folder', str(later), '--apply'])
+    again = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+    check('a second run leaves it alone', again == second, 'changed on a re-run')
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

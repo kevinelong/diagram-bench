@@ -677,6 +677,21 @@ measured membership check and is not bent for a display convenience.
 A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
 was asked for.
 
+## Two rules about prompts, and the tie key
+
+- **The same source prompt is always one folder.** `group_prompts.source_key()` buckets rows by the prompt with its
+  whitespace, case and trailing punctuation normalised, and those buckets become folders *before* the similarity clustering
+  runs. Two pictures made from the same prompt belong together whatever the threshold says about the rest, and the exact
+  match is not diluted into a neighbouring cluster.
+- **The original prompt wins over anything that arrived later.** `recover_sidecars.py` now also considers a picture whose
+  sidecar exists but has **no prompt**: the prompt inside the file is the original, so it is adopted and the rest of the record
+  (a later `caption`, its `topic`, and its `wins`) is kept beside it rather than replaced. `prompt_from` records where the
+  prompt came from, and filing then uses the prompt, not the caption.
+- The corpus statistics prediction and `live_append` depend on are fitted on **every** prompt, including the exact-bucketed
+  ones - fitting them on the remainder silently broke both prompt-to-folder prediction and a new render joining its folder.
+- **`↓` is a tie again in A/B mode.** Adding gallery mode had rebound it to "next" and then let rank mode fall through to
+  nothing, while the button still promised *"Tie (2 or ↓)"*.
+
 ## Filing a foreign folder by caption
 
 A folder from another pipeline has no prompts, so nothing can be grouped. **Caption…** (in the folder pane, beside
@@ -686,6 +701,7 @@ Recover…) sends the pictures that have neither a prompt nor a caption to a **l
 |---|---|
 | the endpoint | `127.0.0.1:8080/v1`, OpenAI-compatible - the same one `Describe` and `enhance` use; `ZIMAGE_LLM_URL` overrides it |
 | what it asks | *"Describe this image as a topic and a one-line caption"*, JSON `{topic, caption}` |
+| cost | the picture is downscaled to **512 px** first: measured **3.8 s** per picture that way against **16 s** at 1024 px, with the same captions |
 | what it writes | `caption` and `topic` **beside the picture**, with `"imported": "caption"` - never into `prompt` |
 | what it makes | groups labelled **`caption: …`**, so an appearance-folder can never be mistaken for an intent-folder |
 | consent | a count and a time estimate first (about 2.5 s per picture at the measured pace), and it refuses outright when nothing is serving at that URL, saying where the model should be |

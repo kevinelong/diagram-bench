@@ -212,9 +212,11 @@ def main():
           sorted((r['created'] for r in plan['recent']), reverse=True), [r['created'] for r in plan['recent']])
     check('and none of them is in a folder',
           not ({r['path'] for r in plan['recent']} & {r['path'] for g in plan['groups'] for r in g['items']}))
-    check('folders are ordered oldest first',
-          [g['oldest'] for g in plan['groups']] == sorted(g['oldest'] for g in plan['groups']),
-          [g['oldest'] for g in plan['groups']])
+    # by the newest picture each folder holds, so a folder that just received a render moves to the front - this check
+    # said "oldest first" and only passed because the fixture's two orders happened to agree
+    check('folders are ordered by the newest picture they hold',
+          [g['newest'] for g in plan['groups']] == sorted((g['newest'] for g in plan['groups']), reverse=True),
+          [g['newest'] for g in plan['groups']])
     check('a folder has at least two pictures', all(len(g['items']) >= 2 for g in plan['groups']))
     check('every folder is named from a real prompt, not invented',
           all(g['label'] and any(g['label'].rstrip('\u2026') in (t or '') for t in texts) for g in plan['groups']),
@@ -468,6 +470,23 @@ def main():
     check('the four scene prompts stay in one folder', joined and sorted(joined[0]) == [0, 1, 2, 3],
           [sorted(g) for g in groups])
     check('and the intruder is not in it', all(4 not in g for g in joined), [sorted(g) for g in groups])
+
+    print('\n-- the same source prompt is always one folder')
+    def r(i, prompt, created):
+        return {'path': 'same%d.png' % i, 'prompt': prompt, 'created': created}
+    same = [r(0, 'a wooden mannequin in the same seated pose', '2026-10-01T10:00:00'),
+            r(1, 'a wooden mannequin in the same seated pose', '2026-10-01T11:00:00'),
+            r(2, 'A WOODEN MANNEQUIN in the same seated pose.  ', '2026-10-01T12:00:00'),
+            r(3, 'an entirely different subject, a lighthouse', '2026-10-01T13:00:00'),
+            r(4, 'an entirely different subject, a lighthouse', '2026-10-01T14:00:00')]
+    same_plan = gp.plan(same, recent=0, keep_lexicon=False)
+    exact = [g for g in same_plan['groups'] if g.get('exact')]
+    check('identical prompts make one folder, whatever the case or spacing', len(exact) == 2,
+          str([(g['label'][:30], len(g['items'])) for g in exact]))
+    biggest = max((len(g['items']) for g in exact), default=0)
+    check('and the three variants are together', biggest == 3, str(biggest))
+    check('a single picture with its own prompt is not made a folder of one',
+          all(len(g['items']) >= 2 for g in same_plan['groups']), str([len(g['items']) for g in same_plan['groups']]))
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0

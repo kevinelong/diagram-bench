@@ -2592,13 +2592,13 @@ class App:
             self.hint.configure(text='no vision model at %s - start one there and Caption will work; nothing was sent'
                                      % capmod.base_url())
             return 0
-        minutes = len(todo) * 2.5 / 60.0
+        minutes = len(todo) * capmod.SECONDS_PER_PICTURE / 60.0
         if not messagebox.askyesno('Caption %d picture%s?' % (len(todo), '' if len(todo) == 1 else 's'),
                                    'Send %d picture%s to the local vision model at %s?\n\n'
                                    'It writes a caption and a topic beside each picture (never into its prompt) and then '
-                                   'files them by caption.\nAdvisory: about %.1f minute%s at the measured 2.5 s each.'
+                                   'files them by caption.\nAdvisory: about %.1f minute%s at the measured %.1f s each.'
                                    % (len(todo), '' if len(todo) == 1 else 's', capmod.base_url(),
-                                      minutes, '' if minutes >= 1.5 else 's'),
+                                      minutes, '' if minutes >= 1.5 else 's', capmod.SECONDS_PER_PICTURE),
                                    parent=self.root):
             return 0
         total = len(todo)
@@ -3393,7 +3393,9 @@ class App:
         if side == 'up':
             return self.review_back()
         if side == 'down':
-            return 'break'
+            # a tie, as the button says ("Tie (2 or ↓)"). Adding gallery mode had rebound Down to "next" and then let it
+            # fall through to nothing here, so the label was promising a key that did nothing.
+            return self.review_decide('middle')
         self.review_decide(side)
         return 'break'
 

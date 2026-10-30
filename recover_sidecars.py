@@ -222,10 +222,24 @@ def main(argv=None):
 
     folder = Path(a.folder)
     pictures = sorted(p for p in folder.glob('*.png') if p.is_file())
-    bare = [p for p in pictures if not p.with_suffix('.json').is_file()]
+    # A picture whose sidecar exists but has **no prompt** is still a candidate: the prompt inside the file is the
+    # *original* one, and an original must win over whatever arrived later (a caption, a recovered guess). The merge below
+    # adds the prompt and keeps everything else.
+    bare = []
+    for p in pictures:
+        side = p.with_suffix('.json')
+        if not side.is_file():
+            bare.append(p)
+            continue
+        try:
+            meta = json.loads(side.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if isinstance(meta, dict) and not (meta.get('prompt') or '').strip():
+            bare.append(p)
     if a.limit:
         bare = bare[:a.limit]
-    print('%s: %d pictures, %d without a sidecar' % (folder, len(pictures), len(bare)))
+    print('%s: %d pictures, %d without a prompt' % (folder, len(pictures), len(bare)))
     written, skipped = 0, {}
     for p in bare:
         fields, source = recover(p)
@@ -233,7 +247,20 @@ def main(argv=None):
             skipped[source] = skipped.get(source, 0) + 1
             continue
         if a.apply:
-            p.with_suffix('.json').write_text(json.dumps(fields, indent=1), encoding='utf-8')
+            side = p.with_suffix('.json')
+            merged = {}
+            if side.is_file():
+                try:
+                    existing = json.loads(side.read_text(encoding='utf-8'))
+                    if isinstance(existing, dict):
+                        merged = existing
+                except Exception:
+                    merged = {}
+            # the prompt from the file wins; a later caption keeps its own field, and ranking is never touched
+            merged.update({k: v for k, v in fields.items() if k != 'imported'})
+            merged['imported'] = fields.get('imported')
+            merged['prompt_from'] = fields.get('imported')
+            side.write_text(json.dumps(merged, indent=1), encoding='utf-8')
         written += 1
         if written <= 3:
             print('   %-46s %-18s seed=%s steps=%s %sx%s' % (p.name[:46], source, fields.get('seed'),

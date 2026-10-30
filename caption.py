@@ -17,6 +17,11 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_URL = 'http://127.0.0.1:8080/v1'
+# A caption does not need the full picture: vision tokens dominate the cost, and measured on this box a 1024 px image
+# took ~16 s while the answer never mentioned anything smaller than 512 px could not show.
+MAX_PX = 512
+# Measured on this box with Qwen2.5-VL-3B Q4 + f16 mmproj at 512 px - used for the time estimate the user is shown.
+SECONDS_PER_PICTURE = 3.8
 QUESTION = ('Describe this image as a topic and a one-line caption: reply with JSON only, '
             '{"topic": "<2-4 words>", "caption": "<under 30 words>"}.')
 
@@ -56,10 +61,26 @@ def _parse(text):
     return '', plain
 
 
+def _payload_bytes(path):
+    """The picture, downscaled to MAX_PX and re-encoded as JPEG. Falls back to the file itself if PIL cannot read it."""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(path) as im:
+            im = im.convert('RGB')
+            if max(im.size) > MAX_PX:
+                im.thumbnail((MAX_PX, MAX_PX), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, 'JPEG', quality=88, optimize=True)
+        return buf.getvalue(), 'jpeg'
+    except Exception:
+        return Path(path).read_bytes(), (Path(path).suffix.lower().lstrip('.') or 'png')
+
+
 def caption(path, timeout=90):
     """(topic, caption) for one picture from the local vision model. Raises NoModel when nothing is serving."""
-    raw = base64.b64encode(Path(path).read_bytes()).decode('ascii')
-    suffix = Path(path).suffix.lower().lstrip('.') or 'png'
+    payload, suffix = _payload_bytes(path)
+    raw = base64.b64encode(payload).decode('ascii')
     body = json.dumps({'model': 'local', 'temperature': 0.2, 'max_tokens': 120, 'messages': [
         {'role': 'user', 'content': [
             {'type': 'text', 'text': QUESTION},
