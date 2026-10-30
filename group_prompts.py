@@ -381,6 +381,30 @@ def _names_the_same_thing(a, b, min_words=2):
     return len(short) < len(long_) and long_[:len(short)] == short
 
 
+def shared_prefix(texts):
+    """The opening that every one of `texts` shares, at least 40 characters long, or ''.
+
+    Compared on whitespace-normalised, case-folded text and cut back to a word boundary, so the answer can be sliced off
+    each original prompt and what remains is what actually differs.
+    """
+    norm = [' '.join((t or '').split()) for t in texts if (t or '').strip()]
+    if len(norm) < 2:
+        return ''
+    first = norm[0].lower()
+    n = len(first)
+    for other in norm[1:]:
+        low = other.lower()
+        i, limit = 0, min(n, len(low))
+        while i < limit and low[i] == first[i]:
+            i += 1
+        n = i
+        if not n:
+            return ''
+    prefix = first[:n]
+    cut = prefix.rstrip().rfind(' ')
+    return prefix[:cut + 1] if cut > 0 else ''
+
+
 def label_for(prompts, members, width=60, lexicon=None):
     """A folder name taken from the member that best represents the folder - never invented, never a bare fragment.
 
@@ -411,11 +435,14 @@ def label_for(prompts, members, width=60, lexicon=None):
     # one - i.e. the folder really is a set of captions.
     template = re.compile(r'^(this|the)\s+(image|picture|photo|shots?)\b|^(pictured|shown here|depicted|in this)')
 
+    frequency = Counter(' '.join(t.split()) for t in texts)
+
     def rank(i):
         shared = toks[i] & core_set
         head = ' '.join(texts[i].split()).lower()
         return (1 if shared else 0,
                 0 if template.match(head) else 1,
+                frequency.get(' '.join(texts[i].split()), 0),
                 sum(idf.get(t, 0.0) for t in shared),
                 nlens[i])
 
@@ -438,6 +465,12 @@ def label_for(prompts, members, width=60, lexicon=None):
         if not m or len(m.group(1).split()) > 4:
             break
         text = text[m.end():]
+    # An edit instruction names the edit, not the picture: "keep all poses as they are but replace with <the subject>"
+    # truncated at 60 characters says nothing about the folder (measured on 178 pictures of one 3d-shapes run). The
+    # payload is the subject, so the name starts there.
+    payload = re.search(r'\breplace(?:d)?\s+with\s+(.{12,})|\bchange[sd]?\s+(?:them|it|these)\s+into\s+(.{12,})', text)
+    if payload:
+        text = (payload.group(1) or payload.group(2) or '').strip()
     # a screenplay slug is not a name either: "INT. A dark office..." must be named by the office, not by "INT."
     text = re.sub(r'^(?:INT|EXT|INT\./EXT\.)\.?\s*', '', text)
     # and a first sentence that is only a fragment ("INT.") is skipped for the first one that says something
@@ -450,6 +483,19 @@ def label_for(prompts, members, width=60, lexicon=None):
         head = re.split(r'(?<=[.!?])\s', text)[0] if text else ''
     if not head:
         head = text
+    # A run of edit instructions opens with the same words and differs only after them - "keep all three poses standing
+    # as they are but replace with <what changes>". Truncated at the shared opening, four different prompts got one name
+    # (measured: 178 pictures, 4 prompts, the label was the instruction and the difference was always cut off). When the
+    # members share a long opening, the folder is named by the part that differs.
+    opening = shared_prefix(texts)
+    if len(opening) >= 40:
+        flat = ' '.join(texts[best].split())
+        tail = flat[len(opening):].strip(' .,;:-') if len(flat) > len(opening) else ''
+        if len(tail) < 12:
+            longest = max(texts, key=len)
+            tail = ' '.join(longest.split())[len(opening):].strip(' .,;:-')
+        if len(tail) >= 12:
+            head = '\u2026' + tail
     if width and len(head) > width:
         cut = head[:width].rsplit(' ', 1)[0]
         head = (cut or head[:width]) + '\u2026'
