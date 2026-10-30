@@ -661,6 +661,27 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## When the text is ambiguous, the pictures referee
+
+Reported: one 33-picture folder named `seated and meditating.` held mannequins, a classroom, wasteland fighters and one
+character, under "a poorly fitting intermediate prompt". Measured: that family held **11 different roots** - the same
+starting sentence re-used for several subjects, then edited - chained by containment through caption scaffolding ("a
+full-body character concept sheet from multiple angles. It features ..."), which says nothing about *which* character.
+
+No prompt distinguishes "an edit that keeps the subject" from "an edit that replaced it": both are steps of one series. So
+the pictures decide, and only where the text admits it is unsure - a family holding **three or more distinct roots**. Then the
+family is split by a 64-bit difference hash of the thumbnails (`VISUAL_LIMIT = 10` bits, `.thumbs` are reused so the whole
+gallery hashes in 0.7 s), and pieces too small to stand alone join the largest piece.
+
+| | before | after |
+|---|---|---|
+| folders | 65 | 85 |
+| `seated and meditating.` | 33 pictures, 11 roots | 20 pictures, 4 roots |
+| the sigil scene (one root, many edits) | 1 folder | **1 folder, unchanged** |
+
+The split is deliberately not global: applied to the whole gallery a dhash collapses 1,003 pictures into 538 clusters, so it
+would fragment everything. Text proposes the family; pictures only break a tie the text cannot settle.
+
 ## A folder is a family: it belongs where its series started
 
 Reported: "add guns, ammo, knives, weapons and armor" sat as its own folder of five pictures, which plainly belonged with
