@@ -643,6 +643,26 @@ a review closed, and folder tiles were chosen by **newest four distinct** regard
 Wins themselves were already durable: `pair_rank` writes `wins/losses/ties/bouts` into each picture's own `.json`, so the
 order holds across folders and restarts.
 
+## A click must show the picture, not rebuild the gallery
+
+`select_file()` used to end with `refresh_gallery(select=path)`, so **every** click rescanned the folder, re-planned the
+groups and rebuilt every strip tile **inside the click callback** - the window could not paint the chosen picture until all
+of that finished. Measured on a 300-picture folder: a full rebuild is **266 ms**, and that was paid per click.
+
+Now a click repaints the selection rings and draws the picture; the grid is rebuilt only when the clicked picture is not among
+the painted tiles (a selection arriving from outside the visible page), and that rebuild is deferred and preserves the
+selection.
+
+Two things followed from measuring it:
+
+- **Scaling the picture was 391 ms.** LANCZOS down to the canvas, plus a full `.copy()` of the source. An integer box
+  reduction then one small bilinear step, cached per (picture, canvas size), takes a click to **234 ms** (first) and **172 ms**
+  (another picture); re-clicking a cached one is faster still. The remaining cost is the PNG decode itself.
+- **Deleting the picture on screen silently did nothing.** `_display` kept the lazily-opened PIL image, so the file stayed
+  *open* in this process; Windows then refused the recycle and the hard-delete fallback raised, leaving `gone=[]` for a file
+  that existed. The image is now decoded and its handle released (the suite's `gone=0` caught it). `delete_selected` also
+  keeps a `_last_delete` record of what it attempted, which is what made this diagnosable.
+
 ## Deleting from the folder pane
 
 The window's second column (the open folder's pictures) now has its own **Select all** and **Delete…** row underneath the

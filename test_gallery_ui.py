@@ -400,12 +400,21 @@ def main():
 
     print('\n-- deleting the base image clears it')
     app.clear_selection()
-    click(app, app._files[5])
+    # earlier blocks in this suite recycle fixture pictures, so this one makes sure the file it is about to delete exists
+    victim = app._files[5]
+    if not Path(victim).exists():
+        Image.new('RGB', (64, 64), (120, 60, 200)).save(victim)
+        victim.with_suffix('.json').write_text(json.dumps({'prompt': 'base delete fixture', 'seed': 5, 'steps': 4,
+                                                           'cfg': 1.0, 'size': 512}), encoding='utf-8')
+        app.refresh_gallery(); root.update()
+        victim = next((p for p in app._files if p.name == victim.name), app._files[5])
+    click(app, victim)
     app.use_as_base(); root.update()
     base_file = app.base_path
     check('a base to delete', base_file is not None)
     gone = app.delete_selected()
-    check('base deleted', gone == 1)
+    check('base deleted', gone == 1, 'gone=%s base=%s last=%s' % (
+        gone, base_file.name if base_file else None, getattr(app, '_last_delete', None)))
     check('base cleared', app.base_path is None)
     check('base label says none', 'none' in app.base_label['text'], app.base_label['text'])
     check('display reset to placeholder', app._current is None)
