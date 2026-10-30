@@ -29,6 +29,9 @@ DEFAULT_THRESHOLD = 0.20
 # than that when they are edited. Measured: at the picture threshold one family swallowed 69 series, which is a folder
 # nobody can read, so the roots are held to a tighter standard of "the same scene".
 FAMILY_THRESHOLD = 0.10
+# The share of the shorter root's words that must appear in the longer one for the two to be one family. Measured on the
+# gallery: one character written two ways sits at 0.88-0.90 containment while unrelated prompts fall far below it.
+FAMILY_CONTAINMENT = 0.85
 # Cosine alone is not enough: a three-word prompt ("a woman not a lady") sharing one word with a long character prompt
 # scores 0.46, because normalisation hides how little it says. An absolute idf floor cannot fix that - idf shrinks with
 # the corpus, so five identical prompts in a five-document lexicon share almost no weight - but *coverage* can: how
@@ -63,7 +66,9 @@ its into over under near above below behind beside between across through during
 some any all each both few many much no not only own same so than too can will just should now one two three photo
 photograph image picture render shot style high quality detailed detail realistic'''.split())
 
-_WORD = re.compile(r"[a-z][a-z'-]+")
+# Hyphens split, because the same subject is written both ways in the same gallery ("space-pirate cat-woman" against
+# "space pirate lady cat", "wide-shot" against "wide shot") and a hyphen kept them apart.
+_WORD = re.compile(r"[a-z][a-z']+")
 
 # The rephrase button swaps words for synonyms on purpose, so two phrasings of one scene can share almost no surface
 # tokens ("a weathered brick wall" against "a time-worn masonry partition"). Reusing the app's own dictionary as a soft
@@ -401,6 +406,12 @@ def _names_the_same_thing(a, b, min_words=2):
     return len(short) < len(long_) and long_[:len(short)] == short
 
 
+def _median_idf(token_sets, lexicon):
+    """The middle idf of the words these prompts use - the line between 'unusual here' and 'ordinary here'."""
+    values = sorted(lexicon['idf'].get(w, 0.0) for toks in token_sets.values() for w in toks)
+    return values[len(values) // 2] if values else 0.0
+
+
 def shared_prefix(texts):
     """The opening that every one of `texts` shares, at least 40 characters long, or ''.
 
@@ -633,16 +644,42 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
         families = {}
         root_list = list(roots)
         if len(root_list) > 1:
-            pseudo = [{'path': 'root:%d' % i, 'prompt': text, 'created': ''} for i, text in enumerate(root_list)]
-            fam = plan(pseudo, threshold=FAMILY_THRESHOLD, recent=0, min_group=1, keep_lexicon=False)
-            for g in fam['groups']:
-                for r in g['items']:
-                    families[int(r['path'].split(':')[1])] = g['label']
+            # Roots are joined when one's words are largely the other's: the same character written out twice - "android
+            # robot cyborg crazy fierce ... butch powerful" against "fierce mature butch powerful large muscled" - sits at
+            # cosine 0.76-0.80, too far for a threshold, yet 90 % of the shorter root's words are inside the longer one.
+            # Containment on the roots only (they are whole prompts, so a template has already been cut) with a bar on how
+            # much that is, and on how many of the shared words are unusual in this gallery.
+            root_tokens = {text: set(tokens(text)) for text in root_list}
+            median = _median_idf(root_tokens, lexicon)
+            parent = {text: text for text in root_list}
+
+            def find(a):
+                while parent[a] != a:
+                    parent[a] = parent[parent[a]]
+                    a = parent[a]
+                return a
+
+            for i, text_a in enumerate(root_list):
+                ta = root_tokens[text_a]
+                if len(ta) < 4:
+                    continue
+                for text_b in root_list[i + 1:]:
+                    tb = root_tokens[text_b]
+                    if len(tb) < 4:
+                        continue
+                    shared = ta & tb
+                    if len(shared) < 6 or len(shared) / float(min(len(ta), len(tb))) < FAMILY_CONTAINMENT:
+                        continue
+                    if sum(1 for w in shared if lexicon['idf'].get(w, 0.0) >= median) < 2:
+                        continue
+                    parent[find(text_b)] = find(text_a)
+            for text in root_list:
+                families[text] = find(text)
         for i, text in enumerate(root_list):
             families.setdefault(i, text)
         by_family = {}
-        for i, text in enumerate(root_list):
-            by_family.setdefault(families[i], []).extend(roots[text])
+        for text in root_list:
+            by_family.setdefault(families[text], []).extend(roots[text])
         family_paths = set()
         for label, rows_here in by_family.items():
             rows_here.sort(key=lambda r: r.get('created') or '')

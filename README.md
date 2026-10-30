@@ -664,6 +664,31 @@ arranged side by side" produced one picture holding both, side by side. `test_re
 ## A folder is a family: it belongs where its series started
 
 Reported: "add guns, ammo, knives, weapons and armor" sat as its own folder of five pictures, which plainly belonged with
+the pictures they were edited from; then later, four folders of one character that should be one. An edit instruction names
+a *change*, not a subject, and one character written out twice is still one character.
+
+Every picture now follows the family of its recorded `lineage_root`. Roots are whole prompts, so a threshold is the wrong
+tool: the same character appears at cosine **0.76-0.96** against itself depending on how many of its forty descriptors were
+retyped, which is far enough apart to split and too close to a stranger to tighten. What separates them is that **90 % of the
+shorter root's words are inside the longer one**, so families are joined by containment on the roots (`FAMILY_CONTAINMENT
+= 0.85`, at least six shared words, at least two of them unusual in this gallery).
+
+Hyphens now split into words: the same subject is written both ways in this gallery ("space-pirate cat-woman" against "space
+pirate lady cat", "wide-shot" against "wide shot") and the hyphen kept them apart.
+
+Measured on the real gallery:
+
+| | before | after |
+|---|---|---|
+| the cyborg character | 4 folders (22 + 17 + 2 + 2) | **1 folder of 39** |
+| folders in total | 57 | 62 |
+| pictures in no folder | 0 | 0 |
+
+The `space pirate lady cat` pictures stay in their own folder - a different character name, and the data says so.
+
+## A folder is a family: it belongs where its series started
+
+Reported: "add guns, ammo, knives, weapons and armor" sat as its own folder of five pictures, which plainly belonged with
 the pictures they were edited from. An edit instruction names a *change*, not a subject. Each picture now carries
 `lineage_root` (see below), the roots are clustered once at a tighter threshold (`FAMILY_THRESHOLD = 0.10`, because two
 roots that look alike are usually two runs of one scene), and every picture follows its root's family.
