@@ -582,6 +582,21 @@ measured membership check and is not bent for a display convenience.
 A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
 was asked for.
 
+## Orphaned metadata in a gallery folder
+
+Pictures get moved out of `C:/Users/kevin/Pictures/zimage-ui` by hand, and their `.json` sidecars stay behind - so the gallery
+keeps listing folders and prompts for pictures that are not there. `tools/orphan_metadata.py` classifies every record
+**read-only** and can write a deletion manifest:
+
+```
+python tools/orphan_metadata.py --folder C:/Users/kevin/Pictures/zimage-ui --manifest <temp>/candidates.txt
+```
+
+Classes, and the one thing each is judged by: `KEEP-OK` (its `image` exists), `KEEP-SIBLING` (the picture's name drifted),
+`SHEET ok` (**its own sheet picture**, not its tiles - tiles may be cleaned up deliberately), `CLIP ok` (`mp4`/`still`, not
+`image`), `KEEP-UNCLEAR`, `CANDIDATE`, `SHEET orphan`, `CLIP orphan`. It never deletes or moves anything; the manifest is the
+input to a decision. Pictures with no record at all are counted separately, because that is the opposite problem.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of
