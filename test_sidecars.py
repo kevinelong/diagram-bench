@@ -135,6 +135,22 @@ def main():
     rs.main(['--folder', str(folder), '--apply'])
     check('a second pass has nothing to do', len(list(folder.glob('*.json'))) == 2, str(len(list(folder.glob('*.json')))))
 
+    print('\n-- an imported picture from another pipeline becomes groupable')
+    ext = tmp / 'external'
+    ext.mkdir()
+    for i in range(3):
+        png(ext / ('ext%d.png' % i), parameters=A1111_BLOCK)     # a stranger's A1111 files, same prompt
+    groups_before, ungrouped_before, counted = rs.preview_groups(ext)
+    check('before the import nothing can be grouped', not groups_before and ungrouped_before == 3,
+          '%s / %d' % (groups_before, ungrouped_before))
+    rs.main(['--folder', str(ext), '--apply'])
+    groups_after, ungrouped_after, counted2 = rs.preview_groups(ext)
+    check('after the import the three pictures form one group',
+          len(groups_after) == 1 and groups_after[0][1] == 3 and ungrouped_after == 0,
+          '%s / ungrouped %d' % (groups_after, ungrouped_after))
+    check('and the group is named from their prompt', 'lighthouse' in (groups_after[0][0] if groups_after else '').lower(),
+          str(groups_after))
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

@@ -368,6 +368,32 @@ def main():
     check('a win decision is not a deletion', len(pdel.review_deletions(sd)) == 1,
           str(pdel.review_deletions(sd)))
 
+    print('\n-- a deliberate deletion is never restored by a rescue')
+    rows2 = [
+        {'path': r'C:\g\ab.png', 'deleted': (when + _td(seconds=5)).isoformat()},
+        {'path': r'C:\g\manual.png', 'deleted': (when + _td(seconds=30)).isoformat()},
+        {'path': r'C:\g\other.png', 'deleted': when.isoformat()},
+    ]
+    deliberate = {'manual.png': [when + _td(seconds=28)]}
+    decisions2 = [('ab.png', when, 'delete_left', 's.json')]      # a decision naming *these* pictures
+    tagged = pdel.classify(rows2, decisions2, deliberate)
+    kinds = {Path(r['path']).name: k for r, k, _d in tagged}
+    check('an A/B deletion is recognised as one', kinds.get('ab.png') == 'ab', str(kinds))
+    check('a button deletion is recognised as deliberate', kinds.get('manual.png') == 'manual', str(kinds))
+    check('anything else is called unrecorded, not accidental', kinds.get('other.png') == 'unrecorded', str(kinds))
+    check('only the A/B deletion is offered for restore',
+          [Path(r['path']).name for r, k, _d in tagged if k == 'ab'] == ['ab.png'], str(kinds))
+
+    sd2 = Path(tempfile.mkdtemp(prefix='delib-'))
+    (sd2 / 'review').mkdir()
+    (sd2 / 'deletions.jsonl').write_text(
+        '\n'.join([json.dumps({'at': when.isoformat(), 'name': 'x.png', 'source': 'button'}),
+                    json.dumps({'at': when.isoformat(), 'name': 'y.png', 'source': 'button'}),
+                    'not json']), encoding='utf-8')
+    got2 = pdel.deliberate_deletions(sd2 / 'review')
+    check('the deliberate-deletion log is read', sorted(got2) == ['x.png', 'y.png'], str(sorted(got2)))
+    check('a broken line does not lose the others', len(got2) == 2, str(len(got2)))
+
     print('\n-- at three seconds a decision, a plan has a price')
     check('15 questions is under a minute', round(pr.estimate_minutes([0] * 15), 2) == 0.75,
           str(pr.estimate_minutes([0] * 15)))

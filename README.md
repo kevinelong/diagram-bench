@@ -682,6 +682,16 @@ and the sixteenth honestly reported `no readable text metadata`. Every record is
 `"a1111-parameters"` and never carries `wins/losses/vs` or the style label, because an import cannot know them. The pane has
 a **Recover…** button that does it for the open folder only.
 
+An import is a **separate policy from a restore**, and the two must not be confused: an import reads pictures that are
+already in the folder and writes metadata beside them - it never brings a file back. Deleting is narrowed in the opposite
+direction: `recycle-restore.ps1` **refuses a broad restore** unless `-Paths` (a list from `pair_deletions.py`) or
+`-IncludeManual` is given, and the app now appends every deliberate Delete to `deletions.jsonl`, so "was this on purpose?"
+is answered from a record instead of inferred from the shape of a Bin entry. `pair_deletions.py` therefore sorts Bin
+entries into **A/B rule / deliberate / unrecorded**, and only the first is ever offered for restoring.
+
+Worked end to end on a foreign folder: three A1111 pictures with the same prompt group into **nothing** before the import
+and into **one group of three** after it, named from the prompt recovered out of the PNGs.
+
 **A caption is never written as `prompt`.** `describe()` already posts a picture to the configured vision model and returns a
 description; measured 10 of 10 pictures at **2.5 s mean** (2.0-5.1 s). A caption describes *appearance* while these folders
 mean *intent*, so a caption belongs in its own field and never in `prompt`.

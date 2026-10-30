@@ -189,11 +189,35 @@ def recover(path):
     return fields, source
 
 
+def preview_groups(folder):
+    """What the grouping would make of this folder once the import is done: (groups, ungrouped, counted).
+
+    `recent=0` on purpose - the app keeps the newest 18 pictures unfiled, and a preview that hid two thirds of a small
+    import behind that window would say nothing about whether the import was worth it.
+    """
+    import group_prompts
+    rows = []
+    for picture in sorted(Path(folder).glob('*.png')):
+        side = picture.with_suffix('.json')
+        prompt = ''
+        if side.is_file():
+            try:
+                prompt = json.loads(side.read_text(encoding='utf-8')).get('prompt') or ''
+            except Exception:
+                prompt = ''
+        rows.append({'path': str(picture), 'prompt': prompt, 'created': ''})
+    plan = group_prompts.plan(rows, recent=0, keep_lexicon=False)
+    groups = [(g.get('label', ''), len(g.get('items') or [])) for g in plan.get('groups') or []]
+    return groups, len(plan.get('ungrouped') or []), len(rows)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Rebuild missing sidecars from the pictures themselves.')
     ap.add_argument('--folder', required=True)
     ap.add_argument('--apply', action='store_true', help='write the sidecars (dry run otherwise)')
     ap.add_argument('--limit', type=int, default=0)
+    ap.add_argument('--preview', action='store_true',
+                    help='afterwards, show the folder groups the import would produce')
     a = ap.parse_args(argv)
 
     folder = Path(a.folder)
@@ -219,6 +243,14 @@ def main(argv=None):
     print('%s %d sidecars%s' % (verb, written, '' if a.apply else '  (dry run - add --apply)'))
     for reason, n in sorted(skipped.items(), key=lambda kv: -kv[1]):
         print('   skipped %4d: %s' % (n, reason))
+    if a.preview:
+        groups, ungrouped, counted = preview_groups(folder)
+        print()
+        print('what the grouping makes of %d pictures (every picture counted, not the newest 18 the app keeps unfiled):'
+              % counted)
+        for label, n in groups[:8]:
+            print('   %4d  %s' % (n, (label or '(untitled)')[:60]))
+        print('   %4d  ungrouped (no prompt recovered)' % ungrouped if ungrouped else '   no ungrouped pictures')
     return 0
 
 

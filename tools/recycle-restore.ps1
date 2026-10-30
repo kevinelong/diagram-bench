@@ -10,11 +10,18 @@ param(
     [string]$Under = '',
     [string[]]$Exts = @(),
     [string]$Paths = '',
+    [switch]$IncludeManual,
     [switch]$Apply,
     [switch]$Force
 )
 
 $cut = (Get-Date).AddHours(-$Hours)
+if (-not $Paths -and -not $IncludeManual) {
+    Write-Output 'refusing a broad restore: a Delete you pressed is a decision, and putting those files back undoes it.'
+    Write-Output '  for A/B-decision deletions:  python pair_deletions.py --bin <json> --list <file>  then -Paths <file>'
+    Write-Output '  to override on purpose:       add -IncludeManual'
+    exit 2
+}
 $wanted = @{}
 if ($Paths) {
     if (-not (Test-Path -LiteralPath $Paths)) { Write-Output "no such list: $Paths"; exit 2 }

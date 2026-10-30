@@ -5200,6 +5200,25 @@ class App:
                 self.hint.configure(text='could not delete %s: %s' % (f.name, e))
         return gone
 
+    @staticmethod
+    def _log_deletions(paths):
+        """Append deliberate deletions to a log beside the review state.
+
+        A Delete you pressed is a decision; putting those files back later would undo it. Nothing here reads the log yet -
+        its value is that "was this deleted on purpose?" can be answered instead of inferred from the shape of a Bin entry.
+        Best effort: a log that cannot be written must never fail a delete that already happened.
+        """
+        try:
+            import pair_review
+            log = Path(pair_review.STATE_DIR).parent / 'deletions.jsonl'
+            log.parent.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().isoformat(timespec='seconds')
+            with log.open('a', encoding='utf-8') as fh:
+                for p in paths:
+                    fh.write(json.dumps({'at': stamp, 'name': Path(p).name, 'source': 'button'}) + '\n')
+        except Exception:
+            pass
+
     def _forget_deleted(self, paths):
         """Take deleted pictures out of the plan now, so the pane stops drawing them without waiting for a regroup.
 
@@ -5252,6 +5271,7 @@ class App:
             self.info_btn.state(['disabled'])
             self._img = None
             self._current = None
+        self._log_deletions(gone)          # deliberate: recorded so a later rescue cannot mistake it for a bug
         self.selected = [p for p in self.selected if p not in paths]
         self._forget_deleted(paths)
         self.refresh_gallery()

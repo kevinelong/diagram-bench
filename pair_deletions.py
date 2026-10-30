@@ -51,6 +51,53 @@ def review_deletions(state_dir=None):
     return out
 
 
+def deliberate_deletions(state_dir=None):
+    """{name: when} for every deletion this app performed on purpose (the Delete button and the review's own delete rule).
+
+    Written by the app as it deletes. A deliberate deletion must never be restored by a rescue: putting back a file
+    somebody chose to remove is undoing their decision.
+    """
+    base = Path(state_dir or pair_review.STATE_DIR).parent
+    out = {}
+    log = base / 'deletions.jsonl'
+    if not log.exists():
+        return out
+    for line in log.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            row = json.loads(line)
+            out.setdefault(str(row.get('name')), []).append(datetime.fromisoformat(str(row.get('at'))))
+        except Exception:
+            continue
+    return out
+
+
+def classify(bin_rows, deletions, deliberate, window=WINDOW):
+    """[(row, 'ab' | 'manual' | 'unrecorded', detail)] for each Bin entry.
+
+    'ab' - a review delete decision matches by name and time (a rule removed it; the likely unintended kind)
+    'manual' - the app recorded it as a deliberate delete
+    'unrecorded' - neither: deleted outside this app, or before the log existed. Not "accidental" - just unknown.
+    """
+    hits = {id(row): decision for row, decision in match(bin_rows, deletions, window)}
+    out = []
+    for row in bin_rows:
+        name = Path(str(row.get('path'))).name
+        if id(row) in hits:
+            out.append((row, 'ab', hits[id(row)]))
+            continue
+        try:
+            when = datetime.fromisoformat(str(row.get('deleted')))
+        except Exception:
+            out.append((row, 'unrecorded', None))
+            continue
+        stamps = deliberate.get(name) or []
+        if any(abs(when - at) <= window for at in stamps):
+            out.append((row, 'manual', name))
+        else:
+            out.append((row, 'unrecorded', None))
+    return out
+
+
 def match(bin_rows, deletions, window=WINDOW):
     """[(bin_row, decision)] where a bin entry is the picture a delete decision removed."""
     hits = []
@@ -93,7 +140,14 @@ def main(argv=None):
 
     window = timedelta(minutes=a.window_minutes)
     hits = match(rows, deletions, window=window)
-    print('bin entries in the report: %d' % len(rows))
+    tagged = classify(rows, deletions, deliberate_deletions(a.state_dir or None), window)
+    counts = {}
+    for _row, kind, _d in tagged:
+        counts[kind] = counts.get(kind, 0) + 1
+    print('bin entries in the report: %d  (by A/B rule: %d, deliberate: %d, unrecorded: %d)'
+          % (len(rows), counts.get('ab', 0), counts.get('manual', 0), counts.get('unrecorded', 0)))
+    if counts.get('manual'):
+        print('   %d are deletions somebody chose; they are never restored by a rescue' % counts['manual'])
     print('matched to an A/B deletion within %d min: %d' % (a.window_minutes, len(hits)))
     for row, (name, when, choice, pile) in hits[:10]:
         print('   %-46s %s  %s' % (name[:46], when.strftime('%m-%d %H:%M:%S'), choice))

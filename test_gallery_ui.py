@@ -1170,6 +1170,12 @@ def main():
               str(app.contents_ab_btn.state()))
 
         check('the files went', not victim.exists() and len(deleted) >= 1, str(len(deleted)))
+        log_path = Path(_pv.STATE_DIR).parent / 'deletions.jsonl'
+        logged = [json.loads(line) for line in log_path.read_text(encoding='utf-8').splitlines()
+                  if line.strip()] if log_path.exists() else []
+        check('a deliberate delete is recorded as such',
+              any(r.get('name') == victim.name and r.get('source') == 'button' for r in logged),
+              str(logged[:2]) if logged else 'no deletions.jsonl')
         check('the tile left the pane immediately', victim not in app._content_order, str(len(app._content_order)))
         check('and the plan forgot it',
               not any(Path(str(it.get('path', ''))) == victim
