@@ -35,6 +35,7 @@ from winproc import popen, run
 import scenes as scene_detect
 import sys
 import threading
+import traceback
 import time
 import urllib.parse
 import webbrowser
@@ -780,6 +781,28 @@ def pair_review_progress_safe(state):
         return pair_review.progress(state)
     except Exception:
         return 0, 0, 0
+
+
+ERROR_LOG = Path(os.environ.get('LOCALAPPDATA') or str(Path.home())) / 'zimage-ui' / 'errors.log'
+
+
+def log_error(where, exc=None):
+    """Append a traceback to errors.log and return the path.
+
+    Asked after an A/B review refused to open: "error logs show anything?" - there were none. Every failure here was
+    caught and written to the one-line hint, which scrolls away and says nothing about where it happened. Now it is on disk.
+    """
+    try:
+        ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with ERROR_LOG.open('a', encoding='utf-8') as fh:
+            fh.write('\n=== %s  %s ===\n' % (datetime.now().isoformat(timespec='seconds'), where))
+            if exc is not None and not isinstance(exc, BaseException):
+                fh.write(str(exc) + '\n')
+            else:
+                traceback.print_exception(type(exc), exc, exc.__traceback__ if exc else None, file=fh)
+        return ERROR_LOG
+    except Exception:
+        return None
 
 
 def lineage_for(base_path=None, described_from=None, typed=None, limit=None):
@@ -3272,7 +3295,10 @@ class App:
         """
         self._pending_review_mode = mode or 'rank'
         if not self._plan:
-            self.hint.configure(text='turn folders on first - A/B review works inside a prompt folder')
+            # "turn folders on first" was also what a review clicked *during* the scan said, which is not what happened
+            busy = getattr(self, '_grouping', False)
+            self.hint.configure(text='folders are still being worked out - try again in a moment' if busy
+                                else 'turn folders on first - A/B review works inside a prompt folder')
             return
         label, paths = self.review_paths(index=index, paths=paths)
         if not paths:
@@ -3294,7 +3320,9 @@ class App:
                 pair_review.save_state(state)
                 self.ui_events.put(('review_ready', (label, state)))
             except Exception as e:
-                self.ui_events.put(('review_error', '%s: %s' % (type(e).__name__, e)))
+                where = log_error('review_start %d pictures' % len(paths), e)
+                self.ui_events.put(('review_error', '%s: %s%s' % (
+                    type(e).__name__, e, ' (logged to %s)' % where if where else '')))
         threading.Thread(target=work, daemon=True).start()
 
     def review_open(self, label, state):
@@ -7407,7 +7435,20 @@ def main(argv):
     engine.start()
 
     root = tk.Tk()
+    app_ref = [None]
+
+    def report(exc, value, tb):
+        # a Tk callback that raises otherwise disappears into a console-less process; now it lands in errors.log
+        where = log_error('tk callback', value)
+        try:
+            app_ref[0].hint.configure(text='a window action failed: %s (logged to %s)'
+                                           % (type(value).__name__, where or 'errors.log'))
+        except Exception:
+            pass
+
+    root.report_callback_exception = report
     app = App(root, engine, args)
+    app_ref[0] = app
     try:
         root.mainloop()
     finally:
