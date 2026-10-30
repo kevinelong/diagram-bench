@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zimage gallery - folders and A/B review</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="folders">
+<a class="skip" href="#main">Skip to the pictures</a>
+
+<header class="bar">
+  <h1>Gallery</h1>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+</header>
+
+<div id="error" class="error" role="alert" hidden></div>
+
+<main id="main">
+
+  <section id="view-folders" aria-labelledby="folders-h">
+    <div class="head">
+      <h2 id="folders-h">Folders</h2>
+      <p id="folders-summary" class="muted"></p>
+    </div>
+    <ul id="folders" class="folders"></ul>
+    <p class="muted hint">A folder is a prompt family: the same scene re-worded, re-seeded or edited. Open one to look
+      at its pictures, then rank them head to head.</p>
+  </section>
+
+  <section id="view-folder" aria-labelledby="folder-h" hidden>
+    <div class="head">
+      <button id="back-to-folders" class="ghost" type="button">&#8592; All folders <span class="key">Esc</span></button>
+      <h2 id="folder-h"></h2>
+      <p id="folder-meta" class="muted"></p>
+    </div>
+    <div class="actions">
+      <button id="start-review" class="primary" type="button">A/B review</button>
+      <button id="describe-all" type="button">Describe all&#8230;</button>
+      <button id="cancel-job" type="button" hidden>Stop describing</button>
+      <span id="describe-count" class="muted"></span>
+      <span id="job-status" class="muted" role="status" aria-live="polite"></span>
+    </div>
+    <ul id="grid" class="grid" aria-label="pictures in this folder"></ul>
+  </section>
+
+  <section id="view-review" aria-labelledby="review-h" hidden>
+    <div class="head">
+      <h2 id="review-h">A/B review</h2>
+      <p id="review-info" class="muted" role="status" aria-live="polite"></p>
+    </div>
+    <div class="pair">
+      <figure class="candidate">
+        <img id="left-img" alt="" width="512" height="512">
+        <figcaption id="left-cap"></figcaption>
+      </figure>
+      <figure class="candidate">
+        <img id="right-img" alt="" width="512" height="512">
+        <figcaption id="right-cap"></figcaption>
+      </figure>
+    </div>
+    <div class="actions choices">
+      <button id="pick-left" class="primary" type="button">Left wins <span class="key">1</span> <span class="key">&#8592;</span></button>
+      <button id="pick-tie" type="button">Tie <span class="key">2</span></button>
+      <button id="pick-right" class="primary" type="button">Right wins <span class="key">3</span> <span class="key">&#8594;</span></button>
+      <button id="leave-review" class="ghost" type="button">Leave <span class="key">Esc</span></button>
+    </div>
+    <p class="muted hint">Nothing is deleted here: a pick adds one win to the winner and one loss to the other, in the
+      pictures' own .json files, and the next pair follows.</p>
+  </section>
+
+  <section id="view-done" aria-labelledby="done-h" hidden>
+    <div class="head">
+      <h2 id="done-h">Ranked by wins</h2>
+      <p id="done-meta" class="muted" role="status" aria-live="polite"></p>
+    </div>
+    <ol id="done-list" class="done"></ol>
+    <div class="actions">
+      <button id="reset-start" type="button">Reset and start over</button>
+      <button id="keep-close" class="primary big" type="button">Keep and close</button>
+    </div>
+    <p class="muted hint">Enter or Space keeps and closes. Reset clears this folder's record and starts the comparison
+      again.</p>
+  </section>
+
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

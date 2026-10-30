@@ -1,0 +1,306 @@
+/* app.css - dark and light from the system preference, a focus ring on everything actionable, and two tile sizes.
+ *
+ * The two tile sizes are the contract's "large tiles, bigger than the grid tiles": --grid-tile for the folder view,
+ * --done-tile for the ranked result. They are custom properties, so the comparison is a number and not an opinion
+ * (web/test_web.py reads them and checks the second is larger).
+ */
+
+:root {
+  --grid-tile: 168px;
+  --done-tile: 360px;
+  --radius: 8px;
+  --gap: 12px;
+  --step: 1.4;
+
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --surface-2: #ebe7e0;
+  --text: #17151a;
+  --muted: #5d5966;
+  --line: #d8d2c8;
+  --accent: #5b3fd6;
+  --accent-text: #ffffff;
+  --focus: #0b63d6;
+  --error-bg: #ffe6e2;
+  --error-text: #7a1d10;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14131a;
+    --surface: #1d1b25;
+    --surface-2: #262331;
+    --text: #ece9f2;
+    --muted: #a9a3b8;
+    --line: #35313f;
+    --accent: #a58bff;
+    --accent-text: #14131a;
+    --focus: #8fc4ff;
+    --error-bg: #3a1712;
+    --error-text: #ffb4a6;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 100%; }
+
+body {
+  margin: 0;
+  padding: 0 16px 48px;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/var(--step) "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+h1 { font-size: 1.4rem; margin: 0; }
+h2 { font-size: 1.15rem; margin: 0; }
+
+/* A visible ring on *every* actionable element. :focus-visible would be the tidier selector, but the promise is that
+ * tabbing always shows where the keyboard is - including after a click on a control that only later gets Tab'd past. */
+a:focus,
+button:focus,
+[tabindex]:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+a:focus:not(:focus-visible),
+button:focus:not(:focus-visible) {
+  outline: 3px solid var(--focus);
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+.skip:focus { left: 16px; }
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 20px;
+  padding: 16px 0 10px;
+}
+
+.status { margin: 0; color: var(--muted); }
+.muted { color: var(--muted); }
+.hint { max-width: 62ch; font-size: 0.92rem; }
+
+.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin: 8px 0 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+button {
+  font: inherit;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+button.primary:hover { filter: brightness(1.08); }
+button.ghost { background: transparent; }
+button.big { font-size: 1.05rem; }
+
+.key {
+  display: inline-block;
+  font-size: 0.78rem;
+  padding: 0 6px;
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  opacity: 0.85;
+}
+
+/* --- folders ---------------------------------------------------------------------------------------------------- */
+
+.folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--gap);
+}
+
+.folder {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 16px;
+}
+.folder-label { font-weight: 600; }
+.folder-meta { color: var(--muted); font-size: 0.86rem; }
+
+/* --- the folder grid --------------------------------------------------------------------------------------------- */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-tile), 1fr));
+  gap: var(--gap);
+}
+
+.grid li { margin: 0; }
+
+.tile {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tile a { display: block; line-height: 0; }
+.tile img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: var(--surface-2);
+  display: block;
+}
+
+.tile figcaption {
+  padding: 6px 8px 8px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.tile .name { color: var(--muted); display: block; }
+.tile .prompt { display: block; margin-top: 2px; }
+.tile .record { color: var(--accent); font-weight: 600; }
+
+/* --- the A/B pair ------------------------------------------------------------------------------------------------ */
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+  margin: 0 0 14px;
+}
+
+.candidate {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidate img {
+  width: 100%;
+  height: auto;
+  max-height: 66vh;
+  object-fit: contain;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+.candidate figcaption { font-size: 0.86rem; color: var(--muted); overflow-wrap: anywhere; }
+
+.choices { gap: 14px; }
+
+/* --- the finished screen: the result, at a size that reads as the answer -------------------------------------------------- */
+
+.done {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--done-tile), 1fr));
+  gap: 16px;
+}
+
+.done li { margin: 0; }
+
+.done figure {
+  margin: 0;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.done li:first-child figure { border-color: var(--accent); }
+
+.done a { display: block; line-height: 0; }
+
+.done img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.done figcaption { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; }
+.done .rank {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 2ch;
+}
+.done .who { font-size: 0.86rem; color: var(--muted); overflow-wrap: anywhere; }
+.done .wins { font-size: 0.86rem; color: var(--text); white-space: nowrap; }
+
+@media (max-width: 720px) {
+  :root { --done-tile: 220px; }
+  .pair { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
