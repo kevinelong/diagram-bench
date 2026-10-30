@@ -75,6 +75,23 @@ def main():
     empty = lineage.backfill(tmp, apply=True, verbose=False)
     check('a picture with no prompt is left alone', empty['no_prompt'] >= 1, empty)
 
+    # A caption generated from a picture belongs to that picture's family even though the sampler never saw it: without
+    # this the two texts are unrelated strings (measured cosine 0.071 for "Left Hip: a rigid holster ..." against the
+    # character prompt it describes) and no threshold can join them.
+    import zimage_ui as _ui
+    described = picture(tmp, 'described', 'very tall, android robot cyborg')
+    steps_cap, _ = None, None
+    drawn = _ui.lineage_for(described_from=str(described), typed='Left Hip: a rigid holster')
+    check('a caption generated from a picture extends that picture s chain',
+          drawn == ['very tall, android robot cyborg', 'Left Hip: a rigid holster'], drawn)
+    check('so its root is the picture s root, and the folders meet',
+          drawn[0] == 'very tall, android robot cyborg', drawn[0])
+    fresh = _ui.lineage_for(typed='Left Hip: a rigid holster')
+    check('a caption generated from nothing starts its own chain',
+          fresh == ['Left Hip: a rigid holster'], fresh)
+    edited = _ui.lineage_for(base_path=str(described), typed='add smoke')
+    check('an edit still takes its chain from the base', edited == ['very tall, android robot cyborg', 'add smoke'], edited)
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

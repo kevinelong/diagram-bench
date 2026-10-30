@@ -661,6 +661,23 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## A caption remembers the picture it was written from
+
+`Chiaroscuro`-style merges fail differently: a *prompt* and a *caption* of the same picture share almost nothing as text - the
+prose character prompt is 53 words, the bullet caption of the same character 259, sharing 12 words at **cosine 0.071** - so no
+threshold or synonym list joins them.
+
+Describe now records its source. When the prompt box holds a caption produced from picture P, the render stores
+`described_from: P` and takes its chain from P, so the caption's family *is* P's family:
+
+- caption from a picture -> chain `[P's prompt, caption]`, root = P's prompt, one folder with P
+- caption typed from nothing -> its own chain, as before
+- an edit -> unchanged: the chain still comes from its base
+
+`lineage_for()` is the one function that builds a chain (tested in `test_lineage.py`). It cannot repair pictures already on
+disk: nothing ever stored a caption in a sidecar, so the old caption-prompt renders have no recorded source to follow. New
+ones do.
+
 ## Families are joined by root similarity, at one measured floor
 
 Asked whether two folders that both begin `exactly six adult women sit…` should be one - one wording says "in a single

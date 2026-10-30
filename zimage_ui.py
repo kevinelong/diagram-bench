@@ -782,6 +782,29 @@ def pair_review_progress_safe(state):
         return 0, 0, 0
 
 
+def lineage_for(base_path=None, described_from=None, typed=None, limit=None):
+    """The chain of prompts that produced a picture, copied from whichever parent gave it its look.
+
+    `base_path` is an edit's parent. `described_from` is the picture a *caption* was written from: generating from a caption
+    is text-to-image, not an edit, so the parent is not sent to the sampler - but the caption's family is the described
+    picture's family, and without recording that the two are unrelated strings ("Left Hip: A specialized rigid holster ..."
+    against "very tall, android robot cyborg ...", measured cosine 0.071) and no threshold can join them.
+    """
+    limit = limit or LINEAGE_MAX
+    steps = []
+    parent = base_path or described_from
+    if parent:
+        try:
+            prior = json.loads(Path(parent).with_suffix('.json').read_text(encoding='utf-8'))
+        except Exception:
+            prior = {}
+        steps = list(prior.get('lineage') or ([prior['prompt']] if prior.get('prompt') else []))
+    text = ' '.join((typed or '').split())
+    if text:
+        steps = (steps + [text])[-limit:]
+    return steps
+
+
 def review_tally(rank_mode, decided, total, deletes, stopped=False, left=None):
     """How an A/B review reports itself, for each mode.
 
@@ -956,7 +979,7 @@ class Engine:
     def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0, prompt_full=None,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
                  outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1, name=None,
-                 scene=None, of=None, base_images=None):
+                 scene=None, of=None, base_images=None, described_from=None):
         """One image, or a sheet of N.
 
         sequential=True runs the sampler N times with seeds seed, seed+1 ... so every tile is individually reproducible
@@ -985,18 +1008,13 @@ class Engine:
                 # this step, so it never has to be reconstructed (a walk over base_image breaks as soon as a base is
                 # deleted or moved, and an enhanced draft then loses the wording it came from). `prompt_full` is what was
                 # typed, not the text the sampler received.
-                steps_chain = []
-                if base_path:
-                    try:
-                        prior = json.loads(Path(base_path).with_suffix('.json').read_text(encoding='utf-8'))
-                    except Exception:
-                        prior = {}
-                    steps_chain = list(prior.get('lineage') or ([prior['prompt']] if prior.get('prompt') else []))
-                typed = ' '.join((prompt_full or prompt or '').split())
-                if typed:
-                    steps_chain = (steps_chain + [typed])[-LINEAGE_MAX:]
+                steps_chain = lineage_for(base_path=base_path, described_from=described_from,
+                                          typed=prompt_full or prompt)
                 meta['lineage'] = steps_chain
                 meta['lineage_root'] = steps_chain[0] if steps_chain else None
+                if described_from:
+                    # recorded so the fact survives: the sampler never saw this picture, the caption was written from it
+                    meta['described_from'] = str(Path(described_from).resolve())
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name, scale_base = None, None
@@ -2546,7 +2564,8 @@ class App:
         parts = [path.name]
         try:
             meta = json.loads(path.with_suffix('.json').read_text(encoding='utf-8'))
-            for key in ('prompt', 'style', 'model', 'negative', 'sweep', 'base_image', 'base_images', 'mask'):
+            for key in ('prompt', 'style', 'model', 'negative', 'sweep', 'base_image', 'base_images',
+                        'described_from', 'mask'):
                 value = meta.get(key)
                 if value:
                     parts.append(str(value))
@@ -5083,6 +5102,9 @@ class App:
                 self.ui_events.put(('enhance_failed', '%s: %s' % (type(e).__name__, e)))
 
         url = self._local_llm_url()
+        # which picture this caption is *of*: generating from the caption is text-to-image, but the result belongs to that
+        # picture's family, and that fact only exists here
+        self._described_src = self._current
         self.hint.configure(text='describing with %s\u2026' % url)
         threading.Thread(target=work, args=(url,), daemon=True).start()
 
@@ -6936,7 +6958,11 @@ class App:
                              seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1),
                              scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None),
                              name=_shot, prompt_full=prompt,
-                             base_images=(bases if len(bases) > 1 else None))
+                             base_images=(bases if len(bases) > 1 else None),
+                             described_from=(getattr(self, '_described_src', None)
+                                             if ' '.join(prompt.split()) == ' '.join(
+                                                 (getattr(self, '_described_text', '') or '').split())
+                                             else None))
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()
@@ -6971,6 +6997,8 @@ class App:
                 elif kind == 'described':
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', payload)
+                    # the caption's provenance: generating this text links its result to the picture it describes
+                    self._described_text = payload
                     self.hint.configure(text='prompt written from the picture by the local model')
                 elif kind == 'enhanced':
                     self.text.delete('1.0', 'end')
