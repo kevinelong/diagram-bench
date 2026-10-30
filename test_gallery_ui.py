@@ -957,6 +957,49 @@ def main():
     check('with nothing to go back to it says so', 'nothing to go back' in app.hint['text'], app.hint['text'][:40])
     app._review = None
 
+    print('\n-- ranking never deletes, even when the mode is missing')
+    app._review_mode = tk.StringVar(value='rank')
+    check('rank mode ranks', app._review_is_rank() is True, str(app._review_is_rank()))
+    app._review_mode.set('delete')
+    check('delete mode deletes', app._review_is_rank() is False, str(app._review_is_rank()))
+    app._review_mode.set('wins')                       # a renamed mode must not fall through to deletion
+    check('an unknown mode still ranks', app._review_is_rank() is True, str(app._review_is_rank()))
+    del app._review_mode
+    check('a missing mode ranks too - this used to mean delete', app._review_is_rank() is True, 'missing')
+
+    # a decision taken with no mode set must record a win, not recycle a file
+    guard_dir = Path(tempfile.mkdtemp(prefix='guard-'))
+    g1, g2 = guard_dir / 'g1.png', guard_dir / 'g2.png'
+    for q in (g1, g2):
+        q.write_bytes(b'x')
+        q.with_suffix('.json').write_text(json.dumps({'image': str(q), 'prompt': 'guard'}), encoding='utf-8')
+    recycled = []
+    real_state_dir_guard = _pv.STATE_DIR
+    _pv.STATE_DIR = guard_dir                 # a test state must not land in the real review folder
+    real_recycle, real_show = app._recycle_files, app._review_show_next
+    app._recycle_files = lambda files: (recycled.extend(files), True)[1]
+    app._review_show_next = lambda: None
+    gstate = {'key': 'guard-test'}
+    app._review = {'state': gstate, 'pair': (str(g1), str(g2)), 'queue': [], 'history': [], 'deleted': 0}
+    try:
+        app.review_decide('left')
+        root.update()
+        check('with no mode the decision ranks', _pr.record_of(str(g1))['wins'] == 1,
+              str(_pr.record_of(str(g1))))
+        check('and nothing is recycled', recycled == [] and g1.exists() and g2.exists(), str(recycled))
+        # a delete choice arriving anyway (a future caller, a stale button) is refused while ranking
+        gstate.clear()
+        app._review = {'state': gstate, 'pair': (str(g1), str(g2)), 'queue': [], 'history': [], 'deleted': 0}
+        app.review_decide('delete_left')
+        root.update()
+        check('a delete choice is refused while ranking', not recycled and 'refused' in app.hint['text'],
+              app.hint['text'][:42])
+    finally:
+        app._recycle_files, app._review_show_next = real_recycle, real_show
+        _pv.STATE_DIR = real_state_dir_guard
+        app._review = None
+        gstate.clear()
+
     print('\n-- a review\'s winners reach the pane order and the folder tile')
     win_dir = Path(tempfile.mkdtemp(prefix='wins-'))
     made = []
@@ -3448,6 +3491,7 @@ def main():
     r = getattr(app, '_review', None)
     check('the review window opens with a pair', bool(r) and r.get('pair') is not None)
     if r:
+        app._review_mode.set('delete')      # this block tests deleting; the mode used to be implied by its absence
         check('it shows two pictures', bool(r['left_lbl'].cget('image')) and bool(r['right_lbl'].cget('image')))
         check('the status line says which pair', 'pair 1 of' in r['info']['text'], r['info']['text'])
         check('the keys are bound', bool(r['win'].bind('1')) and bool(r['win'].bind('<Escape>')))
@@ -3478,6 +3522,7 @@ def main():
               recycled and recycled[-1][0] == Path(right).name and any(n.endswith('.json') for n in recycled[-1]),
               recycled[-1] if recycled else None)
         check('and advances to the next pair', app._review['pair'] != (left, right))
+        app._review_mode.set('delete')
         app.review_decide('keep_both'); root.update()
         check('keep both recycles nothing', len(recycled) == 1, recycled)
         app.review_stop(); root.update()

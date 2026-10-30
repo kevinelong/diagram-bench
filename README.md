@@ -569,6 +569,13 @@ slider still holds what we put there.
 
 ## The A/B review: keys, rounds, and a fitted ranking
 
+**Ranking never deletes, and that is now enforced rather than assumed.** The mode test used to be `mode == 'rank'`, which
+fails *open*: with the mode variable missing or renamed, the expression went falsy and `review_decide('left')` mapped to
+**delete_left**. Four existing tests were passing precisely because of that - they opened a review (mode `rank`) and called
+`review_decide('delete_right')` directly. `_review_is_rank()` now returns True unless the mode is exactly `delete`, every
+site uses it (button mapping, arrows, labels, rounds), and the destructive branch itself refuses a delete choice while
+ranking with a visible *"refused to delete while ranking"* hint.
+
 **Keys, in ranking mode only:** `←` left is better, `→` right is better, `↓` tie, `↑` back. In delete mode the arrows are
 inert and say so - `←` used to recycle a file, which is too much power for a key you press while looking at pictures. `1`,
 `2`, `3` and `Space` work in both modes, and Esc stops with the progress saved.

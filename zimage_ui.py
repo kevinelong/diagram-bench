@@ -2901,7 +2901,7 @@ class App:
 
     def _review_arrow(self, side):
         """Arrows rank; they never delete. In delete mode they are inert and say why - <Left> used to recycle a file."""
-        if getattr(self, '_review_mode', None) is None or self._review_mode.get() != 'rank':
+        if not self._review_is_rank():
             self.hint.configure(text='arrows rank only - press 1, 2 or 3 here to delete or keep')
             return 'break'
         self.review_decide(side)
@@ -2939,7 +2939,7 @@ class App:
         if not r:
             return
         left, middle, right = r['buttons']
-        if self._review_mode.get() == 'rank':
+        if self._review_is_rank():
             left.configure(text='Left wins  (1 or \u2190)')
             middle.configure(text='Tie  (2 or \u2193)')
             right.configure(text='Right wins  (3 or \u2192)')
@@ -2975,7 +2975,7 @@ class App:
             r['queue'] = queue
         queue = r['queue']
         decided, total, deletes = pair_review.progress(r['state'])
-        if not queue and getattr(self, '_review_mode', None) is not None and self._review_mode.get() == 'rank':
+        if not queue and self._review_is_rank():
             # a matching gives every picture one bout; a ranking needs rounds - log2(n) of them, paired by record
             more = pair_review.next_round(r['state'])
             if not more and r['state'].get('settled'):
@@ -3021,6 +3021,21 @@ class App:
             if getattr(lbl, 'source', None):
                 self._review_fit(lbl)
 
+    def _review_is_rank(self):
+        """True unless the mode is explicitly delete.
+
+        This used to be `mode == 'rank'`, which fails *open*: a missing or renamed mode variable made the review behave
+        as delete mode, and the buttons would then recycle files while someone thought they were ranking. Safety comes
+        from the default, so deletion is now the case that must be asked for by name.
+        """
+        mode = getattr(self, '_review_mode', None)
+        if mode is None:
+            return True
+        try:
+            return str(mode.get()) != 'delete'
+        except Exception:
+            return True
+
     def review_decide(self, choice):
         import pair_review
         import pair_rank
@@ -3030,7 +3045,7 @@ class App:
         a, b = r['pair']
         # the buttons say left/middle/right; the mode decides what that means
         if choice in ('left', 'middle', 'right'):
-            rank = getattr(self, '_review_mode', None) and self._review_mode.get() == 'rank'
+            rank = self._review_is_rank()
             choice = {('left', True): 'left_wins', ('middle', True): 'tie', ('right', True): 'right_wins',
                       ('left', False): 'delete_left', ('middle', False): 'keep_both',
                       ('right', False): 'delete_right'}[(choice, rank)]
@@ -3049,6 +3064,9 @@ class App:
             if r['queue']:
                 r['queue'] = r['queue'][1:]
             self._review_show_next()
+            return
+        if choice in pair_rank.DELETE_CHOICES and self._review_is_rank():
+            self.hint.configure(text='refused to delete while ranking - switch the mode to delete first')
             return
         to_delete = pair_review.decide(r['state'], a, b, choice)
         if to_delete:
