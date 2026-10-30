@@ -93,7 +93,10 @@ def main():
     key = pr.state_key(files)
     state = pr.load_state(key, state_dir)
     pr.build(files, state, hash_store=tmp / 'hashes.json')
-    check('the plan holds both pairs', len(state['pairs']) == 2, state.get('pairs'))
+    # five pictures are below EXHAUSTIVE_MAX, so the plan is every pair - the decision/reload checks below do not care
+    # how many, only that a decision sticks and the pair is not offered again
+    check('a small set plans every pair', len(state['pairs']) == 10 and state.get('exhaustive') is True,
+          '%d pairs, exhaustive=%s' % (len(state['pairs']), state.get('exhaustive')))
     a, b, _d = state['pairs'][0]
     to_delete = pr.decide(state, a, b, 'delete_left')
     check('delete_left returns the left path', to_delete == a, to_delete)
@@ -103,7 +106,8 @@ def main():
     check('the decision survives a save and reload', len(reloaded['decisions']) == 1, reloaded['decisions'])
     check('the decided pair is not offered again',
           pr._pair_id(a, b) not in [pr._pair_id(x, y) for x, y, _ in pr.remaining(reloaded)])
-    check('the other pair is still offered', len(pr.remaining(reloaded)) == 1)
+    check('the other pairs are still offered', len(pr.remaining(reloaded)) == 9,
+          str(len(pr.remaining(reloaded))))
 
     print('\n-- choices and accounting')
     s2 = pr.load_state('other', state_dir)
@@ -113,7 +117,7 @@ def main():
     p, q, _ = s2['pairs'][1]
     check('delete_right returns the right path', pr.decide(s2, p, q, 'delete_right') == q)
     decided, total, deletes = pr.progress(s2)
-    check('progress counts decisions and deletes', (decided, total, deletes) == (2, 2, 1),
+    check('progress counts decisions and deletes', (decided, total, deletes) == (2, 10, 1),
           (decided, total, deletes))
     try:
         pr.decide(s2, p, q, 'delete_both')
@@ -184,7 +188,8 @@ def main():
     print('\n-- edges')
     one = pr.load_state('one', state_dir)
     pr.build(files[:1], one, hash_store=tmp / 'hashes.json')
-    check('a single picture makes no pair', one['pairs'] == [] and one['leftovers'] == [str(files[0])])
+    # no pair can be made from one picture; exhaustive leaves nothing over because there is nothing to pair
+    check('a single picture makes no pair', one['pairs'] == [], str(one['pairs']))
     check('a pair id is order-independent', pr._pair_id('x/a.png', 'x/b.png') == pr._pair_id('x/b.png', 'x/a.png'))
     broken = gallery / 'broken.png'
     broken.write_bytes(b'not a png')
@@ -238,6 +243,32 @@ def main():
     check('rounds for 2 is 2', pr.rounds_for(2) == 2, str(pr.rounds_for(2)))
     check('rounds for 8 is 3 (log2)', pr.rounds_for(8) == 3, str(pr.rounds_for(8)))
     check('rounds for 48 is 6', pr.rounds_for(48) == 6, str(pr.rounds_for(48)))
+
+    # a set small enough to compare exhaustively gets every pair: 15 questions is a couple of minutes, and the complete
+    # graph is better data than a schedule
+    def crew(n, name):
+        folder = tmp / name
+        folder.mkdir(parents=True, exist_ok=True)
+        out = []
+        for i in range(n):
+            p = folder / ('s%d.png' % i)
+            Image.new('RGB', (48, 48), (25 * i, 60, 140)).save(p)
+            out.append(p)
+        return out
+
+    small = crew(6, 'small')
+    small_state = pr.build(small, {}, hash_store=tmp / 'small-hashes.json')
+    ids = {pr._pair_id(a, b) for a, b, _d in small_state['pairs']}
+    check('six pictures get every one of their 15 pairs', len(small_state['pairs']) == 15 and len(ids) == 15,
+          '%d pairs, %d unique' % (len(small_state['pairs']), len(ids)))
+    check('and no picture is left out', len({n for a, b, _d in small_state['pairs'] for n in (a, b)}) == 6, 'missing')
+    check('the plan is marked exhaustive', small_state.get('exhaustive') is True, str(small_state.get('exhaustive')))
+    check('and needs no further rounds', pr.next_round(small_state) == [], 'asked for more')
+    edge = crew(7, 'edge')
+    edge_state = pr.build(edge, {}, hash_store=tmp / 'edge-hashes.json')
+    check('seven pictures switch to rounds instead',
+          not edge_state.get('exhaustive') and len(edge_state['pairs']) == 3,
+          '%d pairs, exhaustive=%s' % (len(edge_state['pairs']), edge_state.get('exhaustive')))
 
     ring = [str(tmp / ('r%d.png' % i)) for i in range(8)]
     state = {'paths': ring, 'pairs': [], 'decisions': {}, 'round': 1, 'target_rounds': pr.rounds_for(8)}
@@ -306,6 +337,25 @@ def main():
     check('and the opponent tally went too', not (pair_rank.read_meta(p1).get('vs') or {}).get('two.png')
           or pair_rank.read_meta(p1)['vs']['two.png'][0] == 0, str(pair_rank.read_meta(p1).get('vs')))
     check('undoing a pair with no decision is a no-op', pair_rank.unrecord({}, str(p1), str(p2)) is None, 'returned a choice')
+
+    print('\n-- at three seconds a decision, a plan has a price')
+    check('15 questions is under a minute', round(pr.estimate_minutes([0] * 15), 2) == 0.75,
+          str(pr.estimate_minutes([0] * 15)))
+    check('144 questions is about seven minutes', round(pr.estimate_minutes([0] * 144), 1) == 7.2,
+          str(pr.estimate_minutes([0] * 144)))
+    check('every pair of 48 would be 56 minutes', round(pr.estimate_minutes([0] * 1128) ) == 56,
+          str(pr.estimate_minutes([0] * 1128)))
+
+    # a round that cannot move anybody is not asked: three seconds a question is three minutes of someone's evening
+    settle = {'paths': ['/s/%d.png' % i for i in range(8)],
+              'pairs': [['/s/%d.png' % i, '/s/%d.png' % (i + 1), 1] for i in range(0, 8, 2)],
+              'decisions': {}, 'round': 1, 'target_rounds': 4}
+    for i in range(0, 8, 2):
+        settle['decisions'][pr._pair_id('/s/%d.png' % i, '/s/%d.png' % (i + 1))] = {
+            'choice': 'left_wins', 'left': '%d.png' % i, 'right': '%d.png' % (i + 1)}
+    check('a round is offered while the order can move', len(pr.next_round(settle)) == 4, 'no round offered')
+    check('but not when nothing has changed since', pr.next_round(settle) == [], 'asked anyway')
+    check('and it says the order settled', settle.get('settled') is True, str(settle.get('settled')))
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0

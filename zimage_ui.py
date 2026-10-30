@@ -2978,6 +2978,9 @@ class App:
         if not queue and getattr(self, '_review_mode', None) is not None and self._review_mode.get() == 'rank':
             # a matching gives every picture one bout; a ranking needs rounds - log2(n) of them, paired by record
             more = pair_review.next_round(r['state'])
+            if not more and r['state'].get('settled'):
+                self.hint.configure(text='the order settled after round %s - another round would not move anybody'
+                                         % r['state'].get('round'))
             if more:
                 r['queue'] = None
                 r['round'] = r['state'].get('round')
@@ -2994,10 +2997,14 @@ class App:
         for lbl, path in ((r['left_lbl'], a), (r['right_lbl'], b)):
             lbl.source = path
             self._review_fit(lbl, path)
-        r['info'].configure(text='pair %d of %d \u00b7 round %s of %s \u00b7 %d deleted \u00b7 distance %d \u00b7 '
-                                 '%s | %s' % (decided + 1, total, r['state'].get('round', 1),
-                                              r['state'].get('target_rounds', 1), deletes, dist,
-                                              Path(a).name[:32], Path(b).name[:32]))
+        stage = ('every pair' if r['state'].get('exhaustive')
+                 else 'round %s of %s' % (r['state'].get('round', 1), r['state'].get('target_rounds', 1)))
+        left_min = pair_review.estimate_minutes(queue)
+        r['info'].configure(text='pair %d of %d \u00b7 %s \u00b7 ~%s left at 3 s each \u00b7 %d deleted \u00b7 '
+                                 '%s | %s' % (decided + 1, total, stage,
+                                              ('%d min' % round(left_min)) if left_min >= 1 else '%d s' % (left_min * 60),
+                                              deletes,
+                                              Path(a).name[:30], Path(b).name[:30]))
 
     def _on_review_resize(self, event=None):
         r = getattr(self, '_review', None)

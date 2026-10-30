@@ -92,6 +92,37 @@ def pair_up(paths, hash_map):
     return pairs, leftovers
 
 
+# A small set is worth comparing exhaustively: every pair once.
+#
+#   n   all pairs   rounds (~n/2 per round)
+#   4        6          4
+#   5       10          6
+#   6       15          9
+#   7       21          9      <- rounds start saving more than half
+#
+# The count is not the whole argument: at 15 questions or fewer the cost is a couple of minutes of clicking, and the
+# complete graph is strictly better data than a schedule - every picture has met every other, so the Bradley-Terry fit is
+# fully determined, contradictions ("A beat B, B beat C, C beat A") are visible at all, and each picture's record is
+# perfectly balanced. Above that, rounds cost less for an order that is nearly as good.
+EXHAUSTIVE_MAX = 6
+
+# A decision costs about three seconds of a person's attention (measured on this window, 2026-10-29), so a plan can be
+# priced in minutes before it starts: 15 questions is under a minute, 144 is about seven.
+DECISION_SECONDS = 3.0
+
+
+def estimate_minutes(pairs, per_decision=DECISION_SECONDS):
+    """Rough wall-clock for a plan, from the measured pace."""
+    return len(pairs) * per_decision / 60.0
+
+
+def _session_order(state):
+    """The order the decisions currently imply (wins, then losses, then name) - cheap, and enough to notice no change."""
+    scores = _session_record(state)
+    names = sorted({Path(p).name for p in state.get('paths') or []})
+    return tuple(sorted(names, key=lambda n: (-scores.get(n, (0, 0, 0))[0], scores.get(n, (0, 0, 0))[1], n)))
+
+
 def rounds_for(count):
     """How many rounds a full order needs: log2(n), which is what a comparison sort costs, and at least two."""
     import math
@@ -134,6 +165,14 @@ def next_round(state, hash_map=None):
     done_round = int(state.get('round') or 1)
     if done_round >= target:
         return []
+    # stop as soon as a round would not move anybody: at three seconds a question, a round that changes nothing is
+    # three minutes of someone's evening
+    order = _session_order(state)
+    previous = state.get('last_order')
+    if previous and order == tuple(previous):
+        state['settled'] = True
+        return []
+    state['last_order'] = list(order)
     decided = set((state.get('decisions') or {}).keys())
     scores = _session_record(state)
     by_name = {Path(p).name: str(p) for p in paths}
@@ -207,10 +246,30 @@ def build(paths, state, hash_store=None):
     state.setdefault('paths', [str(p) for p in paths])
     state.setdefault('target_rounds', rounds_for(len(paths)))
     state.setdefault('round', 1)
+    if len(paths) <= EXHAUSTIVE_MAX:
+        # every pair once, most similar first (the distance is only used to order the questions, not to filter)
+        got = hashes(paths, store=hash_store)
+        str_paths = [str(p) for p in paths]
+        scored = []
+        for i in range(len(str_paths)):
+            for j in range(i + 1, len(str_paths)):
+                a, b = str_paths[i], str_paths[j]
+                ha, hb = got.get(a), got.get(b)
+                dist = hamming(ha, hb) if (ha and hb) else 999
+                scored.append((dist, a, b))
+        scored.sort(key=lambda row: (row[0], row[1], row[2]))
+        state['pairs'] = [[a, b, d] for d, a, b in scored]
+        state['leftovers'] = []
+        state['exhaustive'] = True
+        state['round'] = 1
+        state['target_rounds'] = 1
+        state['total'] = len(state['pairs'])
+        return state
     got = hashes(paths, store=hash_store)
     pairs, leftovers = pair_up(paths, got)
     state['pairs'] = [[a, b, d] for a, b, d in pairs]
     state['leftovers'] = leftovers
+    state['exhaustive'] = False
     state['total'] = len(pairs)
     return state
 

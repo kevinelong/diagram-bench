@@ -577,6 +577,26 @@ inert and say so - `←` used to recycle a file, which is too much power for a k
 decision, so retracting a win leaves the sidecars exactly as they were; the pair then comes back first because the queue is
 re-derived from the decisions rather than patched.
 
+**Small sets are compared exhaustively, and the cut-off is a time budget.** A decision costs about **3 s** (measured, this
+window), so a plan can be priced before it starts: 15 questions is under a minute, 144 is about seven, every pair of 48 is
+56 minutes.
+
+| pictures | every pair | rounds | chosen |
+|---:|---:|---:|---|
+| 4 | 6 (18 s) | 4 | **every pair** |
+| 6 | 15 (45 s) | 9 | **every pair** |
+| 7 | 21 (63 s) | 9 (27 s) | rounds |
+| 8 | 28 | 12 | rounds |
+| 48 | 1,128 (56 min) | ~144 (7 min) | rounds |
+
+`EXHAUSTIVE_MAX = 6`: at or below it the complete graph is worth the extra questions - every picture has met every other, the
+Bradley-Terry fit is fully determined, contradictions are visible, and each record is balanced - and the cost is 45 s of
+clicking. Above it, rounds save more than half the time for nearly the same order.
+
+The window also **stops early when the order settles**: if a round would not move anybody (the decision-implied order is
+unchanged), the schedule ends and says so, because another round is minutes of someone's evening for nothing. The info line
+prices what is left - *"~7 min left at 3 s each"*.
+
 **A ranking takes rounds, not a matching.** The pair builder is a greedy *maximal matching* - every picture at most once -
 which is right for elimination (look at each picture once, decide) and useless for ranking: 48 pictures got 24 comparisons,
 each picture with one opponent, no chains, so "wins" were not a ranking. Ranking now continues round by round
