@@ -673,6 +673,23 @@ measured membership check and is not bent for a display convenience.
 A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
 was asked for.
 
+## Filing a foreign folder by caption
+
+A folder from another pipeline has no prompts, so nothing can be grouped. **Caption…** (in the folder pane, beside
+Recover…) sends the pictures that have neither a prompt nor a caption to a **local** vision model and then files them:
+
+| what | how |
+|---|---|
+| the endpoint | `127.0.0.1:8080/v1`, OpenAI-compatible - the same one `Describe` and `enhance` use; `ZIMAGE_LLM_URL` overrides it |
+| what it asks | *"Describe this image as a topic and a one-line caption"*, JSON `{topic, caption}` |
+| what it writes | `caption` and `topic` **beside the picture**, with `"imported": "caption"` - never into `prompt` |
+| what it makes | groups labelled **`caption: …`**, so an appearance-folder can never be mistaken for an intent-folder |
+| consent | a count and a time estimate first (about 2.5 s per picture at the measured pace), and it refuses outright when nothing is serving at that URL, saying where the model should be |
+| safety | nothing is deleted or ranked; the newest `RECENT_N` stay in the recency window as everywhere else |
+
+A caption is *not* a prompt: a prompt is what was asked for, a caption is what the picture looks like. Keeping them in
+separate fields is what lets a caption-foldered folder stay honest about what it is.
+
 ## Looking at another folder (source vs output)
 
 Renders are written to `--out`. What the window *looks at* is now a separate thing, `self._source`, so a folder from

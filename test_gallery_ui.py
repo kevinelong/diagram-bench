@@ -1023,7 +1023,8 @@ def main():
     # the UI route: Open… asks for a folder and switches the view, and cancelling changes nothing
     from tkinter import filedialog as _fd
     bar_buttons = [str(w.cget('text')) for w in app.folder_bar.winfo_children() if w.winfo_class() == 'TButton']
-    check('the folder bar has an Open… button', any(b.startswith('Open') for b in bar_buttons), str(bar_buttons))
+    check('Open… lives on the always-visible line, not the options bar',
+          not any(b.startswith('Open') for b in bar_buttons), str(bar_buttons))
     real_askdir = _fd.askdirectory
     _fd.askdirectory = lambda **k: ''
     try:
@@ -2186,7 +2187,8 @@ def main():
           '%d tiles vs cap %d' % (len(app._tile_widgets), zui.RECENT_N))
     check('the title says it is a match list', app.gal_title['text'].startswith('Matches'), app.gal_title['text'])
     app.search_var.set(''); app.refresh_gallery(); root.update()
-    check('clearing the search returns to a recency window', len(app._tile_widgets) == zui.RECENT_N,
+    # the strip now fills its column, so it may hold more than the 18-tile recency window
+    check('clearing the search returns to a recency window', len(app._tile_widgets) >= zui.RECENT_N,
           str(len(app._tile_widgets)))
 
     print('\n-- no child process may open a console window')

@@ -1589,6 +1589,21 @@ class App:
         self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
                                          command=self.toggle_groups, style='Big.TCheckbutton')
         self.group_chk.pack(side='left', padx=(8, 0))
+        # The picker lived only in the folder bar, which is hidden while options are folded and before a plan exists -
+        # so the one control you need in order to look at an unfamiliar folder could be invisible. It gets its own line
+        # under the title, always visible, together with what that folder is and whether the walk goes into subfolders.
+        self.source_row = ttk.Frame(self.title_row)
+        self.source_row.pack(fill='x', pady=(3, 0))
+        self.title_open_btn = ttk.Button(self.source_row, text='Open\u2026', width=6, command=self.open_source_dialog)
+        self.title_open_btn.pack(side='left')
+        self._tip(self.title_open_btn, 'View and categorise another folder (Ctrl+O). Renders keep going to %s.'
+                                       % self.args.out)
+        self.source_chip = ttk.Label(self.source_row, text='', foreground=self.theme.accent)
+        self.source_back_btn = ttk.Button(self.source_row, text='\u00d7', width=2, command=self.close_source)
+        self.recursive_var = tk.BooleanVar(value=False)
+        self.recursive_chk = ttk.Checkbutton(self.source_row, text='subfolders', variable=self.recursive_var,
+                                            command=self.toggle_recursive)
+        self.recursive_chk.pack(side='right')
         # Everything above the strip except this first line folds away: it is configuration, not the work. Folding it by
         # default is what pays for the bigger controls inside it.
         self._options_shown = False
@@ -1637,7 +1652,7 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(4):
+        for col in range(5):
             self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
@@ -1653,8 +1668,12 @@ class App:
         # pipeline can regain its categories without a human retyping prompts
         self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
         self.contents_rec_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
+        self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
+        self.contents_cap_btn.grid(row=0, column=4, sticky='we', padx=(3, 0))
+        self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
+                                         'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=1, column=0, columnspan=4, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=5, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -2157,6 +2176,7 @@ class App:
         self.style_var.trace_add('write', lambda *a: self._on_style_change())
         self.model_var.trace_add('write', lambda *a: self._update_banner())
         for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
+                        ('<Control-o>', self._on_ctrl_o),
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
 
@@ -2254,6 +2274,29 @@ class App:
         tag = _h.sha1(str(Path(self._source).resolve()).lower().encode('utf-8')).hexdigest()[:12]
         return base / tag
 
+    def _show_source_title(self):
+        """The title row is the one line always on screen, so it carries which folder is being looked at."""
+        try:
+            if not hasattr(self, 'gal_title'):
+                return
+            chip, back = getattr(self, 'source_chip', None), getattr(self, 'source_back_btn', None)
+            if not self._is_output_source():
+                self.gal_title.configure(text='Viewing %s' % self._short_name(self._source.name),
+                                         foreground=self.theme.accent)
+                if chip is not None and back is not None:
+                    chip.configure(text=self._short_name(self._source.name)[:18])
+                    chip.pack(side='left', padx=(6, 2))
+                    back.pack(side='left')
+                    self._tip(back, 'Stop viewing %s and go back to %s' % (self._source, self.args.out))
+            elif chip is not None and back is not None:
+                chip.pack_forget()
+                back.pack_forget()
+            else:
+                # the strip's own label logic owns the text ("Recent (18)", "Folders (12) ...") - only the colour is ours
+                self.gal_title.configure(foreground=self.theme.text)
+        except Exception:
+            pass
+
     def set_source(self, path):
         """Look at another folder - view it, categorise it, review it - while renders keep going to the output folder.
 
@@ -2271,6 +2314,10 @@ class App:
             pass
         self._source = target
         self._recursive = False
+        try:
+            self.recursive_var.set(False)
+        except Exception:
+            pass
         self._scan_capped = False
         self._heads.clear()
         self._wins_cache = {}
@@ -2283,6 +2330,7 @@ class App:
             self.hint.configure(text='viewing %s  \u00b7  renders still go to %s'
                                      % (self._short_name(target.name), self._short_name(Path(self.args.out).name)))
         self.refresh_gallery()
+        self._show_source_title()
         if hasattr(self, 'group_var') and self.group_var.get():
             self._regroup_soon()
         return True
@@ -2496,6 +2544,72 @@ class App:
             hit = None
         return hit['index'] if hit else None
 
+    def caption_folder(self):
+        """Caption the open folder's prompt-less pictures with the local vision model, then group them by caption.
+
+        This is what gives a folder from another pipeline *any* organising principle: it has no prompts, so the only thing
+        to file it by is what the pictures look like. The caption is written beside the picture as `caption`/`topic` with
+        `imported: caption`, never into `prompt`, and the groups it makes are labelled `caption: …`.
+        """
+        import caption as capmod
+        # A foreign folder often has no folders *in it* (nothing to group by), so the pane can be empty: fall back to
+        # every picture the source lists rather than refusing to do the one thing that would create those folders.
+        cells = list(getattr(self, '_content_order', []) or []) or list(self._files)
+        if not cells:
+            self.hint.configure(text='nothing to caption in %s' % self._short_name(self._source.name))
+            return 0
+        todo = []
+        for picture in cells:
+            meta = read_meta(picture) or {}
+            if not meta.get('prompt') and not meta.get('caption'):
+                todo.append(picture)
+        if not todo:
+            self.hint.configure(text='every picture here already has a prompt or a caption')
+            return 0
+        if not capmod.available():
+            self.hint.configure(text='no vision model at %s - start one there and Caption will work; nothing was sent'
+                                     % capmod.base_url())
+            return 0
+        minutes = len(todo) * 2.5 / 60.0
+        if not messagebox.askyesno('Caption %d picture%s?' % (len(todo), '' if len(todo) == 1 else 's'),
+                                   'Send %d picture%s to the local vision model at %s?\n\n'
+                                   'It writes a caption and a topic beside each picture (never into its prompt) and then '
+                                   'files them by caption.\nAdvisory: about %.1f minute%s at the measured 2.5 s each.'
+                                   % (len(todo), '' if len(todo) == 1 else 's', capmod.base_url(),
+                                      minutes, '' if minutes >= 1.5 else 's'),
+                                   parent=self.root):
+            return 0
+        total = len(todo)
+        self.status.configure(text='captioning %d picture%s\u2026' % (total, '' if total == 1 else 's'))
+
+        def work():
+            import pair_rank
+            done = 0
+            for picture in todo:
+                try:
+                    topic, text = capmod.caption(picture)
+                except Exception as e:
+                    self.ui_events.put(('caption_failed', '%s: %s' % (type(e).__name__, e)))
+                    return
+                meta = read_meta(picture) or {}
+                if text:
+                    meta['caption'] = text
+                if topic:
+                    meta['topic'] = topic
+                meta.setdefault('image', str(picture))
+                meta['imported'] = 'caption'
+                try:
+                    pair_rank.write_meta(picture, meta)
+                except Exception:
+                    pass
+                done += 1
+                self.ui_events.put(('caption_progress', (done, total)))
+            self.ui_events.put(('caption_done', (done, total)))
+
+        import threading
+        threading.Thread(target=work, daemon=True).start()
+        return len(todo)
+
     def recover_pane_sidecars(self):
         """Rebuild missing sidecars for the open folder's pictures, from the metadata inside the pictures.
 
@@ -2503,10 +2617,7 @@ class App:
         `"imported": <source>`, because it cannot carry the ranking or the style label this app adds.
         """
         import recover_sidecars
-        cells = list(getattr(self, '_content_order', []) or [])
-        if not cells:
-            self.hint.configure(text='open a folder first')
-            return 0
+        cells = list(getattr(self, '_content_order', []) or []) or list(self._files)   # same fallback as Caption…
         bare = [p for p in cells if not Path(p).with_suffix('.json').is_file()]
         if not bare:
             self.hint.configure(text='every picture in this folder already has its metadata')
@@ -2689,11 +2800,25 @@ class App:
             rows = []
             for path, stamp in self._scan():          # (path, mtime); the prompt lives in the sidecar
                 meta = read_meta(path) or {}
-                rows.append({'path': str(path), 'prompt': meta.get('prompt') or '',
-                             'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds')})
+                prompt = meta.get('prompt') or ''
+                topic = ''
+                if not prompt and (meta.get('caption') or meta.get('topic')):
+                    # A folder from another pipeline has captions and no prompts. Filing it by caption organises what
+                    # the pictures *look like*, which is the only organising principle such a folder has - so it is used,
+                    # and the group's label says where it came from.
+                    topic = (meta.get('topic') or '').strip()
+                    prompt = ' '.join(x for x in (topic, (meta.get('caption') or '').strip()) if x)
+                rows.append({'path': str(path), 'prompt': prompt,
+                             'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
+                             'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
             plan = group_prompts.plan(rows, keep_lexicon=True)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
+            for group in plan.get('groups') or []:
+                items = group.get('items') or []
+                if items and all(row.get('from_caption') for row in items):
+                    group['label'] = 'caption: ' + (group.get('label') or '').strip()
+                    group['from_caption'] = True
             unfiled = [row for row in (plan.get('ungrouped') or []) if row.get('path')]
             if unfiled:
                 plan.setdefault('groups', []).append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,
@@ -2765,6 +2890,10 @@ class App:
     def toggle_recursive(self, force=None):
         """Walk into subfolders, or stop. Resets whenever the source changes."""
         self._recursive = bool(self.recursive_var.get()) if force is None else bool(force)
+        try:
+            self.recursive_var.set(self._recursive)
+        except Exception:
+            pass
         self._scan_capped = False
         self._heads.clear()
         self.refresh_gallery()
@@ -2791,26 +2920,13 @@ class App:
         if not self._plan:
             return
         # the source chip: a looked-at folder and a written-to folder must never be confusable
-        if not self._is_output_source():
-            ttk.Label(self.folder_bar, text='viewing', foreground=self.theme.muted).pack(side='left', padx=(0, 3))
-            ttk.Label(self.folder_bar, text=self._short_name(self._source.name)[:22],
-                      foreground=self.theme.accent).pack(side='left')
-            back = ttk.Button(self.folder_bar, text='\u00d7', width=2, command=self.close_source)
-            back.pack(side='left', padx=(3, 8))
-            self._tip(back, 'Stop viewing %s and go back to %s' % (self._source, self.args.out))
         self._folder_choices = [None] + list(range(len(self._plan['groups'])))
         name = 'All folders' if self._active_folder is None else self._folder_text(self._active_folder)
         self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s\u2026' % name, width=17,
                                           command=self.open_folder_browser)
         self.folder_pick_btn.pack(side='left')
         ttk.Button(self.folder_bar, text='A/B\u2026', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
-        self.open_source_btn = ttk.Button(self.folder_bar, text='Open\u2026', width=6, command=self.open_source_dialog)
-        self.open_source_btn.pack(side='left', padx=(6, 0))
-        self._tip(self.open_source_btn, 'View and categorise another folder - a folder from another pipeline, say. '
-                                       'Renders still go to %s; Close (x) comes back here.' % self.args.out)
-        self.recursive_var = tk.BooleanVar(value=bool(self._recursive))
-        ttk.Checkbutton(self.folder_bar, text='subfolders', variable=self.recursive_var,
-                        command=self.toggle_recursive).pack(side='left', padx=(8, 0))
+
         if getattr(self, '_prediction', None):
             label = ttk.Label(self.folder_bar, text='\u2192 %s' % shorten_title(self._prediction['label'], 5),
                               foreground=self.theme.accent, font=('Segoe UI', 8))
@@ -4180,7 +4296,7 @@ class App:
             self._render_folder_tiles()
             self._paint()          # the folders branch used to return without painting, so a pane click left the
             return                 # action row disabled while `selected` held the path
-        self.gal_title.configure(text=label)
+        self.gal_title.configure(text=label if self._is_output_source() else 'Viewing %s' % self._short_name(self._source.name))
         cols, tile_px = self._strip_metrics()
         for w in self.recent.winfo_children():
             w.destroy()
@@ -5697,6 +5813,13 @@ class App:
         self.delete_selected()
         return 'break'
 
+    def _on_ctrl_o(self, event=None):
+        """Ctrl+O opens another folder to look at - the same dialog as the Open… button."""
+        if self._typing():
+            return None
+        self.open_source_dialog()
+        return 'break'
+
     def _on_ctrl_a(self, event=None):
         if self._typing():
             return None
@@ -6740,6 +6863,19 @@ class App:
                         self.generate()
                 elif kind == 'queued':
                     self.status.configure(text='generating…')
+                elif kind == 'caption_progress':
+                    done, total = payload
+                    self.status.configure(text='captioning %d of %d\u2026' % (done, total))
+                elif kind == 'caption_done':
+                    done, total = payload
+                    self._heads.clear()
+                    self._photo_cache.clear()
+                    self.hint.configure(text='captioned %d of %d - filing them by caption now' % (done, total))
+                    self.refresh_gallery()
+                    if hasattr(self, 'group_var') and self.group_var.get():
+                        self._regroup_soon()
+                elif kind == 'caption_failed':
+                    self.hint.configure(text='captioning stopped: %s' % payload)
                 elif kind == 'thumbs':
                     for path, thumb in (payload or {}).items():
                         self._thumbs_inflight.discard(str(path))
