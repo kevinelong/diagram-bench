@@ -234,6 +234,79 @@ def main():
         check('the first pairs are near-identical', bool(pairs) and pairs[0][2] <= 12, pairs[0][2] if pairs else None)
         print('   first distances:', [d for _a, _b, d in pairs[:8]])
 
+    print('\n-- rounds: a ranking needs more than one bout per picture')
+    check('rounds for 2 is 2', pr.rounds_for(2) == 2, str(pr.rounds_for(2)))
+    check('rounds for 8 is 3 (log2)', pr.rounds_for(8) == 3, str(pr.rounds_for(8)))
+    check('rounds for 48 is 6', pr.rounds_for(48) == 6, str(pr.rounds_for(48)))
+
+    ring = [str(tmp / ('r%d.png' % i)) for i in range(8)]
+    state = {'paths': ring, 'pairs': [], 'decisions': {}, 'round': 1, 'target_rounds': pr.rounds_for(8)}
+    first = [(ring[i], ring[i + 1], 1) for i in range(0, 8, 2)]
+    state['pairs'].extend([list(x) for x in first])
+    for a, b, _d in first:
+        state['decisions'][pr._pair_id(a, b)] = {'choice': 'left_wins', 'left': Path(a).name, 'right': Path(b).name}
+    second = pr.next_round(state)
+    covered = {Path(n).name for a, b, _d in second for n in (a, b)}
+    check('the second round covers every picture once', len(second) == 4 and len(covered) == 8,
+          '%d pairs, %d pictures' % (len(second), len(covered)))
+    check('and asks no pair twice', not ({pr._pair_id(a, b) for a, b, _d in second} & set(state['decisions'])),
+          'rematch asked')
+    winners = {Path(a).name for a, b, _d in first}
+    check('winners are paired with winners', all((Path(a).name in winners) == (Path(b).name in winners)
+                                                  for a, b, _d in second),
+          [(Path(a).name, Path(b).name) for a, b, _d in second])
+    check('the round counter advanced', state['round'] == 2, str(state['round']))
+    state['round'] = state['target_rounds']
+    check('and the schedule stops at the target', pr.next_round(state) == [], 'kept going')
+
+    print('\n-- strength: a win over a strong picture counts for more')
+    import json as _json
+    import pair_rank
+    bt_dir = Path(tempfile.mkdtemp(prefix='bt-'))
+
+    def picture(name, wins, losses, vs):
+        p = bt_dir / (name + '.png'); p.write_bytes(b'x')
+        p.with_suffix('.json').write_text(_json.dumps({'image': str(p), 'wins': wins, 'losses': losses, 'ties': 0,
+                                                       'bouts': wins + losses, 'vs': vs}), encoding='utf-8')
+        return p
+
+    # a wins 3 of 3 against the best; b wins 5 but loses 4 of them to a
+    a = picture('a', 3, 0, {'s1.png': [2, 0, 0], 's2.png': [1, 0, 0]})
+    b = picture('b', 5, 4, {'w1.png': [3, 0, 0], 'a.png': [2, 4, 0]})
+    s1 = picture('s1', 2, 2, {'a.png': [0, 2, 0], 's2.png': [2, 0, 0]})
+    s2 = picture('s2', 1, 3, {'a.png': [0, 1, 0], 's1.png': [0, 2, 0]})
+    w1 = picture('w1', 3, 4, {'b.png': [0, 3, 0], 'a.png': [3, 1, 0]})
+    crew = [a, b, s1, s2, w1]
+    strong = pair_rank.bt_strength(crew)
+    check('every picture gets a strength', all(k in strong for k in map(str, crew)), str(len(strong)))
+    check('a win over the best outranks three over the worst', strong[str(w1)] > strong[str(s2)],
+          '%.3f vs %.3f' % (strong[str(w1)], strong[str(s2)]))
+    order = [Path(p).name for p in pair_rank.sort_by_strength(crew)]
+    check('and the order differs from raw wins', order != [Path(p).name for p in pair_rank.sort_by_wins(crew)],
+          str(order))
+    check('no bouts at all leaves everyone level', len(set(pair_rank.bt_strength([a]).values())) == 1,
+          str(pair_rank.bt_strength([a])))
+
+    print('\n-- undo: going back must retract exactly what it added')
+    u = win_dir = Path(tempfile.mkdtemp(prefix='undo-'))
+    p1, p2 = u / 'one.png', u / 'two.png'
+    for q in (p1, p2):
+        q.write_bytes(b'x')
+        q.with_suffix('.json').write_text(_json.dumps({'image': str(q), 'wins': 0, 'losses': 0, 'ties': 0,
+                                                       'bouts': 0}), encoding='utf-8')
+    st = {}
+    pair_rank.record(st, str(p1), str(p2), 'left_wins')
+    before = pair_rank.record_of(str(p1))
+    check('a decision is recorded', before['wins'] == 1 and before['bouts'] == 1, str(before))
+    undone = pair_rank.unrecord(st, str(p1), str(p2))
+    after = pair_rank.record_of(str(p1))
+    check('the choice is undone', undone == 'left_wins', str(undone))
+    check('the counters go back to zero', after['wins'] == 0 and after['bouts'] == 0, str(after))
+    check('the decision is forgotten', not st.get('decisions'), str(st.get('decisions')))
+    check('and the opponent tally went too', not (pair_rank.read_meta(p1).get('vs') or {}).get('two.png')
+          or pair_rank.read_meta(p1)['vs']['two.png'][0] == 0, str(pair_rank.read_meta(p1).get('vs')))
+    check('undoing a pair with no decision is a no-op', pair_rank.unrecord({}, str(p1), str(p2)) is None, 'returned a choice')
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

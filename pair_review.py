@@ -92,6 +92,90 @@ def pair_up(paths, hash_map):
     return pairs, leftovers
 
 
+def rounds_for(count):
+    """How many rounds a full order needs: log2(n), which is what a comparison sort costs, and at least two."""
+    import math
+    return max(2, int(math.ceil(math.log2(max(2, count)))))
+
+
+def _session_record(state):
+    """{name: (wins, losses, ties)} from the decisions of *this* review, not from the lifetime sidecars."""
+    scores = {}
+    for pair_id, decided in (state.get('decisions') or {}).items():
+        left, right = decided.get('left'), decided.get('right')
+        choice = decided.get('choice')
+        for name in (left, right):
+            scores.setdefault(name, [0, 0, 0])
+        if choice == 'left_wins':
+            scores[left][0] += 1
+            scores[right][1] += 1
+        elif choice == 'right_wins':
+            scores[right][0] += 1
+            scores[left][1] += 1
+        elif choice == 'tie':
+            scores[left][2] += 1
+            scores[right][2] += 1
+    return {k: tuple(v) for k, v in scores.items()}
+
+
+def next_round(state, hash_map=None):
+    """The next round of pairs for a *ranking* review: equal records, never a rematch.
+
+    Round one is the most-similar matching (`pair_up`), which is what makes the first questions easy. After that the
+    pairing is by record - winners with winners, losers with losers - which is the Swiss idea: k rounds of this separate
+    the field, and log2(n) rounds are enough for a total order instead of the n^2 of every pair.
+
+    Returns the pairs appended to `state['pairs']` (and extends it), or [] when the schedule is finished.
+    """
+    paths = state.get('paths') or []
+    if not paths:
+        return []
+    target = int(state.get('target_rounds') or rounds_for(len(paths)))
+    done_round = int(state.get('round') or 1)
+    if done_round >= target:
+        return []
+    decided = set((state.get('decisions') or {}).keys())
+    scores = _session_record(state)
+    by_name = {Path(p).name: str(p) for p in paths}
+    # bucket by record; a missing record means "not yet compared", which belongs with the middle of the field
+    buckets = {}
+    for name, path in by_name.items():
+        buckets.setdefault(scores.get(name, (0, 0, 0)), []).append(str(path))
+    ordered_keys = sorted(buckets, key=lambda k: (-k[0], k[1], k[2]))
+    queue = []                                   # the field, bucket by bucket, strongest record first
+    for key in ordered_keys:
+        queue.extend(sorted(buckets[key], key=lambda p: Path(p).name))
+    taken, pairs = set(), []
+    while len(queue) > 1:
+        a = queue.pop(0)
+        if a in taken:
+            continue
+        partner = None
+        # the nearest-bucketed opponent that has not met a, else the next available picture
+        for b in queue:
+            if b in taken or b == a:
+                continue
+            if _pair_id(a, b) in decided:
+                continue
+            partner = b
+            break
+        if partner is None:
+            for b in queue:
+                if b not in taken and b != a:
+                    partner = b          # a rematch beats dropping a picture from the round
+                    break
+        if partner is None:
+            continue
+        queue.remove(partner)
+        taken.update((a, partner))
+        pairs.append((a, partner, 0))
+    if not pairs:
+        return []
+    state.setdefault('pairs', []).extend([[a, b, d] for a, b, d in pairs])
+    state['round'] = done_round + 1
+    return pairs
+
+
 def state_key(paths):
     """A stable id for "this folder's review session": the hash of its sorted member names."""
     names = '\n'.join(sorted(Path(p).name for p in paths))
@@ -120,6 +204,9 @@ def build(paths, state, hash_store=None):
     """Fill state['pairs'] from a picture list, honouring decisions already recorded. Idempotent."""
     if state.get('pairs') is not None:
         return state
+    state.setdefault('paths', [str(p) for p in paths])
+    state.setdefault('target_rounds', rounds_for(len(paths)))
+    state.setdefault('round', 1)
     got = hashes(paths, store=hash_store)
     pairs, leftovers = pair_up(paths, got)
     state['pairs'] = [[a, b, d] for a, b, d in pairs]

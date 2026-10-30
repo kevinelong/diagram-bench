@@ -905,6 +905,58 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- arrows rank, they never delete, and Up goes back')
+    import pair_rank as _pr
+    import pair_review as _pv
+    arrow_dir = Path(tempfile.mkdtemp(prefix='arrows-'))
+    ap1, ap2 = arrow_dir / 'left.png', arrow_dir / 'right.png'
+    for q in (ap1, ap2):
+        q.write_bytes(b'x')
+        q.with_suffix('.json').write_text(json.dumps({'image': str(q), 'prompt': 'arrow test'}), encoding='utf-8')
+    calls = []
+    app._review_mode = tk.StringVar(value='rank')      # created by review_open, which this test does not need
+    real_decide = app.review_decide
+    app.review_decide = lambda side: calls.append(side)
+    try:
+        app._review_mode.set('rank')
+        app._review_arrow('left'); app._review_arrow('right'); app._review_arrow('middle')
+        check('in rank mode the arrows decide', calls == ['left', 'right', 'middle'], str(calls))
+        calls.clear()
+        app._review_mode.set('delete')
+        app._review_arrow('left')
+        check('in delete mode an arrow does nothing', calls == [], str(calls))
+        check('and says why', 'arrows rank only' in app.hint['text'], app.hint['text'])
+    finally:
+        app.review_decide = real_decide
+        app._review_mode.set('rank')
+        del app._review_mode
+
+    # Up: undo the last decision and put that pair back
+    real_state_dir = _pv.STATE_DIR
+    _pv.STATE_DIR = arrow_dir                     # a test state must never land in the real review folder
+    state = {'key': 'arrow-test'}
+    _pr.record(state, str(ap1), str(ap2), 'left_wins')
+    shown = []
+    real_show = app._review_show_next
+    app._review_show_next = lambda: shown.append(1)
+    app._review = {'state': state, 'history': [(str(ap1), str(ap2))], 'queue': None, 'pair': None}
+    try:
+        app.review_back()
+        root.update()
+    finally:
+        app._review_show_next = real_show
+        app._review = None
+        _pv.STATE_DIR = real_state_dir
+    check('back retracts the win', _pr.record_of(str(ap1))['wins'] == 0, str(_pr.record_of(str(ap1))))
+    check('back forgets the decision', not state.get('decisions'), str(state.get('decisions')))
+    check('back shows the earlier pair again', bool(shown), str(len(shown)))
+    check('and says where it went', 'back to' in app.hint['text'], app.hint['text'][:40])
+    app.history_guard = None
+    app._review = {'state': {}, 'history': [], 'queue': None}
+    app.review_back()
+    check('with nothing to go back to it says so', 'nothing to go back' in app.hint['text'], app.hint['text'][:40])
+    app._review = None
+
     print('\n-- a review\'s winners reach the pane order and the folder tile')
     win_dir = Path(tempfile.mkdtemp(prefix='wins-'))
     made = []

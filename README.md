@@ -567,6 +567,29 @@ at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweep
 never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
 slider still holds what we put there.
 
+## The A/B review: keys, rounds, and a fitted ranking
+
+**Keys, in ranking mode only:** `←` left is better, `→` right is better, `↓` tie, `↑` back. In delete mode the arrows are
+inert and say so - `←` used to recycle a file, which is too much power for a key you press while looking at pictures. `1`,
+`2`, `3` and `Space` work in both modes, and Esc stops with the progress saved.
+
+**`↑` really undoes.** `pair_rank.unrecord()` decrements the counters, removes the per-opponent tally and forgets the
+decision, so retracting a win leaves the sidecars exactly as they were; the pair then comes back first because the queue is
+re-derived from the decisions rather than patched.
+
+**A ranking takes rounds, not a matching.** The pair builder is a greedy *maximal matching* - every picture at most once -
+which is right for elimination (look at each picture once, decide) and useless for ranking: 48 pictures got 24 comparisons,
+each picture with one opponent, no chains, so "wins" were not a ranking. Ranking now continues round by round
+(`pair_review.next_round`), pairing **equal records** (winners with winners), never a rematch, up to `⌈log₂ n⌉` rounds - 6 for
+48 pictures, about **144 comparisons** instead of the **1,128** of all pairs, against the ~200 a comparison sort's lower bound
+implies.
+
+**The order is a Bradley–Terry fit, not raw wins.** Each sidecar now keeps a per-opponent tally (`vs`), and
+`pair_rank.bt_strength()` fits `s_i = W_i / Σ_j n_ij/(s_i+s_j)` by MM iteration. That is what stops "5 wins against pictures
+that always lose" from outranking "3 wins against the best" - measured, the raw order and the fitted order disagree exactly
+there. The pane's `Wins` order uses the fit; folder tiles still use raw wins because they read up to 240 candidates each and
+the fit wants them all.
+
 ## What a finished A/B review changes
 
 Wins were recorded and then hidden: the pane only ordered itself when the sort control said `Wins`, nothing re-rendered when

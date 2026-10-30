@@ -2867,8 +2867,10 @@ class App:
                         ('2', lambda: self.review_decide('middle')),
                         ('3', lambda: self.review_decide('right')),
                         ('<Escape>', self.review_stop),
-                        ('<Left>', lambda: self.review_decide('left')),
-                        ('<Right>', lambda: self.review_decide('right')),
+                        ('<Left>', lambda: self._review_arrow('left')),
+                        ('<Right>', lambda: self._review_arrow('right')),
+                        ('<Down>', lambda: self._review_arrow('middle')),
+                        ('<Up>', self.review_back),
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
@@ -2897,6 +2899,40 @@ class App:
         except Exception as e:
             lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
 
+    def _review_arrow(self, side):
+        """Arrows rank; they never delete. In delete mode they are inert and say why - <Left> used to recycle a file."""
+        if getattr(self, '_review_mode', None) is None or self._review_mode.get() != 'rank':
+            self.hint.configure(text='arrows rank only - press 1, 2 or 3 here to delete or keep')
+            return 'break'
+        self.review_decide(side)
+        return 'break'
+
+    def review_back(self, event=None):
+        """Undo the last ranking decision and put that pair back in front of you.
+
+        The pair list is re-derived from the decisions after the undo, so the undone pair is the first remaining one -
+        no second copy of the schedule can drift from the first.
+        """
+        import pair_rank
+        import pair_review
+        r = getattr(self, '_review', None)
+        if not r:
+            return 'break'
+        history = r.get('history') or []
+        if not history:
+            self.hint.configure(text='nothing to go back to yet')
+            return 'break'
+        a, b = history.pop()
+        undone = pair_rank.unrecord(r['state'], a, b)
+        pair_review.save_state(r['state'])
+        r['pair'] = None
+        r['queue'] = None          # re-derive: the undone pair sorts first again
+        self._review_show_next()
+        self.hint.configure(text='back to %s | %s%s'
+                                 % (Path(a).name[:26], Path(b).name[:26],
+                                    '' if undone else ' (there was no decision to undo)'))
+        return 'break'
+
     def _review_relabel(self):
         """Rank mode marks a winner; delete mode recycles a file. The buttons say which is which."""
         r = getattr(self, '_review', None)
@@ -2904,9 +2940,9 @@ class App:
             return
         left, middle, right = r['buttons']
         if self._review_mode.get() == 'rank':
-            left.configure(text='Left wins  (1)')
-            middle.configure(text='Tie  (2)')
-            right.configure(text='Right wins  (3)')
+            left.configure(text='Left wins  (1 or \u2190)')
+            middle.configure(text='Tie  (2 or \u2193)')
+            right.configure(text='Right wins  (3 or \u2192)')
         else:
             left.configure(text='Delete left  (1)')
             middle.configure(text='Keep both  (2)')
@@ -2939,6 +2975,15 @@ class App:
             r['queue'] = queue
         queue = r['queue']
         decided, total, deletes = pair_review.progress(r['state'])
+        if not queue and getattr(self, '_review_mode', None) is not None and self._review_mode.get() == 'rank':
+            # a matching gives every picture one bout; a ranking needs rounds - log2(n) of them, paired by record
+            more = pair_review.next_round(r['state'])
+            if more:
+                r['queue'] = None
+                r['round'] = r['state'].get('round')
+                self.hint.configure(text='round %s of %s: %d pairs, equal records paired'
+                                         % (r['state'].get('round'), r['state'].get('target_rounds'), len(more)))
+                return self._review_show_next()
         if not queue:
             r['info'].configure(text='done - %d pairs decided, %d deleted. Close this window.' % (decided, total))
             for w in (r['left_lbl'], r['right_lbl']):
@@ -2949,9 +2994,10 @@ class App:
         for lbl, path in ((r['left_lbl'], a), (r['right_lbl'], b)):
             lbl.source = path
             self._review_fit(lbl, path)
-        r['info'].configure(text='pair %d of %d \u00b7 %d deleted \u00b7 similarity distance %d \u00b7 '
-                                 '%s | %s' % (decided + 1, total, deletes, dist,
-                                              Path(a).name[:34], Path(b).name[:34]))
+        r['info'].configure(text='pair %d of %d \u00b7 round %s of %s \u00b7 %d deleted \u00b7 distance %d \u00b7 '
+                                 '%s | %s' % (decided + 1, total, r['state'].get('round', 1),
+                                              r['state'].get('target_rounds', 1), deletes, dist,
+                                              Path(a).name[:32], Path(b).name[:32]))
 
     def _on_review_resize(self, event=None):
         r = getattr(self, '_review', None)
@@ -2991,6 +3037,7 @@ class App:
             else:
                 self.hint.configure(text='tie recorded')
             pair_review.save_state(r['state'])
+            r.setdefault('history', []).append((a, b))     # what Up retracts
             r['pair'] = None
             if r['queue']:
                 r['queue'] = r['queue'][1:]
@@ -3407,7 +3454,8 @@ class App:
         self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
         if self._sort_wins():
             import pair_rank
-            order = pair_rank.sort_by_wins([r['path'] for r in items])
+            # fitted strength, not raw wins: a win over a strong picture outweighs one over a picture that always loses
+            order = pair_rank.sort_by_strength([r['path'] for r in items])
             pos = {p: i for i, p in enumerate(order)}
             items.sort(key=lambda r: pos.get(r['path'], len(items)))
         thumbs = thumbs_for([r['path'] for r in items])
