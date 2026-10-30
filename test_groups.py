@@ -145,20 +145,16 @@ def test_a_stated_head_count_is_a_subject():
           gp.stated_count('two women and three men in a hall') is None,
           gp.stated_count('two women and three men in a hall'))
 
-    three_rows = [{'path': 's%d.png' % i, 'prompt': 'three very strong fit toned women', 'created': ''} for i in range(3)]
-    six_rows = [{'path': 'x%d.png' % i, 'prompt': 'exactly six adult women sit cross-legged', 'created': ''} for i in range(3)]
-    plain = [{'path': 'n1.png', 'prompt': 'a pool hall at night', 'created': ''}]
-    parts = gp.split_by_stated_count(three_rows + six_rows + plain)
-    check('a cluster holding two counts is split into two', len(parts) == 2, [len(p) for p in parts])
-    check('the counts keep their own pictures',
-          sorted(len(p) for p in parts) == [3, 4], [len(p) for p in parts])
-    check('a picture that states no count joins the larger part, it is not exiled',
-          any(any(r['path'] == 'n1.png' for r in part) for part in parts),
-          [[r['path'] for r in part] for part in parts])
-    check('a cluster with one count is left whole',
-          len(gp.split_by_stated_count(three_rows + plain)) == 1)
-    check('a cluster with no counts is left whole',
-          len(gp.split_by_stated_count(plain + plain)) == 1)
+    # Two counts no longer make two folders (2026-10-30): they made five folders of one scene in the gallery. The
+    # count is now handled where it belongs - in the name, which states none when the members disagree.
+    three_rows = [{'path': 's%d.png' % i, 'prompt': 'three very strong fit toned women', 'created': '2026-10-03T10:0%d:00' % i} for i in range(3)]
+    six_rows = [{'path': 'x%d.png' % i, 'prompt': 'exactly six very strong fit toned women', 'created': '2026-10-03T10:1%d:00' % i} for i in range(3)]
+    two_plan = gp.plan(three_rows + six_rows, recent=0, keep_lexicon=False)
+    check('two counts of one subject make one folder', len(two_plan['groups']) == 1,
+          [(g['label'][:40], len(g['items'])) for g in two_plan['groups']])
+    check('and its name states neither count',
+          two_plan['groups'] and gp.stated_count(two_plan['groups'][0]['label']) is None,
+          two_plan['groups'][0]['label'])
 
 
 def main():
@@ -480,13 +476,38 @@ def main():
             r(3, 'an entirely different subject, a lighthouse', '2026-10-01T13:00:00'),
             r(4, 'an entirely different subject, a lighthouse', '2026-10-01T14:00:00')]
     same_plan = gp.plan(same, recent=0, keep_lexicon=False)
-    exact = [g for g in same_plan['groups'] if g.get('exact')]
-    check('identical prompts make one folder, whatever the case or spacing', len(exact) == 2,
-          str([(g['label'][:30], len(g['items'])) for g in exact]))
-    biggest = max((len(g['items']) for g in exact), default=0)
-    check('and the three variants are together', biggest == 3, str(biggest))
+    sizes = sorted((len(g['items']) for g in same_plan['groups']), reverse=True)
+    check('identical prompts make one folder, whatever the case or spacing', sizes == [3, 2], sizes)
     check('a single picture with its own prompt is not made a folder of one',
-          all(len(g['items']) >= 2 for g in same_plan['groups']), str([len(g['items']) for g in same_plan['groups']]))
+          all(len(g['items']) >= 2 for g in same_plan['groups']), sizes)
+
+    # Reported from the gallery (2026-10-30): one scene made five folders because the prompts differed by a count.
+    # "five naked women ...", "a dozen naked women ...", "a dozen diverse naked women ...", "3 naked women ..." and the
+    # count-free form are one series of attempts at one subject. Measured on the real gallery: 13 such pictures landed in
+    # 3 folders at every threshold from 0.15 to 0.40 - the count split made them, not the similarity threshold.
+    scene = 'naked women floating in the air in a circle around a pyre in the forest clearing under the unseen ambient light. all performing a coven ritual. ascending toward the sky.'
+    counts = [r(10, 'five ' + scene, '2026-10-02T10:00:00'), r(11, 'five ' + scene, '2026-10-02T10:05:00'),
+              r(12, 'a dozen ' + scene, '2026-10-02T10:10:00'), r(13, 'a dozen diverse ' + scene, '2026-10-02T10:15:00'),
+              r(14, '3 ' + scene, '2026-10-02T10:20:00'), r(15, scene, '2026-10-02T10:25:00'),
+              r(16, 'four green lamps on a wooden table', '2026-10-02T10:30:00'),
+              r(17, 'four green lamps on a wooden table', '2026-10-02T10:35:00')]
+    count_plan = gp.plan(counts, recent=0, keep_lexicon=False)
+    scene_groups = [g for g in count_plan['groups'] if any('pyre' in r['prompt'] for r in g['items'])]
+    check('one scene with a different count is still one folder', len(scene_groups) == 1,
+          [(g['label'][:40], len(g['items'])) for g in count_plan['groups']])
+    check('and it holds every attempt', len(scene_groups[0]['items']) == 6 if scene_groups else False,
+          len(scene_groups[0]['items']) if scene_groups else None)
+    check('its name states no count, because its members disagree',
+          scene_groups and gp.stated_count(scene_groups[0]['label']) is None,
+          scene_groups[0]['label'] if scene_groups else None)
+    check('a folder whose members share a cast count may still name it',
+          gp.stated_count(gp.label_for(['three very strong fit toned women'] * 2, range(2))) == 3,
+          gp.label_for(['three very strong fit toned women'] * 2, range(2)))
+    check('without_counts drops the number and nothing else',
+          gp.without_counts('a dozen diverse naked women by a pyre') == 'diverse naked women by a pyre',
+          gp.without_counts('a dozen diverse naked women by a pyre'))
+    check('and it leaves a prompt without a count untouched',
+          gp.without_counts('a red sports car parked on a stone bridge') == 'a red sports car parked on a stone bridge')
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0

@@ -643,6 +643,44 @@ a review closed, and folder tiles were chosen by **newest four distinct** regard
 Wins themselves were already durable: `pair_rank` writes `wins/losses/ties/bouts` into each picture's own `.json`, so the
 order holds across folders and restarts.
 
+## A stated count no longer splits a folder; the name carries it
+
+One scene made five folders in the gallery: *"five naked women floating in the air in a circle around a pyre ..."*,
+*"a dozen naked women ..."*, *"a dozen diverse naked women ..."*, *"3 naked women ..."* and the count-free form. Measured on
+the real gallery (995 prompts, 13 pictures of that scene): **9 near-identical strings, differing by one or two words**, and the
+count rule split them. Two mechanisms were doing it, and both are gone:
+
+- **The count is no longer part of the subject.** `vector()` drops the stated count before comparing, so "five women ..." and
+  "a dozen women ..." are the same subject. On a short prompt the count was otherwise the *loudest* word in the vector.
+  `split_by_stated_count()` is deleted; the count now only reaches the folder name, and a folder whose members disagree
+  states **no** count (a 93-picture folder holding 3, 4 and 6-woman prompts is named without a number).
+- **The exact-prompt pre-pass is deleted.** Bucketing identical prompts before clustering *absorbed* its rows, so a
+  near-duplicate one word away ("... diverse naked women ...") landed in a different bucket and could never be clustered
+  with its own scene. The similarity pass now sees everything.
+
+### The threshold, measured rather than guessed
+
+The snapshot was the suspect, so it was swept on the real gallery - folders, whether that scene stayed one folder, and how
+many folders are oversized (>40 pictures):
+
+| threshold | folders | the scene in | folders >40 | largest |
+|---|---|---|---|---|
+| 0.15 | 53 | 1 folder | 7 | 178 |
+| **0.20** | **50** | 1 folder | 6 | 178 |
+| 0.22 | 51 | 1 folder | 5 | 178 |
+| 0.25 | 54 | 1 folder | 4 | 178 |
+| 0.30 | 55 | 1 folder | 5 | 178 |
+
+0.20 is the minimum-folder point, and lower thresholds merge *more* into oversized folders, so the default stays 0.20. The
+threshold was never the lever: 0.15 through 0.40 all kept 50-55 folders and none of them could put the count variants
+together - that was the bucketing, not the snapshot.
+
+Result on the real gallery: **62 folders before, 50 after**, and the scene is one folder of 17 at every threshold.
+
+Known and untouched: one 178-picture folder comes from a shared *edit instruction* ("keep all three poses standing as they
+are but replace with ...") - prompts that share a long instruction but describe different pictures. That is an over-merge,
+the opposite direction, and a separate job.
+
 ## A click must show the picture, not rebuild the gallery
 
 `select_file()` used to end with `refresh_gallery(select=path)`, so **every** click rescanned the folder, re-planned the

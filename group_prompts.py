@@ -173,7 +173,12 @@ def vector(text, lexicon, expand_synonyms=True):
 
     With expansion on, "brickwork" contributes to "masonry" at SYNONYM_WEIGHT, so a rephrased prompt still lands near
     its original without the threshold being lowered for everyone.
+
+    The stated count is dropped first: it is one word among a dozen, so similarity treats "five women ..." and "a dozen
+    women ..." as the same subject - and on a short prompt it is otherwise the *loudest* word, which split one scene into
+    several folders. The count still reaches the folder name, and a folder that disagrees on it states none.
     """
+    text = without_counts(text) or text
     bag = Counter(tokens(text))
     weights = token_weights(text)
     idf = lexicon['idf']
@@ -453,8 +458,13 @@ def label_for(prompts, members, width=60, lexicon=None):
 
 
 # -- stated head counts -----------------------------------------------------------------------------------------------
-# A prompt that says "three ... women" and one that says "exactly six adult women" describe different pictures. The
-# text similarity cannot tell, because the count is one word among many; so it is read explicitly and used to split.
+# A prompt that says "three ... women" and one that says "exactly six adult women" can be different pictures, and the text
+# similarity cannot tell, because the count is one word among many; so it is read explicitly.
+#
+# It is *not* used to split a folder any more (2026-10-30). Splitting made five folders of one scene - "five naked women
+# floating in a circle", "a dozen naked women ...", "a dozen diverse naked women ...", "3 naked women ..." and the
+# count-free form - which a reader calls one series of attempts. The count now only reaches the name, and a folder whose
+# members disagree states none (see without_counts and plan).
 COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
                'ten': 10, 'eleven': 11, 'twelve': 12}
 PEOPLE_WORDS = ('adult', 'woman', 'women', 'man', 'men', 'people', 'person', 'persons', 'figure', 'figures', 'character',
@@ -492,31 +502,19 @@ def stated_count(prompt):
     return found[0][1]
 
 
-def split_by_stated_count(rows):
-    """Split one cluster by the head count its prompts state. A single count, or no counts, means one part.
+COUNT_TOKEN = re.compile(r'\b(?:' + '|'.join(COUNT_WORDS) + r'|a dozen|dozen|exactly|\d{1,3})\b', re.I)
 
-    Members that state no count carry no evidence against any part, so they join the largest one rather than forming a
-    folder of their own - otherwise every count-free prompt would be exiled from the subject it belongs to.
+
+def without_counts(prompt):
+    """The prompt with its stated count removed - the same subject whether it says "five", "a dozen" or nothing.
+
+    Two pictures made from the same subject with a different count in the sentence are the same folder to a reader
+    ("five naked women floating in a circle" and "a dozen naked women floating in a circle" are one series of attempts),
+    and the folder's name must not assert a count its members do not all share.
     """
-    buckets = {}
-    for row in rows:
-        buckets.setdefault(stated_count(row.get('prompt')), []).append(row)
-    counted = {count: members for count, members in buckets.items() if count is not None}
-    if len(counted) < 2:
-        return [rows]
-    parts = sorted(counted.items())
-    largest = max(parts, key=lambda item: len(item[1]))[1]
-    largest.extend(buckets.get(None, []))
-    return [sorted(members, key=lambda r: r.get('created') or '') for _count, members in parts]
-
-
-def source_key(prompt):
-    """The source prompt as a key: whitespace and case collapsed, trailing punctuation ignored.
-
-    Two pictures made from the *same* prompt belong in one folder, whatever the similarity threshold says about the rest -
-    the prompt is the strongest evidence there is, and it must not be diluted into a neighbour.
-    """
-    return ' '.join((prompt or '').split()).strip().strip('.').lower()
+    text = ' '.join((prompt or '').split())
+    text = COUNT_TOKEN.sub(' ', text)
+    return ' '.join(text.split())
 
 
 def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
@@ -536,31 +534,14 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     with_prompt.sort(key=lambda r: r.get('created') or '')
 
     groups = []
-    # Exact source prompts first: every picture from the same prompt is one folder, before any similarity clustering runs
-    # and before the stated-count split - "same prompt" outranks "looks similar", and it is what a user means by a folder.
-    buckets = {}
-    for row in with_prompt:
-        buckets.setdefault(source_key(row.get('prompt')), []).append(row)
-    rest = []
-    for key, rows in buckets.items():
-        if len(rows) >= min_group:
-            rows.sort(key=lambda r: r.get('created') or '')
-            prompts_here = [r['prompt'] for r in rows]
-            groups.append({'label': label_for(prompts_here, range(len(rows))),
-                           'title': label_for(prompts_here, range(len(rows)), width=0),
-                           'items': rows, 'oldest': rows[0].get('created') or '',
-                           'newest': rows[-1].get('created') or '', 'exact': True})
-        else:
-            rest.extend(rows)
-    rest.sort(key=lambda r: r.get('created') or '')
-    # The corpus statistics are fitted on *every* prompt, including the exactly-matched ones: the lexicon is what the
-    # prediction and live_append use to recognise "this new picture belongs to that folder", and fitting it on a reduced
-    # set (this used to be the case) quietly broke both.
+    # The corpus statistics are fitted on every prompt: the lexicon is what prediction and live_append use to recognise
+    # "this new picture belongs to that folder", and fitting it on a reduced set quietly broke both.
     every_prompt = [r['prompt'] for r in with_prompt]
-    # the lexicon is the corpus statistic prediction and live_append rely on: fitted (and stored) whenever there are
-    # prompts at all, never only when some rows happen to be left over for the similarity pass
     lexicon = fit_lexicon(every_prompt + [(r.get('prompt') or '') for r in head]) if every_prompt else None
-    with_prompt = rest
+    # An "exact prompt" pre-pass used to bucket identical prompts before this pass ran. It was wrong in the direction that
+    # matters: an exact bucket *absorbs* its rows, so a near-duplicate one word away ("... diverse naked women ...") went
+    # into a different bucket and could never be clustered with it - five folders of one subject. The similarity pass sees
+    # everything, and the stated count is handled in the label instead of by splitting.
     if with_prompt and lexicon is not None:
         prompts = [r['prompt'] for r in with_prompt]
         for members in group_texts(prompts, threshold=threshold, lexicon=lexicon):
@@ -570,10 +551,15 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             # A cluster can hold two different stated counts ("three ... women" and "exactly six adult women"): the count
             # is the subject, so the cluster is split before a label is chosen. Measured on the real gallery: two of 85
             # folders mixed counts and between them held 363 pictures.
-            for part in split_by_stated_count(rows):
+            counts = {stated_count(r.get('prompt')) for r in rows} - {None}
+            # Counts no longer split a cluster: they made five folders of one subject (measured on the real gallery, 13
+            # pictures of one scene landed in 3 folders at every threshold from 0.15 to 0.40). The label carries the truth
+            # instead - if the members disagree on the count, the name states none.
+            for part in [rows]:
                 if len(part) < min_group:
                     continue
-                part_prompts = [r['prompt'] for r in part]
+                part_prompts = ([without_counts(r['prompt']) for r in part] if len(counts) > 1
+                                else [r['prompt'] for r in part])
                 # `label` is the short form for the selector; `title` is the same sentence uncut, for the tile
                 groups.append({'label': label_for(part_prompts, range(len(part)), lexicon=lexicon),
                                'title': label_for(part_prompts, range(len(part)), width=0, lexicon=lexicon),
