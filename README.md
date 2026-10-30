@@ -567,6 +567,21 @@ at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweep
 never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
 slider still holds what we put there.
 
+## What a finished A/B review changes
+
+Wins were recorded and then hidden: the pane only ordered itself when the sort control said `Wins`, nothing re-rendered when
+a review closed, and folder tiles were chosen by **newest four distinct** regardless. Now:
+
+- **finishing a review sets the sort to `Wins`** - visible in the control (choosing `Recent` puts it back), with `_wins_cache`
+  and `_heads` cleared and the pane re-rendered in the same gesture, so the order changes as you close the window;
+- **a folder tile leads with its winners.** `_sheet_paths` sorts the candidate window by recorded wins and uses the plan's own
+  newest-first order as the tiebreak - *not* file mtimes, which are coarse and lie after a copy. Folders with no wins are
+  unchanged, because every win count is 0 and the old rule survives; the distinctness rule (`_different`, four visibly
+  different pictures) still applies, and the memoised tile is now keyed by the wins total so a decision invalidates it.
+
+Wins themselves were already durable: `pair_rank` writes `wins/losses/ties/bouts` into each picture's own `.json`, so the
+order holds across folders and restarts.
+
 ## Deleting from the folder pane
 
 The window's second column (the open folder's pictures) now has its own **Select all** and **Delete…** row underneath the

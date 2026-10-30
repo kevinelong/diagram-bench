@@ -3022,10 +3022,22 @@ class App:
         except Exception:
             pass
         self._review = None
+        # the review's whole point is the ranking, so show it: wins first in the pane, the folders' best on their tiles,
+        # and the order stated in the control (choosing Recent puts it back).
+        if decided:
+            try:
+                self.sort_var.set('Wins')
+            except Exception:
+                pass
+        self._wins_cache = {}
+        self._heads.clear()
         self.refresh_gallery()
         self._render_folder_bar()
+        if self._active_folder is not None and self._folders_view_active():
+            self._render_contents()
         self.status.configure(text='A/B review stopped: %d of %d pairs decided, %d deleted - progress saved'
-                              % (decided, total, deletes))
+                                      '%s' % (decided, total, deletes,
+                                              ', ordered by wins' if decided else ''))
         return 'break'
 
     def _scroll_pos(self, canvas):
@@ -3238,6 +3250,26 @@ class App:
         colour_delta = max(max(abs(x - y) for x, y in zip(qa, qb)) for qa, qb in zip(a[1], b[1]))
         return grey_bits >= FOLDER_DISTINCT or colour_delta >= FOLDER_COLOUR
 
+    def _wins_of(self, path):
+        """Wins for one picture, memoised by mtime - the sheet walk may touch FOLDER_SCAN pictures per folder."""
+        cache = getattr(self, '_wins_cache', None)
+        if cache is None:
+            cache = self._wins_cache = {}
+        try:
+            stamp = Path(path).stat().st_mtime
+        except OSError:
+            return 0
+        hit = cache.get(path)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        try:
+            import pair_rank
+            wins = pair_rank.record_of(path)['wins']
+        except Exception:
+            wins = 0
+        cache[path] = (stamp, wins)
+        return wins
+
     def _sheet_paths(self, group):
         """The four pictures a folder's tile shows: the newest four that are visibly different from each other.
 
@@ -3247,7 +3279,16 @@ class App:
         Always newest-first, so a tile reads the same way whichever path produced it.
         """
         items = group['items']
-        cache_key = (group['label'], len(items), items[-1]['path'] if items else '')
+        window = items[-FOLDER_SCAN:] if len(items) > FOLDER_SCAN else items
+        # A folder with recorded winners shows them: after an A/B review the folder's best is a measured thing, and a tile
+        # that still showed the newest would hide the very result the review produced. Folders with no wins keep the old
+        # rule exactly, because the sort falls back to newest-first when every win count is 0.
+        # wins first, and among equal wins the plan's own order newest-first - the tile has always trusted the list
+        # rather than the filesystem's mtimes, which are coarse and lie after a copy
+        ranked = [row for _pos, row in sorted(enumerate(window),
+                                              key=lambda t: (-self._wins_of(t[1]['path']), -t[0]))]
+        wins_stamp = sum(self._wins_of(r['path']) for r in window)
+        cache_key = (group['label'], len(items), items[-1]['path'] if items else '', wins_stamp)
         cached = self._heads.get(cache_key)
         if cached is not None:
             return cached
@@ -3256,7 +3297,7 @@ class App:
         # Look past the newest handful when they are near-copies: with a higher bar the walk has to travel further into
         # the history to find four that qualify, which is the point - a spreadsheet of four one-pixel variations is not
         # a summary of the folder.
-        for row in reversed(items[-FOLDER_SCAN:] if len(items) > FOLDER_SCAN else items):
+        for row in ranked:
             signature = self._signature(row['path'])
             if signature is not None and all(self._different(signature, other) for other in signatures):
                 signatures.append(signature)
@@ -3264,7 +3305,7 @@ class App:
                 if len(kept) == want:
                     break
         if len(kept) < want:
-            kept = [r['path'] for r in reversed(items[-want:])]
+            kept = [r['path'] for r in ranked[:want]]
             self.sheets_all_alike += 1
         self._heads[cache_key] = kept
         return kept

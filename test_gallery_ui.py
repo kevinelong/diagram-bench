@@ -73,6 +73,7 @@ class _SheetShim:
 
     _signature = zui.App._signature
     _different = zui.App._different
+    _wins_of = zui.App._wins_of
     _sheet_paths = zui.App._sheet_paths
 
 
@@ -903,6 +904,71 @@ def main():
     app.style_var.set('none')
     app.negative.delete('1.0', 'end')
     app.busy = False
+
+    print('\n-- a review\'s winners reach the pane order and the folder tile')
+    win_dir = Path(tempfile.mkdtemp(prefix='wins-'))
+    made = []
+    for i in range(5):
+        p = win_dir / ('2026102%d-120000_512x512_seed%d.png' % (i, 900 + i))
+        Image.new('RGB', (64, 64), (40 * i, 90, 180 - 20 * i)).save(p)
+        os.utime(p, (1_700_000_000 + i, 1_700_000_000 + i))   # the tile's tiebreak is mtime: give it a real order
+        p.with_suffix('.json').write_text(json.dumps({'prompt': 'wins test', 'seed': 900 + i, 'steps': 4,
+                                                      'cfg': 1.0, 'size': 512, 'wins': 0}), encoding='utf-8')
+        made.append(p)
+    group = {'label': 'wins', 'items': [{'path': str(p)} for p in made]}
+    plain = app._sheet_paths(group)
+    check('with no wins the tile keeps the newest first', Path(plain[0]) == made[-1], Path(plain[0]).name)
+    # the oldest picture wins three bouts
+    victim = made[0]
+    meta = json.loads(victim.with_suffix('.json').read_text(encoding='utf-8'))
+    meta['wins'] = 3
+    victim.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
+    app._wins_cache = {}
+    ranked = app._sheet_paths(group)
+    check('a winner leads the folder tile', Path(ranked[0]) == victim, str(Path(ranked[0]).name))
+    check('and the tile is still four distinct pictures', len(ranked) == zui.FOLDER_CELLS, str(len(ranked)))
+    check('the wins stamp invalidates the cached tile', ranked[0] != plain[0], 'cache not keyed by wins')
+
+    saved_soon3 = app._regroup_soon
+    app._regroup_soon = lambda: None
+    saved_plan3 = app._plan
+    # newest first, the order grouping would leave, so 'Recent' has something to be right about
+    app._plan = {'groups': [{'label': 'wins', 'items': [{'path': str(p)} for p in reversed(made)]}],
+                 'recent': [], 'ungrouped': []}
+    app.sort_var.set('Recent')
+    app._render_folder_bar(); app.select_folder(0); root.update()
+    check('the pane opens newest first', Path(app._content_order[0]) == made[-1], str(app._content_order[0].name))
+    app.sort_var.set('Wins'); app._render_contents(); root.update()
+    check('Wins puts the winner first in the pane', Path(app._content_order[0]) == victim,
+          str(app._content_order[0].name))
+
+    # finishing a review switches the order on, and drops the cached ranks
+    import pair_review
+    real_progress, real_save = pair_review.progress, pair_review.save_state
+    class _Win:
+        def destroy(self): pass
+    app._review = {'state': {}, 'win': _Win(), 'queue': []}
+    app.sort_var.set('Recent')
+    app._heads[('stale', 0, '', 0)] = ['x']
+    app._wins_cache['a-stale-entry'] = (0.0, 9)
+    pair_review.progress = lambda state: (3, 4, 0)
+    pair_review.save_state = lambda state: None
+    try:
+        app.review_stop()
+        root.update()
+    finally:
+        pair_review.progress, pair_review.save_state = real_progress, real_save
+    check('finishing a review orders by wins', app.sort_var.get() == 'Wins', app.sort_var.get())
+    check('and forgets the cached tiles', ('stale', 0, '', 0) not in app._heads, str(len(app._heads)))
+    # the wins cache is repopulated by the refresh that follows - the point is that the stale entry went
+    check('and the stale ranks', 'a-stale-entry' not in app._wins_cache, str(len(app._wins_cache)))
+    check('and the status says so', 'ordered by wins' in app.status['text'], app.status['text'][:60])
+    app._review = None
+    app.selected = []
+    app.select_folder(None); app._plan = saved_plan3
+    app._regroup_soon = saved_soon3
+    app.sort_var.set('Recent')
+    app.refresh_gallery(); app.busy = False
 
     print('\n-- the folder pane has select all and delete, and a delete leaves the pane at once')
     check('the pane has a select-all button', hasattr(app, 'contents_all_btn'), 'missing')
