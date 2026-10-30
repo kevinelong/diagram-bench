@@ -661,6 +661,21 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## A family link must rest on the shorter prompt being inside the longer
+
+Asked whether synonyms would merge `life drawing`, `life-drawing`, `figure drawing` and `live figure` into one folder. They
+already score **cosine 1.000** (hyphens split) or containment 0.857, so no synonym was needed: the *guard* was refusing the
+link. It demanded at least three words rarer than the corpus median, and in this gallery half the prompts share the camera
+vocabulary - "light" is in 39 % of them, "shallow" 16 %, "field" 13 % - so a subject like "life drawing model reference"
+had only two such words and was refused on a technicality.
+
+The rule is now about shape, not rarity: the shorter root must be almost entirely inside the longer (`differing <=
+max(2, 5 % of the shorter)`). Measured: those five folders became **one**, 65 folders became 59.
+
+Naming had to change with it. The merged family was named `Chiaroscuro, photograph, natural light, shallow depth of field`
+- the *most frequent* root, and a style fragment with no subject - so a family is now named by its most **specific** root
+(highest summed idf), which gives `figure model posing for room of art students, cinematic ...`.
+
 ## The pictures were tried as a referee, and refused
 
 One family (`seated and meditating.`) held 11 roots - mannequins, a classroom, wasteland fighters, one character - so the

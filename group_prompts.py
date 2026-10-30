@@ -455,11 +455,20 @@ def label_for(prompts, members, width=60, lexicon=None, roots=None):
     minority cannot name it. A prompt with fewer than three content words is never chosen while a fuller one exists.
     """
     texts = [(prompts[m] or '').strip() for m in members]
-    # a family carries its roots: the instruction that last touched a picture is not what the folder is about
+    specificity = {}
+    # a family carries its roots: the instruction that last touched a picture is not what the folder is about.
+    # Named by the most *specific* root, not the most popular one: "Chiaroscuro, photograph, natural light, shallow depth of
+    # field" appears far more often than the subject it accompanies, and naming a 61-picture family after the camera
+    # fragment is how a good merge looked wrong (measured: 'light' is in 39 % of this gallery's prompts).
     if roots:
         root_texts = [' '.join(r.split()) for r in roots if r and str(r).strip()]
         if root_texts:
+            try:
+                idf_roots = (lexicon or fit_lexicon(root_texts))['idf']
+            except Exception:
+                idf_roots = {}
             texts = root_texts
+            specificity = {text: sum(idf_roots.get(w, 0.0) for w in set(tokens(text))) for text in root_texts}
     if not texts:
         return '(no prompt recorded)'
     try:
@@ -488,6 +497,7 @@ def label_for(prompts, members, width=60, lexicon=None, roots=None):
         head = ' '.join(texts[i].split()).lower()
         return (1 if shared else 0,
                 0 if template.match(head) else 1,
+                round(specificity.get(texts[i], 0.0), 2),
                 frequency.get(' '.join(texts[i].split()), 0),
                 sum(idf.get(t, 0.0) for t in shared),
                 nlens[i])
@@ -680,14 +690,14 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
                     shared = ta & tb
                     if len(shared) < 6 or len(shared) / float(min(len(ta), len(tb))) < FAMILY_CONTAINMENT:
                         continue
-                    # The words that make the two prompts the same subject are the unusual ones. A heading shared by many
-                    # roots - "a full-body character concept sheet from multiple angles" - is not a subject, and letting it
-                    # carry the link merged mannequins, a classroom and wasteland fighters into one character folder
-                    # (measured: 11 different roots under one name). So the rarer words must also be mostly shared.
-                    rare = {w for w in (ta if len(ta) <= len(tb) else tb) if lexicon['idf'].get(w, 0.0) >= median}
-                    if len(rare) < 3:
-                        continue
-                    if len(shared & rare) / float(len(rare)) < 0.6:
+                    # What makes two roots one subject is that the shorter one is *almost entirely inside* the longer: it is
+                    # the same sentence at a different length ("life drawing model reference, photograph, ..." against
+                    # "life-drawing model reference, photograph, ..."). An idf gate cannot do this job here - half this
+                    # gallery shares the camera vocabulary ("photo", "model", "natural light", "depth of field"), so those
+                    # words are only *two* above the median and the useful link was being refused on a technicality.
+                    shorter = ta if len(ta) <= len(tb) else tb
+                    differing = len(shorter - (ta & tb))
+                    if differing > max(2, int(0.05 * len(shorter))):
                         continue
                     parent[find(text_b)] = find(text_a)
             for text in root_list:
