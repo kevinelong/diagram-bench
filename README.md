@@ -661,26 +661,19 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
-## When the text is ambiguous, the pictures referee
+## The pictures were tried as a referee, and refused
 
-Reported: one 33-picture folder named `seated and meditating.` held mannequins, a classroom, wasteland fighters and one
-character, under "a poorly fitting intermediate prompt". Measured: that family held **11 different roots** - the same
-starting sentence re-used for several subjects, then edited - chained by containment through caption scaffolding ("a
-full-body character concept sheet from multiple angles. It features ..."), which says nothing about *which* character.
+One family (`seated and meditating.`) held 11 roots - mannequins, a classroom, wasteland fighters, one character - so the
+pictures were given a veto: a family holding three or more distinct roots was split by a 64-bit difference hash of its
+thumbnails. It fixed that folder (33 pictures/11 roots -> 20/4) and broke a worse one: the 51 pictures of "Pictured are
+women. Each clothed in their own distinct traditional ethnic garb from their individual regions." are one sentence and
+*visibly* different pictures, so the veto cut them into **ten** folders.
 
-No prompt distinguishes "an edit that keeps the subject" from "an edit that replaced it": both are steps of one series. So
-the pictures decide, and only where the text admits it is unsure - a family holding **three or more distinct roots**. Then the
-family is split by a 64-bit difference hash of the thumbnails (`VISUAL_LIMIT = 10` bits, `.thumbs` are reused so the whole
-gallery hashes in 0.7 s), and pieces too small to stand alone join the largest piece.
-
-| | before | after |
-|---|---|---|
-| folders | 65 | 85 |
-| `seated and meditating.` | 33 pictures, 11 roots | 20 pictures, 4 roots |
-| the sigil scene (one root, many edits) | 1 folder | **1 folder, unchanged** |
-
-The split is deliberately not global: applied to the whole gallery a dhash collapses 1,003 pictures into 538 clusters, so it
-would fragment everything. Text proposes the family; pictures only break a tie the text cannot settle.
+That is the honest state of the problem, measured both ways: prompts cannot separate "an edit that kept the subject" from
+"one that replaced it", and neither can a dhash, because "same subject, different people" and "different subject" look alike
+to it. The veto is removed (65 folders; that family is one folder of 76 again; the sigil scene stays one). The answer is not
+another heuristic but a two-tier view - family, then the series inside it - which is display only and cannot shred anything.
+Every folder already carries `series`, its count of distinct chains.
 
 ## A folder is a family: it belongs where its series started
 
