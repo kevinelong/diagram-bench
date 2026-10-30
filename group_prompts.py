@@ -33,9 +33,6 @@ FAMILY_THRESHOLD = 0.10
 # The share of the shorter root's words that must appear in the longer one for the two to be one family. Measured on the
 # gallery: one character written two ways sits at 0.88-0.90 containment while unrelated prompts fall far below it.
 FAMILY_CONTAINMENT = 0.85
-# Bits of a 64-bit dhash that may differ before two pictures of one family count as different pictures. Measured on this
-# gallery: inside a family that already shares a prompt it separates a replaced subject from an edited one.
-VISUAL_LIMIT = 10
 # Cosine alone is not enough: a three-word prompt ("a woman not a lady") sharing one word with a long character prompt
 # scores 0.46, because normalisation hides how little it says. An absolute idf floor cannot fix that - idf shrinks with
 # the corpus, so five identical prompts in a five-document lexicon share almost no weight - but *coverage* can: how
@@ -419,61 +416,6 @@ def _names_the_same_thing(a, b, min_words=2):
     return len(short) < len(long_) and long_[:len(short)] == short
 
 
-def _visual_clusters(paths, limit=10, thumbs_name='.thumbs'):
-    """Group picture paths by what they look like, using a 64-bit difference hash of the thumbnail.
-
-    Used to *split* a family whose text is ambiguous, never to form folders: a dhash is strict (the whole gallery collapses
-    into 538 clusters at this setting) so on its own it fragments, but inside a family that already shares a prompt it
-    separates "the same picture edited" from "the subject was replaced" - which no prompt can tell, because both are steps
-    of one series (measured: a family of 33 held mannequins, a classroom, wasteland fighters and one character).
-    """
-    try:
-        from PIL import Image
-    except Exception:
-        return [list(paths)]
-
-    def dhash(path, size=8):
-        with Image.open(path) as im:
-            grey = im.convert('L').resize((size + 1, size), Image.LANCZOS)
-            px = list(grey.getdata())
-        bits = 0
-        for r in range(size):
-            for c in range(size):
-                bits = (bits << 1) | (1 if px[r * (size + 1) + c] < px[r * (size + 1) + c + 1] else 0)
-        return bits
-
-    hashes = {}
-    for path in paths:
-        path = Path(path)
-        thumb = path.parent / thumbs_name / (path.stem + '.jpg')
-        try:
-            hashes[path] = dhash(thumb if thumb.is_file() else path)
-        except Exception:
-            pass
-    if len(hashes) < 3:
-        return [list(paths)]
-    parent = {p: p for p in hashes}
-
-    def find(a):
-        while parent[a] != a:
-            parent[a] = parent[parent[a]]
-            a = parent[a]
-        return a
-
-    keys = sorted(hashes)
-    for i, a in enumerate(keys):
-        for b in keys[i + 1:]:
-            if bin(hashes[a] ^ hashes[b]).count('1') <= limit:
-                ra, rb = find(a), find(b)
-                if ra != rb:
-                    parent[rb] = ra
-    clusters = {}
-    for p in paths:
-        key = find(Path(p)) if Path(p) in hashes else ('solo', p)
-        clusters.setdefault(key, []).append(p)
-    return list(clusters.values())
-
-
 def _median_idf(token_sets, lexicon):
     """The middle idf of the words these prompts use - the line between 'unusual here' and 'ordinary here'."""
     values = sorted(lexicon['idf'].get(w, 0.0) for toks in token_sets.values() for w in toks)
@@ -764,37 +706,6 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             counts = {stated_count(r.get('prompt')) for r in rows_here} - {None}
             label_prompts = ([without_counts(r['prompt']) for r in rows_here] if len(counts) > 1
                              else [r['prompt'] for r in rows_here])
-            # The text says "one family" but the pictures may not: a family holding several *roots* - the subject was
-            # re-described, not just edited - is the case where a reader sees unrelated pictures under one name. Then, and
-            # only then, the pictures referee. One root with many edits (the sigil scene) keeps its one folder.
-            roots_here = {' '.join(str(r.get('root')).split()) for r in rows_here if r.get('root')}
-            if len(roots_here) >= 3 and len(rows_here) >= 4:
-                pieces = _visual_clusters([r['path'] for r in rows_here], limit=VISUAL_LIMIT)
-                pieces.sort(key=len, reverse=True)
-                if len(pieces) > 1:
-                    keep = list(pieces[0])
-                    for piece in pieces[1:]:
-                        if len(piece) < min_group:
-                            keep.extend(piece)
-                    pieces = [keep] + [piece for piece in pieces[1:] if len(piece) >= min_group]
-                    if len(pieces) > 1:
-                        by_path = {r['path']: r for r in rows_here}
-                        for piece in pieces:
-                            members = sorted((by_path[p] for p in piece if p in by_path),
-                                             key=lambda r: r.get('created') or '')
-                            if len(members) < min_group:
-                                continue
-                            counts_piece = {stated_count(r.get('prompt')) for r in members} - {None}
-                            lp = ([without_counts(r['prompt']) for r in members] if len(counts_piece) > 1
-                                  else [r['prompt'] for r in members])
-                            roots_piece = [r.get('root') for r in members]
-                            groups.append({'label': label_for(lp, range(len(lp)), lexicon=lexicon, roots=roots_piece),
-                                           'title': label_for(lp, range(len(lp)), width=0, lexicon=lexicon,
-                                                              roots=roots_piece),
-                                           'items': members, 'oldest': members[0].get('created') or '',
-                                           'newest': (members[-1].get('created') or ''),
-                                           'series': len({tuple(r.get('lineage') or [r['prompt']]) for r in members})})
-                        continue
             groups.append({'label': label_for(label_prompts, range(len(label_prompts)), lexicon=lexicon,
                                               roots=[r.get('root') for r in rows_here]),
                            'title': label_for(label_prompts, range(len(label_prompts)), width=0, lexicon=lexicon,
