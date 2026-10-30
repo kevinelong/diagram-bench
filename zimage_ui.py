@@ -3765,11 +3765,18 @@ class App:
                  if rank_mode else '%d pairs decided · %d deleted' % (decided, deletes),
                  font=('Segoe UI', 13), background=frame['background'], foreground=self.theme.muted
                  ).grid(row=1, column=0, columnspan=6, pady=(0, 10))
-        cols = 6
+        # Sized from the window, and always larger than the strip's tiles: these eight are the result, and at 148 px on a
+        # zoomed 1920 window they read as thumbnails rather than as the answer.
+        cols = 4
         for c in range(cols):
             frame.columnconfigure(c, weight=1, uniform='tile')
-        size = 148
-        shown = ordered[:cols * 3]
+        try:
+            room = max(1, win.winfo_width()) - 140
+        except Exception:
+            room = 1200
+        size = max(STRIP_TILE_MIN * 2, min(360, int(room / cols)))
+        r['finish_size'] = size          # kept so the size can be checked rather than eyeballed
+        shown = ordered[:cols * 2]
         for i, path in enumerate(shown):
             cell = tk.Frame(frame, background=frame['background'])
             cell.grid(row=2 + i // cols, column=i % cols, padx=5, pady=5, sticky='n')
@@ -3796,6 +3803,12 @@ class App:
         tk.Button(actions, text='Reset and start over', font=big, command=self._review_restart,
                   background=_mix(self.theme.window, '#000000', 0.25), foreground=self.theme.text,
                   activebackground=self.theme.accent, padx=22, pady=10).pack(side='left', padx=10)
+        # a default action: Enter and Space are what a keyboard user reaches for, and Keep and close is the safe one
+        for seq in ('<Return>', '<KP_Enter>', '<space>'):
+            try:
+                win.bind(seq, lambda e: (self.review_stop(), 'break')[1])
+            except Exception:
+                pass
         tk.Button(actions, text='Keep and close', font=big, command=self.review_stop,
                   background=self.theme.accent, foreground=self.theme.on_accent, activebackground=self.theme.accent,
                   padx=22, pady=10).pack(side='left', padx=10)
@@ -3803,6 +3816,13 @@ class App:
     def _review_restart(self):
         """Clear this folder's record and run the comparison again, from the finished screen."""
         self._review_reset()
+        win = (getattr(self, '_review', None) or {}).get('win')
+        if win is not None:
+            for seq in ('<Return>', '<KP_Enter>', '<space>'):
+                try:
+                    win.unbind(seq)
+                except Exception:
+                    pass
         r = getattr(self, '_review', None)
         if not r:
             return
