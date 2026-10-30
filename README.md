@@ -666,6 +666,42 @@ measured membership check and is not bent for a display convenience.
 A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
 was asked for.
 
+## Recovering metadata from the pictures themselves
+
+Pictures from **any ComfyUI graph** carry the executed graph in their PNG `prompt` tEXt chunk, and **A1111/Forge** pictures
+carry a `parameters` block - so a folder that lost its sidecars (or arrived from another pipeline) can regain its prompts:
+
+```
+python recover_sidecars.py --folder C:/Users/kevin/Pictures/zimage-ui            # dry run
+python recover_sidecars.py --folder ... --apply
+```
+
+The mapping is generic (a sampler with positive/negative inputs, a text encoder, a loader's model name, a latent's size), so
+someone else's workflow recovers as well as ours; measured on the live folder, **15 of 16** sidecar-less pictures recovered
+and the sixteenth honestly reported `no readable text metadata`. Every record is marked `"imported": "comfy-workflow"` or
+`"a1111-parameters"` and never carries `wins/losses/vs` or the style label, because an import cannot know them. The pane has
+a **Recover…** button that does it for the open folder only.
+
+**A caption is never written as `prompt`.** `describe()` already posts a picture to the configured vision model and returns a
+description; measured 10 of 10 pictures at **2.5 s mean** (2.0-5.1 s). A caption describes *appearance* while these folders
+mean *intent*, so a caption belongs in its own field and never in `prompt`.
+
+## Attributing a deletion to an A/B decision
+
+The Recycle Bin records a path and a time, not a reason, and A/B elimination uses the same png+json+thumb triple as the pane's
+Delete button - so the *shape* of a deletion cannot tell them apart. The reason is in the review state instead:
+`pair_review` records `{choice: delete_left|delete_right, left, right, at}` per decision, and `pair_deletions.py` joins that to
+a Bin report (`tools/recycle-report.ps1 -Json`) by **name and time**:
+
+```
+python pair_deletions.py --bin bin.json --list to-restore.txt
+powershell -File tools/recycle-restore.ps1 -Paths to-restore.txt -Apply
+```
+
+Measured on this machine (2026-10-30): 16 review states, **107 decisions, 0 delete decisions** - no A/B elimination has ever
+deleted anything here, so every deletion in the Bin came from the Delete button or from outside the app. The join exists for
+the case where it does happen, and it reports zero rather than guessing.
+
 ## Orphaned metadata in a gallery folder
 
 Pictures get moved out of `C:/Users/kevin/Pictures/zimage-ui` by hand, and their `.json` sidecars stay behind - so the gallery

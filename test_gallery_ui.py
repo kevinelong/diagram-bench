@@ -957,6 +957,35 @@ def main():
     check('with nothing to go back to it says so', 'nothing to go back' in app.hint['text'], app.hint['text'][:40])
     app._review = None
 
+    print('\n-- Recover rebuilds missing metadata for the open folder')
+    rec_dir = Path(tempfile.mkdtemp(prefix='recover-ui-'))
+    from PIL import PngImagePlugin
+    graph = {"1": {"class_type": "CLIPTextEncode", "inputs": {"text": "a lighthouse on a rock"}},
+             "2": {"class_type": "KSampler", "inputs": {"steps": 20, "cfg": 7.0, "seed": 5, "denoise": 1.0,
+                                                        "positive": ["1", 0]}}}
+    bare_pics = []
+    for i in range(2):
+        p = rec_dir / ('rec%d.png' % i)
+        info = PngImagePlugin.PngInfo(); info.add_text('prompt', json.dumps(graph))
+        Image.new('RGB', (48, 48), (70 + i, 90, 120)).save(p, pnginfo=info)
+        bare_pics.append(p)
+    Image.new('RGB', (48, 48), (10, 10, 10)).save(rec_dir / 'nothing.png')   # no metadata at all
+    saved_soon_rec, saved_order_rec = app._regroup_soon, app._content_order
+    app._content_order = bare_pics + [rec_dir / 'nothing.png']
+    app._regroup_soon = lambda: None      # restored below: leaving this stubbed starves a later check of its regroup
+    written = app.recover_pane_sidecars()
+    check('two sidecars are written', written == 2, str(written))
+    made = sorted(p.name for p in rec_dir.glob('*.json'))
+    check('only the recoverable pictures get one', made == ['rec0.json', 'rec1.json'], str(made))
+    meta0 = json.loads((rec_dir / 'rec0.json').read_text(encoding='utf-8'))
+    check('the recovered prompt is inside', (meta0.get('prompt') or '').startswith('a lighthouse'), meta0.get('prompt'))
+    check('and it is marked as imported', meta0.get('imported') == 'comfy-workflow', str(meta0.get('imported')))
+    check('the hint reports the refusal', 'no readable metadata' in app.hint['text'], app.hint['text'][:60])
+    check('a second press finds nothing left', app.recover_pane_sidecars() == 0, str(app.recover_pane_sidecars()))
+    app._regroup_soon = saved_soon_rec
+    app._content_order = saved_order_rec
+    app.busy = False
+
     print('\n-- ranking never deletes, even when the mode is missing')
     app._review_mode = tk.StringVar(value='rank')
     check('rank mode ranks', app._review_is_rank() is True, str(app._review_is_rank()))

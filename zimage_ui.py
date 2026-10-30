@@ -1609,7 +1609,7 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(3):
+        for col in range(4):
             self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
@@ -1620,9 +1620,13 @@ class App:
         # header, so a folder open in the second column had no way in from there
         self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
                                           state='disabled')
-        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=(3, 0))
+        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=3)
+        # a picture can carry its own provenance (a ComfyUI graph or an A1111 block), so a folder imported from another
+        # pipeline can regain its categories without a human retyping prompts
+        self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
+        self.contents_rec_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=1, column=0, columnspan=3, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=4, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -2312,6 +2316,45 @@ class App:
         except Exception:
             hit = None
         return hit['index'] if hit else None
+
+    def recover_pane_sidecars(self):
+        """Rebuild missing sidecars for the open folder's pictures, from the metadata inside the pictures.
+
+        Only for a picture that has none: an existing sidecar is never touched, and every record written here is marked
+        `"imported": <source>`, because it cannot carry the ranking or the style label this app adds.
+        """
+        import recover_sidecars
+        cells = list(getattr(self, '_content_order', []) or [])
+        if not cells:
+            self.hint.configure(text='open a folder first')
+            return 0
+        bare = [p for p in cells if not Path(p).with_suffix('.json').is_file()]
+        if not bare:
+            self.hint.configure(text='every picture in this folder already has its metadata')
+            return 0
+        written, refused = 0, {}
+        for picture in bare:
+            fields, source = recover_sidecars.recover(picture)
+            if not fields:
+                refused[source] = refused.get(source, 0) + 1
+                continue
+            try:
+                Path(picture).with_suffix('.json').write_text(
+                    json.dumps(fields, indent=1), encoding='utf-8')
+                written += 1
+            except OSError as e:
+                refused['%s' % e] = refused.get('%s' % e, 0) + 1
+        # the new prompts change what can be grouped, so the plan is recomputed rather than left stale
+        if written:
+            self._heads.clear()
+            self._regroup_soon()
+        self.hint.configure(text='recovered %d of %d missing sidecar%s%s%s'
+                                 % (written, len(bare), '' if len(bare) == 1 else 's',
+                                    '' if not refused else '; %d had no readable metadata' % sum(refused.values()),
+                                    ' - regrouping' if written else ''))
+        if written:
+            self._render_contents()
+        return written
 
     def _pane_cells(self):
         """The contents pane's cells in display order, its column count, and its tile widgets."""

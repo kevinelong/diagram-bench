@@ -338,6 +338,36 @@ def main():
           or pair_rank.read_meta(p1)['vs']['two.png'][0] == 0, str(pair_rank.read_meta(p1).get('vs')))
     check('undoing a pair with no decision is a no-op', pair_rank.unrecord({}, str(p1), str(p2)) is None, 'returned a choice')
 
+    print('\n-- an A/B deletion is attributable by name and time, and only then')
+    import pair_deletions as pdel
+    from datetime import datetime as _dt, timedelta as _td
+    when = _dt(2026, 10, 29, 18, 19, 30)
+    rows = [
+        {'path': r'C:\pics\a.png', 'deleted': (when + _td(seconds=9)).isoformat()},
+        {'path': r'C:\pics\b.png', 'deleted': (when + _td(hours=3)).isoformat()},
+        {'path': r'C:\pics\c.png', 'deleted': when.isoformat()},
+    ]
+    decisions = [('a.png', when, 'delete_left', 's.json'), ('b.png', when, 'delete_right', 's.json')]
+    hits = pdel.match(rows, decisions)
+    check('the picture the decision deleted is matched', [r['path'].split('\\')[-1] for r, _d in hits] == ['a.png'],
+          str([r['path'] for r, _d in hits]))
+    check('a name without a decision is not matched', not any('c.png' in r['path'] for r, _d in hits), 'matched c')
+    check('a decision hours away from the deletion is not matched',
+          not any('b.png' in r['path'] for r, _d in hits), 'matched b three hours off')
+    check('the choice travels with the match', hits and hits[0][1][2] == 'delete_left', str(hits and hits[0][1]))
+    state_file = {'decisions': {'x|y': {'choice': 'delete_right', 'left': 'x.png', 'right': 'y.png',
+                                        'at': when.isoformat()}}}
+    sd = Path(tempfile.mkdtemp(prefix='decisions-'))
+    (sd / 'pile.json').write_text(json.dumps(state_file), encoding='utf-8')
+    got = pdel.review_deletions(sd)
+    check('a review state yields its delete decisions', got == [('y.png', when, 'delete_right', 'pile.json')],
+          str(got))
+    win_file = {'decisions': {'x|y': {'choice': 'left_wins', 'left': 'x.png', 'right': 'y.png',
+                                      'at': when.isoformat()}}}
+    (sd / 'wins.json').write_text(json.dumps(win_file), encoding='utf-8')
+    check('a win decision is not a deletion', len(pdel.review_deletions(sd)) == 1,
+          str(pdel.review_deletions(sd)))
+
     print('\n-- at three seconds a decision, a plan has a price')
     check('15 questions is under a minute', round(pr.estimate_minutes([0] * 15), 2) == 0.75,
           str(pr.estimate_minutes([0] * 15)))
