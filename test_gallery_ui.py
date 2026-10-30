@@ -3845,6 +3845,264 @@ def main():
           app.hint['text'])
     root.update()
 
+    print('\n-- a11y: a tile is a tab stop, F6 walks the three panes, Alt+letter runs the command (2026-10-30)')
+    # The four gaps an audit against Microsoft's Windows keyboard guidance found: tiles were mouse targets only, there
+    # were no access keys, F6 did nothing, and "Reset wins in this folder" was destructive without asking.
+    real_regroup_soon = app._regroup_soon
+    app._regroup_soon = lambda: None          # a regroup would swap the plan out from under the checks
+    app.busy = False
+    app.clear_selection()
+    if not (app._plan and app._plan.get('groups')):
+        app._plan = {'recent': [], 'ungrouped': [], 'groups': [
+            {'label': 'a11y', 'title': 'a11y folder', 'oldest': '', 'newest': '', 'series': False,
+             'items': [{'path': str(p), 'prompt': 'prompt %d' % i, 'created': '', 'root': None}
+                       for i, p in enumerate(app._files[:4])]}]}
+    app.group_var.set(True)
+    app._grouping = False
+    app.select_folder(0)
+    root.update(); time.sleep(0.15); root.update()
+
+    print('\n-- pane tiles take the keyboard, ring themselves in the accent, and activate on Enter')
+    folder_tiles = app._folder_tiles()
+    check('a folder tile in the strip is a tab stop',
+          bool(folder_tiles) and all(str(t.cget('takefocus')) == '1' for t in folder_tiles),
+          [t.cget('takefocus') for t in folder_tiles][:4])
+    check('... with a focus handler and Enter to open it',
+          bool(folder_tiles) and bool(folder_tiles[0].bind('<FocusIn>')) and bool(folder_tiles[0].bind('<Return>')),
+          folder_tiles[0].bind('<Return>') if folder_tiles else None)
+    if folder_tiles:
+        frame = folder_tiles[0]
+        app._on_tile_focus(NS(widget=frame), True)
+        check('the focused folder tile is ringed in the accent and the cursor follows it',
+              str(frame.cget('highlightbackground')) == app.theme.accent
+              and int(frame.cget('highlightthickness')) == 2 and app._nav_cur == 0,
+              (frame.cget('highlightbackground'), frame.cget('highlightthickness'), app._nav_cur))
+        app._on_tile_focus(NS(widget=frame), False)
+        check('leaving it releases the focus claim', getattr(app, '_focus_tile', None) is None)
+        app._nav_cur = None
+        app._paint_folder_cursor()
+        check('and with the cursor elsewhere the tile is unringed',
+              int(frame.cget('highlightthickness')) == 0, frame.cget('highlightthickness'))
+        opened = []
+        real_select_folder = app.select_folder
+        app.select_folder = lambda i: opened.append(i)
+        try:
+            app._activate_tile(frame)
+        finally:
+            app.select_folder = real_select_folder
+        check('Enter on a focused folder tile opens that folder', opened == [0], opened)
+    pane_tiles = list((getattr(app, '_content_widgets', {}) or {}).values())
+    check('an open folder draws tiles in the pane', len(pane_tiles) >= 2, len(pane_tiles))
+    check('a pane tile is a tab stop',
+          bool(pane_tiles) and all(str(t.cget('takefocus')) == '1' for t in pane_tiles),
+          [t.cget('takefocus') for t in pane_tiles][:4])
+    check('... with focus-in and focus-out handlers',
+          bool(pane_tiles) and bool(pane_tiles[0].bind('<FocusIn>')) and bool(pane_tiles[0].bind('<FocusOut>')),
+          (pane_tiles[0].bind('<FocusIn>'), pane_tiles[0].bind('<FocusOut>')) if pane_tiles else None)
+    check('... and Enter and Space on it', bool(pane_tiles) and bool(pane_tiles[0].bind('<Return>'))
+          and bool(pane_tiles[0].bind('<space>')))
+    if pane_tiles:
+        tile = pane_tiles[0]
+        idle = str(tile.cget('highlightbackground'))
+        app._on_tile_focus(NS(widget=tile), True)
+        check('the focused tile is ringed in the accent colour',
+              str(tile.cget('highlightbackground')) == app.theme.accent and app.theme.accent != idle,
+              (tile.cget('highlightbackground'), app.theme.accent, idle))
+        app._paint()
+        check('a repaint keeps the ring', str(tile.cget('highlightbackground')) == app.theme.accent,
+              tile.cget('highlightbackground'))
+        app._on_tile_focus(NS(widget=tile), False)
+        check('leaving the tile gives the colour back', str(tile.cget('highlightbackground')) == idle,
+              (tile.cget('highlightbackground'), idle))
+        check('and the ring is no longer claimed', getattr(app, '_focus_tile', None) is None)
+        target = Path(tile.path)
+        seen = []
+        real_select_file = app.select_file
+        app.select_file = lambda p: seen.append(Path(p))
+        try:
+            app._activate_tile(tile)
+        finally:
+            app.select_file = real_select_file
+        check('Enter on a focused pane tile loads that picture', seen == [target], str(seen))
+
+        print('\n-- Tab walks the pane in visual order')
+        order = list(app._content_order)
+        focused = []
+        if len(pane_tiles) >= 2:
+            a, b = sorted(pane_tiles[:2], key=lambda t: order.index(Path(t.path)))
+            a.focus_set = lambda: focused.append('a')
+            b.focus_set = lambda: focused.append('b')
+            try:
+                moved = app._tab_in_list(1, a)
+            finally:
+                a.__dict__.pop('focus_set', None)
+                b.__dict__.pop('focus_set', None)
+            check('Tab from a pane tile goes to the next one in the list', moved == 'break' and focused == ['b'],
+                  (moved, focused))
+            focused.clear()
+            a.focus_set = lambda: focused.append('a')
+            try:
+                moved = app._tab_in_list(-1, a)
+            finally:
+                a.__dict__.pop('focus_set', None)
+            check('Shift+Tab from the first pane tile leaves the list to Tk', moved is None and not focused,
+                  (moved, focused))
+
+    print('\n-- F6 / Shift+F6 cycle folder column -> picture pane -> prompt box')
+    regions = {'folders': app.gal_canvas, 'pictures': app.contents_canvas, 'prompt': app.text}
+    check('the pane is on screen, so all three panes take a turn',
+          all(app._region_available(n) for n in regions),
+          [n for n in regions if not app._region_available(n)])
+    calls = []
+    for name, widget in regions.items():
+        widget.focus_set = lambda n=name: calls.append(n)
+    real_focus_get = app.root.focus_get
+    real_region_last = dict(app._region_last)
+    check('F6 and Shift+F6 are bound on the window',
+          bool(root.bind('<F6>')) and bool(root.bind('<Shift-F6>')))
+    try:
+        app._region_last = {}
+        # generated on a widget inside this window, not on the toplevel: a key event sent to the toplevel is
+        # redirected to whatever window holds the real keyboard focus, which in this suite may be a leftover dialog
+        app.root.focus_get = lambda: app.text
+        app.text.event_generate('<F6>'); root.update()
+        check('F6 from the prompt box lands on the folder column', calls[-1:] == ['folders'], calls)
+        app.root.focus_get = lambda: app.gal_canvas
+        app.text.event_generate('<F6>'); root.update()
+        check('F6 from the folder column lands on the picture pane', calls[-1:] == ['pictures'], calls)
+        app.root.focus_get = lambda: app.contents_canvas
+        app.text.event_generate('<F6>'); root.update()
+        check('F6 from the picture pane lands on the prompt box', calls[-1:] == ['prompt'], calls)
+        app.root.focus_get = lambda: app.contents_canvas
+        app.text.event_generate('<Shift-F6>'); root.update()
+        check('Shift+F6 walks backwards to the folder column', calls[-1:] == ['folders'], calls)
+        app.root.focus_get = lambda: app.text
+        app.text.event_generate('<Shift-F6>'); root.update()
+        check('Shift+F6 from the prompt box goes back to the picture pane',
+              calls[-1:] == ['pictures'], calls)
+        app.root.focus_get = lambda: app.refresh_btn      # a control that is in none of the three panes
+        app.text.event_generate('<F6>'); root.update()
+        check('F6 from anywhere else starts again at the folder column', calls[-1:] == ['folders'], calls)
+    finally:
+        for widget in regions.values():
+            widget.__dict__.pop('focus_set', None)
+        app.root.focus_get = real_focus_get
+        app._region_last = real_region_last
+
+    print('\n-- Reset wins asks before it rewrites a record')
+    import pair_rank as _pair_rank
+    reset_calls, asked = [], []
+    real_reset_wins = _pair_rank.reset_wins
+    real_ask_reset = zui.messagebox.askyesno
+    real_show_next = app._review_show_next
+    _pair_rank.reset_wins = lambda paths: reset_calls.append(list(paths)) or len(paths)
+    app._review_show_next = lambda: None
+    app._review = {'state': {'decisions': {'a|b': 1}}, 'queue': ['q'], 'deleted': 2, 'win': None}
+    try:
+        zui.messagebox.askyesno = lambda *a, **k: (asked.append((a[0], a[1])), False)[1]
+        app._review_reset()
+        check('Reset asks first, and says what it clears',
+              bool(asked) and 'Reset wins' in asked[0][0] and 'record' in asked[0][1], asked)
+        check('... answering No changes nothing',
+              not reset_calls and app._review['state']['decisions'] == {'a|b': 1}, reset_calls)
+        zui.messagebox.askyesno = lambda *a, **k: (asked.append((a[0], a[1])), True)[1]
+        app._review_reset()
+        check('... answering Yes clears the record for this folder',
+              bool(reset_calls) and app._review['state']['decisions'] == {} and app._review['queue'] is None,
+              reset_calls)
+    finally:
+        zui.messagebox.askyesno = real_ask_reset
+        _pair_rank.reset_wins = real_reset_wins
+        app._review_show_next = real_show_next
+        app._review = None
+
+    print('\n-- with folders off the strip paints picture tiles, and they are tab stops too')
+    app.toggle_groups(False)
+    root.update(); time.sleep(0.1); root.update()
+    strip_tiles = list(app._tile_widgets.values())
+    check('the strip drew picture tiles', len(strip_tiles) >= 2, len(strip_tiles))
+    check('a strip tile is a tab stop',
+          bool(strip_tiles) and all(str(t.cget('takefocus')) == '1' for t in strip_tiles),
+          [t.cget('takefocus') for t in strip_tiles][:4])
+    check('... with a focus ring and Tab in visual order',
+          bool(strip_tiles) and bool(strip_tiles[0].bind('<FocusIn>')) and bool(strip_tiles[0].bind('<Tab>'))
+          and bool(strip_tiles[0].bind('<Return>')) and bool(strip_tiles[0].bind('<space>')))
+    if len(strip_tiles) >= 2:
+        focused = []
+        first, second = strip_tiles[0], strip_tiles[1]
+        first.focus_set = lambda: focused.append('first')
+        second.focus_set = lambda: focused.append('second')
+        try:
+            moved = app._tab_in_list(1, first)
+        finally:
+            first.__dict__.pop('focus_set', None)
+            second.__dict__.pop('focus_set', None)
+        check('Tab from the first strip tile goes to the second', moved == 'break' and focused == ['second'],
+              (moved, focused))
+        seen = []
+        real_select_file = app.select_file
+        app.select_file = lambda p: seen.append(Path(p))
+        try:
+            app._activate_tile(second)
+        finally:
+            app.select_file = real_select_file
+        check('Space/Enter on a focused strip tile loads it', seen == [Path(second.path)], str(seen))
+    app._regroup_soon = real_regroup_soon
+
+    print('\n-- Alt+letter: the primary commands, labelled the way Windows labels them')
+    pairs = [(k, attr, index) for k, attr, index, _what in zui.ACCESS_COMMANDS]
+    check('the twelve primary commands have an access key', len(pairs) == 12, len(pairs))
+    check('every letter is bound on the window',
+          all(root.bind('<Alt-%s>' % k) and root.bind('<Alt-%s>' % k.upper()) for k, _a, _i in pairs),
+          [k for k, _a, _i in pairs if not root.bind('<Alt-%s>' % k)])
+    check('and no bare letter was taken from the prompt box',
+          not any(root.bind('<KeyPress-%s>' % k) for k, _a, _i in pairs),
+          [k for k, _a, _i in pairs if root.bind('<KeyPress-%s>' % k)])
+    labelled, fired_all, tipped_all, altgr = [], [], [], []
+    for key, attr, index in pairs:
+        widget = getattr(app, attr)
+        text = str(widget.cget('text'))
+        try:
+            under = int(widget.cget('underline'))
+        except Exception:
+            under = -1
+        labelled.append((attr, 0 <= under < len(text) and text[under:under + 1].lower() == key))
+        tipped_all.append((attr, any(('Alt+%s' % key.upper()) in tip.text
+                                    for tip in app._tips if tip.widget is widget)))
+        fires = []
+        was = widget.state()
+        widget.state(['!disabled'])
+        widget.invoke = lambda a=attr: fires.append(a)
+        try:
+            app._on_access_key(NS(state=0), key)
+        finally:
+            widget.__dict__.pop('invoke', None)
+            widget.state(list(was) or ['!disabled'])
+        fired_all.append((attr, fires == [attr]))
+        # AltGr (Ctrl+Alt) is how a European keyboard types a letter: it must not run a command
+        widget.invoke = lambda a=attr: altgr.append(a)
+        try:
+            app._on_access_key(NS(state=0x0004), key)
+        finally:
+            widget.__dict__.pop('invoke', None)
+    check('Alt+<letter> runs the matching command, for every one of them',
+          all(ok for _a, ok in fired_all), [a for a, ok in fired_all if not ok])
+    check('every control underlines its own access letter (Tk 8.6 -underline)',
+          all(ok for _a, ok in labelled), [a for a, ok in labelled if not ok])
+    check('and names the key in its tooltip as well',
+          all(ok for _a, ok in tipped_all), [a for a, ok in tipped_all if not ok])
+    check('AltGr is left alone - it types a letter, it is not a command', not altgr, altgr)
+    # a disabled command stays disabled from the keyboard: Delete has nothing to act on here
+    app.clear_selection()
+    root.update()
+    delete_dialog = []
+    zui.messagebox.askyesno = lambda *a, **k: delete_dialog.append(a[0]) or False
+    try:
+        app._on_access_key(NS(state=0), 'd')
+    finally:
+        zui.messagebox.askyesno = real_ask_reset
+    check('an access key cannot run a disabled command', not delete_dialog, delete_dialog)
+
     for w in root.winfo_children():
         if isinstance(w, tk.Toplevel):
             w.destroy()

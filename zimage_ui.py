@@ -120,6 +120,27 @@ GRID_MOVES = (('Left', 'left'), ('Right', 'right'), ('Up', 'up'), ('Down', 'down
               ('Control-Home', 'all-home'), ('Control-End', 'all-end'))
 
 
+# Alt+letter for the primary commands, the way a Windows window labels its own. Each entry is
+# (letter, App attribute holding the control, index of the letter inside that control's text, what it does). The index is
+# what the control underlines - Tk 8.6 gives both `tk.Button` and `ttk.Button` a `-underline` option, so the letter is
+# drawn in the button itself, and the same key is named in its tooltip. Letters are picked so no two commands share one,
+# and the letter always occurs in the visible text.
+ACCESS_COMMANDS = (
+    ('o', 'title_open_btn', 0, 'Open another folder to look at (same as Ctrl+O)'),
+    ('f', 'group_chk', 0, 'Group the pictures into prompt folders, or stop grouping'),
+    ('r', 'rephrase_btn', 2, 'Rewrite the prompt with synonyms'),
+    ('g', 'gen_btn', 2, 'Generate with the current prompt (same as Enter in the box)'),
+    ('u', 'use_base_btn', 0, 'Arm the shown picture as the base for the next run'),
+    ('c', 'clear_base_btn', 0, 'Forget the base: the next run is text to image again'),
+    ('i', 'describe_btn', 5, 'Describe the shown picture with the local vision model'),
+    ('a', 'describe_all_btn', 9, 'Describe every picture here that has no prompt yet'),
+    ('b', 'contents_ab_btn', 2, 'Compare the open folder as A/B pairs'),
+    ('l', 'contents_gal_btn', 2, 'Walk the open folder one picture at a time'),
+    ('s', 'sel_all_btn', 0, 'Select every picture in the strip (press again to clear)'),
+    ('d', 'del_btn', 0, 'Send the selected pictures to the Recycle Bin (asks first)'),
+)
+
+
 def grid_move(index, count, cols, move, rows=1):
     """Where the W3C APG layout-grid pattern takes the current cell, in a row-major grid of `count` cells.
 
@@ -1603,6 +1624,8 @@ class App:
         self._img = None
         self._raw = None
         self._tips = []                   # populated as widgets appear, not in one later pass
+        self._focus_tile = None           # the tile holding the keyboard, so a repaint can re-ring it
+        self._region_last = {}            # 'folders'/'pictures' -> the widget F6 came back to
         self._poll_id = None
         self.ui_events = queue.Queue()    # results from worker threads (the prompt enhancer)
         self._settings = load_settings()
@@ -2315,6 +2338,10 @@ class App:
                         ('<Control-o>', self._on_ctrl_o),
                         ('<Escape>', self._on_escape)):
             root.bind(seq, fn)
+        # F6 walks the three panes the way Windows says it should, backwards with Shift
+        root.bind('<F6>', lambda e: self._cycle_focus(1, e))
+        root.bind('<Shift-F6>', lambda e: self._cycle_focus(-1, e))
+        self._install_access_keys()
 
         if not self._sidebar:
             self.set_sidebar(False)
@@ -2553,13 +2580,34 @@ class App:
         return [p for p, _m in self._scan()]
 
     def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
-        lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2')
+        # A tile is a tab stop, not a mouse target. `takefocus` puts it in the Tab order in the order it was created,
+        # which for both lists is the visual order; the ring is the same accent the selection uses, so a keyboard user
+        # can see where they are. Tile widgets are Labels, whose class default is "no focus", so nothing else in the
+        # list is a stop and Tab walks tile to tile.
+        lab = tk.Label(parent, image=thumb, bd=1, relief='flat', cursor='hand2', takefocus=1,
+                       highlightthickness=3, highlightbackground=self.theme.border,
+                       highlightcolor=self.theme.accent)
         lab.image = thumb
         lab.path = path
+        lab.pane = bool(pane)
         lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser, pane=pane))
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
             lab.bind(seq, fn)
+        # the ring is drawn by hand rather than left to Tk's `highlightcolor`: `_paint` rewrites the highlight on every
+        # selection change, and a focus ring that the next repaint can erase is not a focus ring
+        lab.bind('<FocusIn>', lambda e: self._on_tile_focus(e, True), add='+')
+        lab.bind('<FocusOut>', lambda e: self._on_tile_focus(e, False), add='+')
+        for seq in ('<Return>', '<KP_Enter>', '<space>'):
+            lab.bind(seq, lambda e, w=lab: self._activate_tile(w))
+        # Tab walks the list in visual order, which is this widget's row-major creation order; at either end it hands
+        # the keyboard back to Tk's own traversal so Tab can leave the list.
+        lab.bind('<Tab>', lambda e, w=lab: self._tab_in_list(1, w))
+        lab.bind('<Shift-Tab>', lambda e, w=lab: self._tab_in_list(-1, w))
+        try:
+            lab.bind('<ISO_Left_Tab>', lambda e, w=lab: self._tab_in_list(-1, w))   # X11 only; harmless elsewhere
+        except Exception:
+            pass
         if browser:
             # a double click loads the picture and leaves the window open: closing it was easy to do by accident
             lab.bind('<Double-Button-1>', lambda e, p=path: self._load_from_browser(p))
@@ -3658,13 +3706,33 @@ class App:
         self._review_show_next()
 
     def _review_reset(self):
-        """Zero the record for this folder only - the one explicit way to start a comparison over."""
+        """Zero the record for this folder only - the one explicit way to start a comparison over.
+
+        It is destructive in a way the rest of the review window is not: it rewrites `wins`/`losses`/`ties` in every
+        member's sidecar, and no undo reaches into a JSON file. So it asks first, in the words the delete confirmation
+        uses - what will change, and that nothing else will.
+        """
         import pair_rank
         r = getattr(self, '_review', None)
         if not r or not self._plan:
             return
         group = self._plan['groups'][self._active_folder] if self._active_folder is not None else None
         paths = [it['path'] for it in (group['items'] if group else self._files)]
+        n = len(paths)
+        try:
+            parent = r.get('win') or self.root
+            if not parent.winfo_exists():
+                parent = self.root
+        except Exception:
+            parent = self.root
+        if not messagebox.askyesno(
+                'Reset wins in this folder',
+                'Zero the win/loss record on %d picture%s in this folder?\n\n'
+                'Their wins, losses and ties are cleared, and this comparison starts again from the first pair. '
+                'No picture, prompt or file is changed%s.'
+                % (n, '' if n == 1 else 's', '; you cannot undo this inside the window'),
+                parent=parent):
+            return
         n = pair_rank.reset_wins(paths)
         r['state']['decisions'] = {}
         r['queue'] = None
@@ -4537,6 +4605,16 @@ class App:
             self._tip(title, full_title)
             for w in (tile, body, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self._folder_clicked(i))
+            # One tab stop per folder, on the frame that already carries the "this folder is open" border: the four
+            # labels inside it are mouse targets too, and four stops per folder would be four stops too many. The ring
+            # itself is the cursor ring `_paint_folder_cursor` draws, so focusing a tile costs no extra geometry.
+            tile.configure(takefocus=1, highlightcolor=self.theme.accent)
+            tile.bind('<FocusIn>', lambda e: self._on_tile_focus(e, True), add='+')
+            tile.bind('<FocusOut>', lambda e: self._on_tile_focus(e, False), add='+')
+            for seq in ('<Return>', '<KP_Enter>', '<space>'):
+                tile.bind(seq, lambda e, w=tile: self._activate_tile(w))
+            tile.bind('<Tab>', lambda e, w=tile: self._tab_in_list(1, w))
+            tile.bind('<Shift-Tab>', lambda e, w=tile: self._tab_in_list(-1, w))
         self._paint_folder_cursor()
         self.root.after_idle(self._on_strip_resize)
         self.root.after_idle(lambda: self._fill_view('strip'))
@@ -6061,6 +6139,7 @@ class App:
             if lab is not None and lab.winfo_exists():
                 lab.configure(text='%d selected' % n if n else '')
         self._update_pane_buttons()
+        self._apply_focus_ring()
 
     def _browser_mark(self, key, mode):
         """Keyboard selection inside View All, in the same vocabulary the mouse uses.
@@ -6274,6 +6353,257 @@ class App:
     def _on_escape(self, event=None):
         self.clear_selection()
         return None
+
+    # -- focus: tiles, F6 and access keys ------------------------------------
+    def _on_tile_focus(self, event=None, focused=True):
+        """The tile under the keyboard wears the accent; leaving it gives the colour back to the selection.
+
+        Tk's own `highlightcolor` would do this if nothing else touched the highlight, but `_paint` rewrites it on
+        every selection change, so the ring is set here and re-applied there.
+        """
+        w = getattr(event, 'widget', None)
+        if w is None:
+            return None
+        try:
+            if focused:
+                self._focus_tile = w
+                if getattr(w, 'path', None) is None:            # a folder tile: the frame is the stop
+                    tiles = self._folder_tiles()
+                    if w in tiles:
+                        self._nav_cur = tiles.index(w)
+                        self._region_last['folders'] = w
+                        self._paint_folder_cursor()
+                else:
+                    w.configure(highlightcolor=self.theme.accent, highlightbackground=self.theme.accent)
+                    if getattr(w, 'pane', False):
+                        self._pane_cur = Path(w.path)
+                        self._region_last['pictures'] = w
+                    else:
+                        self._nav_cur = Path(w.path)
+                        self._region_last['folders'] = w
+            else:
+                if getattr(self, '_focus_tile', None) is w:
+                    self._focus_tile = None
+                self._paint()
+                self._paint_folder_cursor()
+        except Exception:
+            pass
+        return None
+
+    def _apply_focus_ring(self):
+        """Re-draw the focus ring after a repaint, since `_paint` has just reset every tile's highlight."""
+        w = getattr(self, '_focus_tile', None)
+        if w is None:
+            return
+        try:
+            if getattr(w, 'path', None) is None:
+                self._paint_folder_cursor()          # a folder tile's ring is the cursor ring, in the accent
+            else:
+                w.configure(highlightcolor=self.theme.accent, highlightbackground=self.theme.accent)
+        except Exception:
+            self._focus_tile = None
+
+    def _activate_tile(self, widget):
+        """Enter or Space on a focused tile: exactly what Enter on the list does for the cell under the cursor."""
+        try:
+            if not widget.winfo_exists():
+                return 'break'
+        except Exception:
+            return 'break'
+        path = getattr(widget, 'path', None)
+        if path is None:
+            tiles = self._folder_tiles()
+            if widget in tiles:
+                self.select_folder(tiles.index(widget))
+                self._nav_cur = tiles.index(widget)
+                self._paint_folder_cursor()
+            return 'break'
+        path = Path(path)
+        if getattr(widget, 'pane', False):
+            self._pane_cur = path
+        else:
+            self._nav_cur = path
+        self.selected = [path]
+        self._anchor = path
+        self.select_file(path)
+        return 'break'
+
+    def _tab_in_list(self, delta, widget):
+        """Tab / Shift+Tab inside one list, in visual order; None at either end, so Tk's traversal leaves the list."""
+        try:
+            if getattr(widget, 'path', None) is not None:
+                pane = bool(getattr(widget, 'pane', False))
+                keys = list(self._pane_cells()[0] if pane else self._strip_cells()[0])
+                store = self._content_widgets if pane else self._tile_widgets
+                cur = Path(widget.path)
+                if cur not in keys:
+                    return None
+                i = keys.index(cur) + delta
+                if not 0 <= i < len(keys):
+                    return None
+                nxt = store.get(keys[i])
+            else:
+                tiles = self._folder_tiles()
+                if widget not in tiles:
+                    return None
+                i = tiles.index(widget) + delta
+                if not 0 <= i < len(tiles):
+                    return None
+                nxt = tiles[i]
+            if nxt is None:
+                return None
+            nxt.focus_set()
+        except Exception:
+            return None
+        return 'break'
+
+    # -- F6: the three panes -------------------------------------------------
+    def _region_available(self, name):
+        """A pane takes a turn in the F6 cycle only while it is on screen."""
+        widget = {'folders': getattr(self, 'gal', None), 'pictures': getattr(self, 'contents_holder', None),
+                  'prompt': getattr(self, 'text', None)}.get(name)
+        if widget is None:
+            return False
+        try:
+            return name == 'prompt' or bool(widget.winfo_manager())
+        except Exception:
+            return False
+
+    def _region_widget(self, name):
+        """What takes the keyboard when F6 lands on a pane: the tile you were on, else the list itself."""
+        last = (getattr(self, '_region_last', {}) or {}).get(name)
+        if last is not None:
+            try:
+                if last.winfo_exists():
+                    return last
+            except Exception:
+                pass
+        return {'folders': getattr(self, 'gal_canvas', None),
+                'pictures': getattr(self, 'contents_canvas', None),
+                'prompt': getattr(self, 'text', None)}[name]
+
+    def _focus_region_of(self, widget):
+        """Which of the three panes a widget belongs to, or None for everything else in the window."""
+        if widget is None:
+            return None
+        try:
+            if self._is_inside(widget, self.text):
+                return 'prompt'
+            if self._is_inside(widget, self.gal_canvas) or widget in self._folder_tiles():
+                return 'folders'
+            if self._is_inside(widget, self.contents_canvas):
+                return 'pictures'
+        except Exception:
+            return None
+        return None
+
+    def _is_inside(self, widget, ancestor):
+        """Is `widget` the pane itself or built inside it? Walks the parent chain, which no path string can confuse."""
+        w = widget
+        for _ in range(16):
+            if w is None:
+                return False
+            if w is ancestor:
+                return True
+            w = getattr(w, 'master', None)
+        return False
+
+    def _cycle_focus(self, delta=1, event=None):
+        """F6 / Shift+F6 between the folder column, the picture pane and the prompt box.
+
+        Microsoft's rule is that F6 walks the panes of a window and Shift+F6 walks them backwards; which pane you land
+        on is where you were last time, so a round trip puts the caret back where it was.
+        """
+        order = [n for n in ('folders', 'pictures', 'prompt') if self._region_available(n)]
+        if not order:
+            return None
+        try:
+            here = self._focus_region_of(self.root.focus_get())
+        except Exception:
+            here = None
+        if here in order:
+            i = (order.index(here) + (1 if delta > 0 else -1)) % len(order)
+        else:
+            i = 0 if delta > 0 else len(order) - 1
+        widget = self._region_widget(order[i])
+        if widget is None:
+            return None
+        try:
+            widget.focus_set()
+            self._region_last[order[i]] = widget
+        except Exception:
+            return None
+        return 'break'
+
+    # -- Alt+letter access keys ----------------------------------------------
+    def _install_access_keys(self):
+        """Alt+letter for the commands Windows would give one, and the letter shown the way Windows shows it.
+
+        Alt combinations are not text, so the prompt box keeps every character it types. Ctrl+Alt is left alone on
+        purpose: that is AltGr on most European layouts, where AltGr+letter *is* a character.
+        """
+        self._access = {}
+        for key, attr, index, what in ACCESS_COMMANDS:
+            widget = getattr(self, attr, None)
+            if widget is None:
+                continue
+            self._access[key] = attr
+            self._label_access(widget, key, index, what)
+            for seq in ('<Alt-%s>' % key, '<Alt-%s>' % key.upper()):
+                try:
+                    self.root.bind(seq, lambda e, k=key: self._on_access_key(e, k))
+                except Exception:
+                    pass
+
+    def _label_access(self, widget, key, index, what):
+        """Underline the letter the way Windows does, and name the key in the tooltip as well.
+
+        Tk 8.6 gives both `tk.Button` and `ttk.Button` a `-underline` option, so the letter is drawn in the control
+        itself; the tooltip repeats it for anyone who has not learnt the letter yet.
+        """
+        underlined = False
+        if index is not None:
+            try:
+                widget.configure(underline=index)
+                underlined = True
+            except Exception:
+                underlined = False
+        line = 'Alt+%s  %s' % (key.upper(), what)
+        if not underlined:
+            line += '  (this control cannot draw the underline; the key is here only)'
+        for tip in self._tips:
+            if tip.widget is widget:
+                tip.text = '%s\n%s' % (tip.text, line)
+                return
+        self._tip(widget, line)
+
+    def _on_access_key(self, event, key):
+        if getattr(event, 'state', 0) & 0x0004:       # AltGr: a character, not a command
+            return None
+        return self._invoke_access(key)
+
+    def _invoke_access(self, key):
+        """Press one access-key command, without ever calling its handler directly."""
+        attr = (getattr(self, '_access', None) or {}).get(key)
+        if not attr:
+            return None
+        widget = getattr(self, attr, None)
+        if widget is None:
+            return None
+        try:
+            if 'disabled' in widget.state():          # a disabled command stays disabled from the keyboard too
+                return 'break'
+        except Exception:
+            try:
+                if str(widget.cget('state')) == 'disabled':
+                    return 'break'
+            except Exception:
+                pass
+        try:
+            widget.invoke()
+        except Exception:
+            pass
+        return 'break'
 
     def select_file(self, path):
         """One entry point for a click in the recent strip or the full browser: look at it, restore its prompt.

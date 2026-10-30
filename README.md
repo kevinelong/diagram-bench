@@ -1143,7 +1143,7 @@ where this app stands:
 | honour contrast themes | **partly** - system colours are used for chrome; the photo panes stay photographic |
 | system font, system icons | **done** for text (Segoe UI, which is what Tk's default resolves to on Windows) |
 | native window behaviour: maximise, snap layouts, rounded corners | **done** - the window is a plain Tk toplevel, so DWM owns the frame and snap |
-| keyboard access to everything, mnemonics | **partly** - the APG layout-grid keys in all three lists (strip, View All, folder browser), plus Delete/Ctrl+A/Esc; no mnemonics |
+| keyboard access to everything, mnemonics | **done** - the APG layout-grid keys in all three lists (strip, View All, folder browser), every tile a tab stop with Enter/Space, F6/Shift+F6 between the folder column, the picture pane and the prompt box, and Alt+letter for the twelve primary commands, underlined in the control the way Windows labels them; Delete/Ctrl+A/Esc as before |
 | native file and folder dialogs | **done** (`tkinter.filedialog`, Explorer) |
 | a responsive layout down to small windows, always scrollable | **done** - every list scrolls, tiles reflow |
 | visible state for long operations, cancel | **done** - progress bar, ticks, Stop |
@@ -1317,8 +1317,10 @@ compared twenty times outrank one that won every bout it entered). The folder pa
 badge (`4W`, `4W 1L`).
 
 Records accumulate; `Reset wins in this folder` in the window is the one explicit way to start over, and it clears only
-the record, never the prompt or the file. Writing a sidecar is atomic (temp file + `os.replace`), so an interrupted
-write cannot cost a picture its prompt.
+the record, never the prompt or the file. It **asks first** (2026-10-30): a yes/no naming how many pictures are about
+to be zeroed, in the same wording as the delete confirmation, because it rewrites `wins`/`losses`/`ties` in every
+member's sidecar and nothing inside the window can undo that. Writing a sidecar is atomic (temp file + `os.replace`), so
+an interrupted write cannot cost a picture its prompt.
 
 ## Clips: why they would not play, and what opens them now
 
@@ -1730,8 +1732,8 @@ hides itself when everything fits. *Select all* therefore covers 18; use **More�
 There is no undo inside the window, but the delete itself is reversible in Explorer's Recycle Bin.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
-carrying the same state bits Tk sends), asserts 49 selection, delete and older-control checks, and screenshots each
-state: `python test_gallery_ui.py --shots <dir>`.
+carrying the same state bits Tk sends), asserts 877 selection, delete, accessibility and older-control checks, and
+screenshots each state: `python test_gallery_ui.py --shots <dir>`.
 
 ### Keyboard in the gallery
 
@@ -1750,18 +1752,68 @@ vertical-clamp rather than a plain index step:
 | **Space** | toggles the current cell (opens a folder tile - a folder list has one selection, the open folder) |
 | **Enter** | activates it: loads the picture, or opens the folder |
 | **Shift+arrows** | extends the selection from the anchor, as shift+click does |
+| **Ctrl+A** | selects everything laid out |
 
 **Which list answers the keys is which list you clicked.** The open folder's contents pane is a list in its own right:
 clicking a picture there gives it the keyboard and the arrows move *its* cursor (left/right wrap across its rows,
 up/down keep the column, PgUp/PgDn move a screenful, Home/End the row, Ctrl+Home/End the pane), leaving the strip alone;
 clicking a tile in column 0 hands the keyboard back. A re-render of the pane keeps the keyboard where it was, so a
 re-group does not silently move your arrows to the other column.
-| **Ctrl+A** | selects everything laid out |
 
 The keys are bound to the list itself, never to the whole application, so typing in the prompt box or in the View All
 search field is untouched. A click puts the cursor where the mouse is and hands the list the keyboard; movement scrolls
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
+
+### Tab, F6 and Alt+letter (2026-10-30)
+
+An audit against Microsoft's Windows keyboard guidance
+([interaction basics](https://learn.microsoft.com/en-us/windows/apps/design/input/keyboard-accelerators),
+[access keys](https://learn.microsoft.com/en-us/windows/apps/design/input/access-keys),
+[tab and arrow keys](https://learn.microsoft.com/en-us/windows/apps/design/input/keyboard-interactions)) found four
+gaps. All four are closed, and each is asserted in `test_gallery_ui.py` against the real window:
+
+| gap | what the window does now |
+|---|---|
+| a tile was a mouse target, not a tab stop | every strip tile, pane tile and folder tile has `takefocus=1`, so Tab reaches it; one stop per folder, on the tile's own frame |
+| no visible focus, so a keyboard user could not see where they were | `FocusIn` rings the tile in `theme.accent` and `FocusOut` gives the colour back; `_paint` re-applies the ring, because it rewrites every tile's highlight on each selection change |
+| nothing activated a focused tile | **Enter** or **Space** on the focused tile does what the list's own Enter does: load the picture, or open the folder |
+| no way to move between the panes | **F6** / **Shift+F6** cycle folder column -> picture pane -> prompt box, skipping a pane that is not on screen (the pane when no folder is open, the column when the sidebar is collapsed) and coming back to the tile you left |
+| no mnemonics | **Alt+letter** for the twelve primary commands, with the letter underlined in the control |
+
+**Tab walks a list in visual order** (`_tab_in_list`), not in Tk's creation order, and at either end it returns `None`
+so Tk's own traversal takes over and Tab can leave the list - the APG rule that a grid is entered and left with Tab.
+
+| key | command |
+|---|---|
+| **Alt+O** | Open… another folder to look at (also Ctrl+O) |
+| **Alt+F** | folders: group the pictures, or stop grouping |
+| **Alt+R** | rephrase the prompt |
+| **Alt+G** | Generate (Enter in the box does the same) |
+| **Alt+U** | Use as Base |
+| **Alt+C** | Clear Base |
+| **Alt+I** | Describe the shown picture |
+| **Alt+A** | Describe all… |
+| **Alt+B** | A/B… the open folder |
+| **Alt+L** | Gallery… walk the folder one picture at a time |
+| **Alt+S** | Select all |
+| **Alt+D** | Delete… (still asks, still reversible) |
+
+The letters are the ones the controls already contain, so the underline lands on a letter that is there: `Use as Base`
+underlines **U**, `A/B…` underlines **B**, `Describe all…` underlines the **a**. Tk 8.6's `-underline` works on
+`ttk.Button` as well as `tk.Button` (verified on the `vista` theme: two identical buttons, one with `-underline=2`,
+render differently), so the control itself shows the letter; the same key is also named in the control's tooltip. Alt
+combinations are not text, so the prompt box keeps every character it types - and **Ctrl+Alt is ignored**, because that
+is AltGr on a European layout and AltGr+letter is a character, not a command. No letter is bound bare: `root.bind` for
+`<KeyPress-g>` and the other eleven stays empty.
+
+`Reset wins in this folder` is destructive in a way nothing else in that window is, so it now asks first, in the same
+wording as the delete confirmation; see the ranking section above.
+
+The headless checks for all of this (877 in the last run) record `focus_set`/`invoke` instead of moving the real
+keyboard, so no dialog is opened: a tile reports `takefocus` and a focus handler, `FocusIn` paints the accent and a
+repaint keeps it, Tab steps to the next tile in list order, F6 and Shift+F6 move between the three panes, each Alt+key
+runs its own command and a disabled one stays disabled.
 
 ## How much do seeds actually vary? (`variety_probe.py`)
 
