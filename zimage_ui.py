@@ -2887,8 +2887,12 @@ class App:
                     # and the group's label says where it came from.
                     topic = (meta.get('topic') or '').strip()
                     prompt = ' '.join(x for x in (topic, (meta.get('caption') or '').strip()) if x)
+                # the chain travels with the picture: a folder is a *family* that follows where the series started, so
+                # grouping needs the root and the steps, not just the prompt of the moment (it ran without them once and
+                # every series split into a folder of its own instruction)
                 rows.append({'path': str(path), 'prompt': prompt,
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
+                             'root': meta.get('lineage_root'), 'lineage': meta.get('lineage'),
                              'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
             plan = group_prompts.plan(rows, keep_lexicon=True)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
