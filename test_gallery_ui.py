@@ -74,6 +74,7 @@ class _SheetShim:
     _signature = zui.App._signature
     _different = zui.App._different
     _wins_of = zui.App._wins_of
+    _thumb_root = lambda self: None       # the shim's pictures are temp files: cache beside them, as for the output folder
     _sheet_paths = zui.App._sheet_paths
 
 
@@ -956,6 +957,61 @@ def main():
     app.review_back()
     check('with nothing to go back to it says so', 'nothing to go back' in app.hint['text'], app.hint['text'][:40])
     app._review = None
+
+    print('\n-- another folder can be viewed while renders keep their own output folder')
+    src_out = Path(tempfile.mkdtemp(prefix='src-out-'))
+    src_foreign = Path(tempfile.mkdtemp(prefix='src-foreign-'))
+    for i in range(2):
+        p = src_out / ('own%d.png' % i); Image.new('RGB', (64, 64), (40 * i, 90, 150)).save(p)
+        p.with_suffix('.json').write_text(json.dumps({'prompt': 'own study', 'seed': i, 'steps': 4,
+                                                      'cfg': 1.0, 'size': 512}), encoding='utf-8')
+    for name in ('x.jpg', 'y.webp', 'z.png'):
+        Image.new('RGB', (64, 64), (30, 200, 30)).save(src_foreign / name)
+    (src_foreign / 'sub').mkdir()
+    Image.new('RGB', (64, 64), (0, 0, 220)).save(src_foreign / 'sub' / 'deep.png')
+
+    was_source, was_out = app._source, app.args.out
+    app.set_source(src_foreign); root.update()
+    check('the view follows the new folder', sorted(Path(p).name for p in app._files) == ['x.jpg', 'y.webp', 'z.png'],
+          str(sorted(Path(p).name for p in app._files)))
+    check('a foreign dump is listed whatever its extension', len(app._files) == 3, str(len(app._files)))
+    check('renders still go to the output folder', Path(app.args.out) == Path(was_out), str(app.args.out))
+    check('recursion starts off', app._recursive is False, str(app._recursive))
+    app.toggle_recursive(True); root.update()
+    check('asked for, the walk finds the subfolder too', any('deep.png' == Path(p).name for p in app._files),
+          str(sorted(Path(p).name for p in app._files)))
+    app.set_source(src_foreign); root.update()
+    check('re-opening a folder does not remember recursion', app._recursive is False, str(app._recursive))
+    check('a foreign source caches thumbs in app data', app._thumb_root() is not None
+          and 'zimage-ui' in str(app._thumb_root()), str(app._thumb_root()))
+    foreign_pic = next(p for p in app._files if Path(p).name == 'z.png')
+    thumb = zui.thumb_for(foreign_pic, cache_root=app._thumb_root())
+    check('the thumbnail is built', thumb is not None and Path(thumb).exists(), str(thumb))
+    check('and nothing is written into that folder', not (src_foreign / zui.THUMB_DIR).exists(),
+          str((src_foreign / zui.THUMB_DIR)))
+    app.close_source(); root.update()
+    check('closing returns to the output folder', Path(app._source) == Path(was_out), str(app._source))
+    check('where thumbnails live beside the pictures again', app._thumb_root() is None, str(app._thumb_root()))
+
+    print('\n-- deleting in someone else\'s folder is recycle-or-nothing')
+    app.set_source(src_foreign); root.update()
+    victim_foreign = next(p for p in app._files if Path(p).name == 'z.png')
+    app.selected = [victim_foreign]
+    app._paint()
+    hard, real_recycle2, real_delete_one = [], app._recycle_files, app._delete_one
+    app._recycle_files = lambda files: False
+    app._delete_one = lambda p: (hard.append(p), False)[1]
+    from tkinter import messagebox as _mb2
+    real_ask2 = _mb2.askyesno
+    _mb2.askyesno = lambda *a, **k: True
+    try:
+        app.delete_selected(); root.update()
+    finally:
+        app._recycle_files, app._delete_one, _mb2.askyesno = real_recycle2, real_delete_one, real_ask2
+    check('the file is still there when the Bin refuses', victim_foreign.exists(), 'deleted anyway')
+    check('no hard delete was attempted', hard == [], str(hard))
+    check('and the window says so', 'could not be recycled' in app.hint['text'], app.hint['text'][:60])
+    app.close_source(); app.selected = []; app.refresh_gallery(); app.busy = False
 
     print('\n-- Recover rebuilds missing metadata for the open folder')
     rec_dir = Path(tempfile.mkdtemp(prefix='recover-ui-'))

@@ -666,6 +666,22 @@ measured membership check and is not bent for a display convenience.
 A base picked any other way (typed path, clipboard, chain) leaves the folder alone - the behaviour is only for the case it
 was asked for.
 
+## Looking at another folder (source vs output)
+
+Renders are written to `--out`. What the window *looks at* is now a separate thing, `self._source`, so a folder from
+another pipeline can be browsed, categorised, reviewed and captioned without any render landing in it:
+
+| concern | behaviour |
+|---|---|
+| the view | scans, grouping, the pane, the viewer and the A/B review follow the **source** |
+| the writes | renders, masks, crops, previews and "open the folder" keep using **`--out`** |
+| the chip | a *viewing \<folder\> ×* label appears in the folder bar whenever the source is not the output folder; `×` returns to it |
+| extensions | `.png`, `.webp`, `.jpg`, `.jpeg` - a foreign dump used to be invisible unless it was PNG |
+| **unfiled** | pictures with no prompt get their own bucket, because they can never be in a prompt folder and were otherwise unreachable while folders were on |
+| recursion | **off by default and never remembered**: `subfolders` is a mode you ask for, and re-opening a folder resets it to off. The walk skips `.thumbs`, `.masks`, `.previews` and dotted directories, dedupes by real path (junctions), and stops at `SCAN_CAP = 5000` saying so |
+| **deleting there** | enabled, logged as deliberate, and **Recycle Bin or nothing**: the hard-delete fallback that `--out` keeps is disabled for any other folder, so a refused Bin leaves the file alone and the window says so |
+| **thumbnails** | beside the picture when the source *is* the output folder (unchanged, self-contained); in app data keyed by the source's real path for any other folder, so nothing is written into someone else's. The cache key inside a shared cache is `stem-<hash of the path>`, because under recursion `a/foo.png` and `b/foo.png` would otherwise share a thumbnail. A thumbnail costs **20.3 ms** to build (measured), so the cache is not optional: 5,000 pictures would be ~100 s without it |
+
 ## Recovering metadata from the pictures themselves
 
 Pictures from **any ComfyUI graph** carry the executed graph in their PNG `prompt` tEXt chunk, and **A1111/Forge** pictures

@@ -628,6 +628,7 @@ def save_settings(data):
 
 
 THUMB_DIR = '.thumbs'
+SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
 THUMB_PX = 168
 RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
 RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
@@ -682,7 +683,13 @@ def thumb_for(png, cache_root=None):
     root = Path(cache_root) if cache_root else png.parent
     cache = root / THUMB_DIR
     cache.mkdir(parents=True, exist_ok=True)
-    out = cache / (png.stem + '.jpg')
+    # a shared cache is keyed by the picture's own path, not just its stem: with recursion, a/foo.png and b/foo.png
+    # would otherwise show each other's thumbnail. Beside the picture, the stem is already unique.
+    if cache_root:
+        tag = hashlib.sha1(str(png.resolve()).lower().encode('utf-8')).hexdigest()[:10]
+        out = cache / ('%s-%s.jpg' % (png.stem, tag))
+    else:
+        out = cache / (png.stem + '.jpg')
     try:
         if out.exists() and out.stat().st_mtime >= png.stat().st_mtime:
             return out
@@ -1501,6 +1508,10 @@ class App:
         self._base_from_gallery = False   # True only when a click in the gallery chose the base
         self._current = None
         self._files = []
+        # what we look at (source) and what we write to (args.out) are the same folder until somebody opens another one
+        self._source = Path(self.args.out)
+        self._recursive = False      # never remembered: a mode you ask for, not a property of a folder
+        self._scan_capped = False
         self._sheet = None            # {'cols','rows','tiles'} while a contact sheet is on screen
         self._draw = None             # (x0, y0, w, h) of the drawn image on the canvas
 
@@ -2160,26 +2171,114 @@ class App:
             pass
 
     # -- gallery: thumbnails -------------------------------------------------
-    def _scan(self):
-        """One directory read: (path, mtime) for every png, newest first.
+    IMAGE_SUFFIXES = ('.png', '.webp', '.jpg', '.jpeg')
 
-        The filter and the cache check both need the mtime, so scanning once beats stat-ing each file twice.
+    def _thumb_root(self):
+        """Where thumbnails for the current source belong: None for "beside the picture", else a cache folder.
+
+        Beside the picture is right for our own output folder - the folder stays self-contained and the existing delete
+        path knows where to look. Any other folder is somebody else's, possibly read-only or on a network, so its
+        thumbnails go to app data under a key derived from the source's real path.
         """
-        out = Path(self.args.out)
+        try:
+            if Path(self._source).resolve() == Path(self.args.out).resolve():
+                return None
+        except OSError:
+            return None
+        import hashlib as _h
+        base = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'zimage-ui' / 'thumbs'
+        tag = _h.sha1(str(Path(self._source).resolve()).lower().encode('utf-8')).hexdigest()[:12]
+        return base / tag
+
+    def set_source(self, path):
+        """Look at another folder - view it, categorise it, review it - while renders keep going to the output folder.
+
+        Recursion is reset to off on purpose: it is a mode you ask for, never a property of a folder, so coming back to a
+        folder cannot silently start walking a tree again.
+        """
+        target = Path(path)
+        if not target.is_dir():
+            self.hint.configure(text='%s is not a folder' % (target.name or target))
+            return False
+        same = False
+        try:
+            same = target.resolve() == Path(self._source).resolve()
+        except OSError:
+            pass
+        self._source = target
+        self._recursive = False
+        self._scan_capped = False
+        self._heads.clear()
+        self._wins_cache = {}
+        self._plan = None
+        self._active_folder = None
+        if not same:
+            self.hint.configure(text='viewing %s  \u00b7  renders still go to %s'
+                                     % (self._short_name(target.name), self._short_name(Path(self.args.out).name)))
+        self.refresh_gallery()
+        if hasattr(self, 'group_var') and self.group_var.get():
+            self._regroup_soon()
+        return True
+
+    def close_source(self):
+        """Back to the folder this window writes to."""
+        return self.set_source(self.args.out)
+
+    def _is_output_source(self):
+        try:
+            return Path(self._source).resolve() == Path(self.args.out).resolve()
+        except OSError:
+            return True
+
+    def _scan(self, recursive=None):
+        """(path, mtime) for every picture in the *source*, newest first.
+
+        The source is what the window looks at; `args.out` is where renders are written. They are the same folder by
+        default and stop being the same the moment somebody opens another folder to view or categorise it.
+
+        Recursion is off unless asked: it is a deliberate mode, and it resets on every source change, so returning to a
+        folder never silently walks a tree again. Skipped while walking: the app's own caches and any dotted directory.
+        """
+        out = Path(getattr(self, '_source', None) or self.args.out)
+        walk = bool(self._recursive) if recursive is None else bool(recursive)
         if not out.exists():
             return []
         rows, meta_mtimes = [], {}
+        seen = set()
+
+        def take(folder):
+            try:
+                with os.scandir(folder) as it:
+                    for entry in it:
+                        low = entry.name.lower()
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                continue
+                            if low.endswith('.json') and Path(folder) == out:
+                                meta_mtimes[Path(entry.name).stem] = entry.stat().st_mtime
+                            elif low.endswith(self.IMAGE_SUFFIXES) and entry.is_file():
+                                real = os.path.realpath(entry.path).lower()
+                                if real in seen:
+                                    continue           # the same file through two paths (junction, symlink)
+                                seen.add(real)
+                                rows.append((Path(entry.path), entry.stat().st_mtime))
+                        except OSError:
+                            continue
+            except OSError:
+                return
+
         try:
-            with os.scandir(out) as it:
-                for entry in it:
-                    low = entry.name.lower()
-                    try:
-                        if low.endswith('.json'):
-                            meta_mtimes[Path(entry.name).stem] = entry.stat().st_mtime
-                        elif low.endswith('.png') and entry.is_file():
-                            rows.append((Path(entry.path), entry.stat().st_mtime))
-                    except OSError:
-                        continue
+            take(out)
+            if walk:
+                for dirpath, dirnames, filenames in os.walk(out):
+                    dirnames[:] = sorted(d for d in dirnames
+                                         if not d.startswith('.') and d.lower() not in
+                                         (THUMB_DIR.lower(), '.masks', '.previews'))
+                    if Path(dirpath) != out:
+                        take(dirpath)
+                    if len(rows) >= SCAN_CAP:
+                        self._scan_capped = True
+                        break
         except OSError:
             return []
         rows.sort(key=lambda r: -r[1])
@@ -2513,6 +2612,12 @@ class App:
                 rows.append({'path': str(path), 'prompt': meta.get('prompt') or '',
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds')})
             plan = group_prompts.plan(rows, keep_lexicon=True)
+            # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
+            # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
+            unfiled = [row for row in (plan.get('ungrouped') or []) if row.get('path')]
+            if unfiled:
+                plan.setdefault('groups', []).append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,
+                                                      'oldest': None, 'newest': None, 'synthetic': True})
             plan['seconds'] = round(time.time() - started, 2)
             self.ui_events.put(('groups', plan))
         except Exception as e:
@@ -2548,10 +2653,11 @@ class App:
         # re-selected the folder (reported 2026-10-28). Re-render here so the plan and the pane cannot disagree.
         if self._active_folder is not None:
             self._render_contents()
+        synthetic = sum(len(g.get('items') or []) for g in plan['groups'] if g.get('synthetic'))
+        total = (sum(len(g.get('items') or []) for g in plan['groups']) - synthetic
+                 + len(plan.get('ungrouped') or []) + len(plan.get('recent') or []))
         self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
-                              % (len(plan['groups']), len(plan['recent']) + len(plan['groups']) and
-                                 sum(len(g['items']) for g in plan['groups']) + len(plan['ungrouped']) + len(plan['recent']),
-                                 plan.get('seconds') or 0, len(plan['recent'])))
+                              % (len(plan['groups']), total, plan.get('seconds') or 0, len(plan['recent'])))
 
     def _show_new_results(self):
         """Make a just-made picture visible when a folder is open.
@@ -2576,6 +2682,19 @@ class App:
                                  'to show them - the folder bar opens it again')
         return True
 
+    def toggle_recursive(self, force=None):
+        """Walk into subfolders, or stop. Resets whenever the source changes."""
+        self._recursive = bool(self.recursive_var.get()) if force is None else bool(force)
+        self._scan_capped = False
+        self._heads.clear()
+        self.refresh_gallery()
+        if self._recursive:
+            found = len(self._files)
+            self.hint.configure(text='walking subfolders: %d picture%s%s'
+                                     % (found, '' if found == 1 else 's',
+                                        ' (stopped at %d)' % SCAN_CAP if self._scan_capped else ''))
+        return self._recursive
+
     def _render_folder_bar(self):
         """A folder *button*, not a dropdown: it names what is open and it opens the full-screen folder browser.
 
@@ -2591,12 +2710,21 @@ class App:
             return
         if not self._plan:
             return
+        # the source chip: a looked-at folder and a written-to folder must never be confusable
+        if not self._is_output_source():
+            ttk.Label(self.folder_bar, text='viewing', foreground=self.theme.muted).pack(side='left', padx=(0, 3))
+            ttk.Label(self.folder_bar, text=self._short_name(self._source.name)[:22],
+                      foreground=self.theme.accent).pack(side='left')
+            ttk.Button(self.folder_bar, text='\u00d7', width=2, command=self.close_source).pack(side='left', padx=(3, 8))
         self._folder_choices = [None] + list(range(len(self._plan['groups'])))
         name = 'All folders' if self._active_folder is None else self._folder_text(self._active_folder)
         self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s\u2026' % name, width=17,
                                           command=self.open_folder_browser)
         self.folder_pick_btn.pack(side='left')
         ttk.Button(self.folder_bar, text='A/B\u2026', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
+        self.recursive_var = tk.BooleanVar(value=bool(self._recursive))
+        ttk.Checkbutton(self.folder_bar, text='subfolders', variable=self.recursive_var,
+                        command=self.toggle_recursive).pack(side='left', padx=(8, 0))
         if getattr(self, '_prediction', None):
             label = ttk.Label(self.folder_bar, text='\u2192 %s' % shorten_title(self._prediction['label'], 5),
                               foreground=self.theme.accent, font=('Segoe UI', 8))
@@ -2653,7 +2781,7 @@ class App:
 
         def picture_tile(parent, item, size):
             path = item['path']
-            tp = thumb_for(path)
+            tp = thumb_for(path, cache_root=self._thumb_root())
             if not tp:
                 return tk.Label(parent, text=path.name[:18], width=12, height=6,
                                 background=self.theme.window, foreground=self.theme.muted)
@@ -3327,7 +3455,7 @@ class App:
         if path in self._hashes:
             return self._hashes[path]
         value = None
-        thumb = thumbs_for([path]).get(path)
+        thumb = thumbs_for([path], cache_root=self._thumb_root()).get(path)
         if thumb:
             try:
                 from PIL import Image as _I
@@ -3443,7 +3571,7 @@ class App:
         # the gutter is what draws the 1 px line between the four pictures when the tile is selected
         sheet = _I.new('RGB', (size, size), gutter or self.theme.sheet_bg)
         paths = list(head)
-        thumbs = thumbs_for(paths)
+        thumbs = thumbs_for(paths, cache_root=self._thumb_root())
         for i, path in enumerate(paths):
             tp = thumbs.get(path)
             if not tp:
@@ -3491,7 +3619,7 @@ class App:
         # corpus statistics, newest first, and marks them so the folder's own membership stays honest.
         try:
             import group_prompts as _gp
-            fresh = _gp.live_append(group, self._plan) if self._plan else []
+            fresh = _gp.live_append(group, self._plan) if (self._plan and not group.get('synthetic')) else []
         except Exception:
             fresh = []
         fresh_rows = []
@@ -3526,7 +3654,7 @@ class App:
             order = pair_rank.sort_by_strength([r['path'] for r in items])
             pos = {p: i for i, p in enumerate(order)}
             items.sort(key=lambda r: pos.get(r['path'], len(items)))
-        thumbs = thumbs_for([r['path'] for r in items])
+        thumbs = thumbs_for([r['path'] for r in items], cache_root=self._thumb_root())
         order = []                                  # the pane's own display order, for its keyboard
         for i, row in enumerate(items[:self._content_shown]):
             tp = thumbs.get(row['path'])
@@ -3784,7 +3912,7 @@ class App:
             return                 # action row disabled while `selected` held the path
         self.gal_title.configure(text=label)
         cols, tile_px = self._strip_metrics()
-        thumbs = thumbs_for(recent) if recent else {}
+        thumbs = thumbs_for(recent, cache_root=self._thumb_root()) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
@@ -5255,9 +5383,15 @@ class App:
         recycled = self._recycle_files(files)
         gone = [p for p in paths if not p.exists()]
         if len(gone) < len(paths):
-            # the shell would not take them (off-volume path, or no recycle bin): hard delete what is left
-            gone += [p for p in paths if p.exists() and self._delete_one(p)]
-            recycled = False
+            if self._is_output_source():
+                # our own folder: the shell would not take them (off-volume path, or no recycle bin), so hard delete
+                gone += [p for p in paths if p.exists() and self._delete_one(p)]
+                recycled = False
+            else:
+                # somebody else's folder: a hard delete is never the fallback there. If the Bin refused, the delete
+                # fails and says so - the file stays.
+                self.hint.configure(text='%d of %d could not be recycled from %s - nothing was deleted'
+                                         % (len(paths) - len(gone), len(paths), self._short_name(self._source.name)))
         base_gone = self.base_path is not None and any(
             p.name == self.base_path.name for p in paths)
         if base_gone:
@@ -5393,7 +5527,7 @@ class App:
 
         def make_tile(parent, item, size):
             path = item['path']
-            tp = thumb_for(path)
+            tp = thumb_for(path, cache_root=self._thumb_root())
             if not tp:
                 return tk.Label(parent, text=path.name[:12], width=8, height=4,
                                 background=self.theme.window, foreground=self.theme.muted)
