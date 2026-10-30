@@ -1732,7 +1732,7 @@ hides itself when everything fits. *Select all* therefore covers 18; use **Moreâ
 There is no undo inside the window, but the delete itself is reversible in Explorer's Recycle Bin.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
-carrying the same state bits Tk sends), asserts 877 selection, delete, accessibility and older-control checks, and
+carrying the same state bits Tk sends), asserts 883 selection, delete, accessibility and older-control checks, and
 screenshots each state: `python test_gallery_ui.py --shots <dir>`.
 
 ### Keyboard in the gallery
@@ -1810,10 +1810,27 @@ is AltGr on a European layout and AltGr+letter is a character, not a command. No
 `Reset wins in this folder` is destructive in a way nothing else in that window is, so it now asks first, in the same
 wording as the delete confirmation; see the ranking section above.
 
-The headless checks for all of this (877 in the last run) record `focus_set`/`invoke` instead of moving the real
+The headless checks for all of this (883 in the last run) record `focus_set`/`invoke` instead of moving the real
 keyboard, so no dialog is opened: a tile reports `takefocus` and a focus handler, `FocusIn` paints the accent and a
 repaint keeps it, Tab steps to the next tile in list order, F6 and Shift+F6 move between the three panes, each Alt+key
 runs its own command and a disabled one stays disabled.
+
+**Opening a folder keeps the strip's place, measured.** Chasing a failure that appeared in one run of five
+(`opening a folder leaves the list where it was  FAIL  3410.0 -> 0.0 px`) turned up a stale measurement rather than a
+scroll bug: `_apply_strip_resize` ran 50 ms after a rebuild and read `bbox('all')` while the inner frame was populated
+but **not yet laid out**, so it installed a 624 px scrollregion over 9744 px of content and Tk clamped the view to the
+top. It now forces the layout first (`update_idletasks`, the same pass `_scroll_folder_into_view` already makes for this
+exact trap) and re-installs the pixel offset if a region still clamps it. Deterministic in isolation (3/3 failing before,
+3/3 passing after); in the suite it failed or passed purely on whether the idle layout pass beat the timer.
+
+**A window that goes away cancels its own timers.** Pending `after` scripts surfaced as
+`invalid command name "..._apply_strip_resize"` / `"...probe_llm"` / `"<lambda>"` through `bgerror` *after* the run
+finished: **19 such lines per suite run before this pass, 0 in five consecutive runs after**. The fix is not a blanket
+`after info` sweep - cancelling a job another widget scheduled leaves that widget's command list pointing at a deleted
+command, and its `destroy()` then fails with `can't delete Tcl command` (which is exactly how the first attempt broke the
+teardown) - but a set of ids this window scheduled (`_idle`/`_later`), plus the named debounces, plus a `_closing` flag
+so a handler that is already in flight declines to schedule more, plus a `_retitle` retry that is cancelled when the
+dialog it belongs to is destroyed.
 
 ## How much do seeds actually vary? (`variety_probe.py`)
 

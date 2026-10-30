@@ -381,10 +381,24 @@ class Theme:
         except Exception:
             pass
         try:
-            target.after(250, lambda: self._apply_titlebar(target))
+            # The retry is scheduled *on the window*, so it has to be cancelled when the window goes: a timer whose
+            # command was deleted with its widget comes back as `invalid command name "<lambda>"` through bgerror, and
+            # the dialogs in the suite are destroyed well inside 250 ms.
+            job = target.after(250, lambda: self._apply_titlebar(target))
+            target.bind('<Destroy>', lambda e, j=job: self._cancel_after(target, e, j), add='+')
         except Exception:
             pass
         return applied
+
+    @staticmethod
+    def _cancel_after(target, event, job):
+        """Drop one pending retry for a window that is going away (and ignore its children's own destroys)."""
+        if getattr(event, 'widget', None) is not target:
+            return
+        try:
+            target.after_cancel(job)
+        except Exception:
+            pass
 
     def _apply_titlebar(self, window=None):
         """Win32 title bar, done the way Windows does it: dark mode, and the accent when the user asked for it there.
@@ -1626,6 +1640,8 @@ class App:
         self._tips = []                   # populated as widgets appear, not in one later pass
         self._focus_tile = None           # the tile holding the keyboard, so a repaint can re-ring it
         self._region_last = {}            # 'folders'/'pictures' -> the widget F6 came back to
+        self._timers = set()              # after/after_idle ids this window owns, cancelled when it goes away
+        self._closing = False             # set by <Destroy>, so nothing schedules new work on a dying window
         self._poll_id = None
         self.ui_events = queue.Queue()    # results from worker threads (the prompt enhancer)
         self._settings = load_settings()
@@ -1689,7 +1705,7 @@ class App:
             root.state('zoomed')   # fill the screen: prompt left, picture right
         except Exception:
             root.geometry('1180x720')
-        root.after(150, self._ensure_maximized)
+        self._later(150, self._ensure_maximized)
         # gallery + prompt column + picture: the controls need ~1200 before the picture column can hold its buttons
         root.minsize(1200, 700)
         root.columnconfigure(0, weight=0, minsize=210)
@@ -2345,14 +2361,14 @@ class App:
 
         if not self._sidebar:
             self.set_sidebar(False)
-        root.after(400, self.probe_llm)
+        self._later(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         self._poll()
         # Folders are the default view. Grouping reads a sidecar per picture, so it waits for the window to exist and
         # for the first paint instead of running during construction.
         if self.group_var.get():
-            self.root.after_idle(lambda: self.toggle_groups(True) if not self._plan else None)
+            self._idle(lambda: self.toggle_groups(True) if not self._plan else None)
 
     def _ensure_maximized(self):
         """Ask again once the window is mapped.
@@ -2954,7 +2970,7 @@ class App:
         Debounced because a batch or a 16-up sheet arrives as several events; grouping 1,800 prompts costs ~2.4 s, which
         belongs on a worker, not in the event loop.
         """
-        if not self.group_var.get():
+        if not self.group_var.get() or getattr(self, '_closing', False):
             return
         if getattr(self, '_regroup_job', None):
             try:
@@ -3131,7 +3147,8 @@ class App:
         lbl = getattr(self, 'loading_lbl', None)
         # "active", not "mapped": place() does not map until the next update, so asking about mapping made the first tick
         # give up and never reschedule - the notice sat still saying "Loading"
-        if lbl is None or not lbl.winfo_exists() or not getattr(self, '_loading_active', False):
+        if (lbl is None or not lbl.winfo_exists() or not getattr(self, '_loading_active', False)
+                or getattr(self, '_closing', False)):
             self._loading_job = None
             return
         step = self._loading_step % 8
@@ -3203,7 +3220,7 @@ class App:
         from PIL import ImageTk
 
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         self._folder_win = win
         win.title('Prompt folders (%d)' % len(self._plan['groups']))
         try:
@@ -3324,7 +3341,7 @@ class App:
             self._folder_shown = index + 1
             self._render_folder_tiles()
         self._see_pending = index
-        self.root.after_idle(lambda: self.refresh_gallery())
+        self._idle(lambda: self.refresh_gallery())
 
     def _scroll_folder_into_view(self, index, _retry=True):
         """Scroll the strip to `index`, refreshing the scrollregion first.
@@ -3335,9 +3352,11 @@ class App:
         """
         def again():
             # one retry is not enough: the strip rebuilds after the selection, and the batch may not even exist yet
-            if _retry:
-                self.root.after(80, lambda: self._scroll_folder_into_view(index, False))
+            if _retry and not getattr(self, '_closing', False) and self._alive():
+                self._later(80, self._scroll_folder_into_view, index, False)
 
+        if getattr(self, '_closing', False) or not self._alive():
+            return
         tiles = [w for w in self.recent.winfo_children() if w.grid_info()]
         if index >= len(tiles):
             if index >= self._folder_shown:
@@ -3459,7 +3478,7 @@ class App:
             self._review['win'].lift()
             return
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         win.title('A/B review - %s' % label[:50])
         try:
             win.state('zoomed')
@@ -4026,7 +4045,7 @@ class App:
                 canvas.yview_moveto(pos)
             except Exception:
                 pass
-        self.root.after_idle(restore)
+        self._idle(restore)
 
     def toggle_options(self, force=None):
         """Fold the column's configuration away, or bring it back.
@@ -4426,9 +4445,9 @@ class App:
         self._rebuilding = False
         if had_focus:
             # a re-render must not hand the keyboard to the strip: the reader was working in this pane
-            self.root.after_idle(lambda: self.contents_canvas.focus_set())
-        self.root.after_idle(self._on_contents_resize)
-        self.root.after_idle(lambda: self._fill_view('contents'))
+            self._idle(lambda: self.contents_canvas.focus_set())
+        self._idle(self._on_contents_resize)
+        self._idle(lambda: self._fill_view('contents'))
         if pane_pos:
             self._restore_scroll(self.contents_canvas, pane_pos)
         else:
@@ -4439,7 +4458,7 @@ class App:
         self._maybe_more('strip')
 
     def _on_contents_resize(self, event=None):
-        if getattr(self, '_rebuilding', False):
+        if getattr(self, '_rebuilding', False) or not self._alive():
             return
         width = self.contents_canvas.winfo_width()
         cols = max(3, int((max(width, 1) - 8) // (STRIP_TILE_MIN + 6)))
@@ -4616,8 +4635,8 @@ class App:
             tile.bind('<Tab>', lambda e, w=tile: self._tab_in_list(1, w))
             tile.bind('<Shift-Tab>', lambda e, w=tile: self._tab_in_list(-1, w))
         self._paint_folder_cursor()
-        self.root.after_idle(self._on_strip_resize)
-        self.root.after_idle(lambda: self._fill_view('strip'))
+        self._idle(self._on_strip_resize)
+        self._idle(lambda: self._fill_view('strip'))
 
     def _folder_clicked(self, index):
         """A click on a folder tile: open it, park the keyboard cursor on it, and hand the strip the arrows.
@@ -4654,6 +4673,8 @@ class App:
         return self._strip_metrics()[0]
 
     def refresh_gallery(self, select=None):
+        if getattr(self, '_closing', False) or not self._alive():
+            return                       # the window is on its way out: painting it now is a bgerror, not a repaint
         strip_pos = self._scroll_pos(self.gal_canvas)
         self._rebuilding = True          # <Configure> mid-rebuild would see an empty container and clamp the view
         try:
@@ -4665,7 +4686,7 @@ class App:
         pending = getattr(self, '_see_pending', None)
         if pending is not None:
             self._see_pending = None
-            self.root.after_idle(lambda i=pending: self._scroll_folder_into_view(i))
+            self._idle(lambda i=pending: self._scroll_folder_into_view(i))
         else:
             self._restore_scroll(self.gal_canvas, strip_pos)
 
@@ -4751,6 +4772,8 @@ class App:
         Applying them immediately made the scroll region collapse to a few pixels, and Tk then clamped the view to the
         top - which is what lost the reader's place when a picture in the other column was selected.
         """
+        if getattr(self, '_closing', False):
+            return
         if getattr(self, '_strip_job', None):
             try:
                 self.root.after_cancel(self._strip_job)
@@ -4760,18 +4783,33 @@ class App:
 
     def _apply_strip_resize(self):
         self._strip_job = None
+        if not self._alive():
+            return
         cols, tile = self._strip_metrics()
         if (cols, tile) != getattr(self, '_strip_cols_seen', None):
             self._strip_cols_seen = (cols, tile)
-            if self._tile_widgets:
-                self.root.after_idle(self.refresh_gallery)   # the tile grid follows the width
+            if self._tile_widgets and not getattr(self, '_closing', False):
+                self._idle(self.refresh_gallery)   # the tile grid follows the width
                 return
-        box = self.gal_canvas.bbox('all')
+        # Measure a real layout, not a stale bbox. This runs 50 ms after a rebuild, and at that instant the inner frame
+        # is populated but not yet laid out: `bbox('all')` answers a few hundred pixels while the canvas still believes
+        # the list is thousands tall. Installing that short region clamps the view to the top, which is the "opening a
+        # folder moves the list" bug - measured 3410 px -> 0 px, and it depends only on whether the idle layout pass
+        # ran before the timer, which is why it failed one suite run in five. `_scroll_folder_into_view` already forces
+        # the layout for exactly this reason.
+        try:
+            self.recent.update_idletasks()
+            self.gal_canvas.update_idletasks()
+        except Exception:
+            pass
+        canvas = self.gal_canvas
+        top = canvas.canvasy(0)          # the reader's place, in pixels, before the region is touched
+        box = canvas.bbox('all')
         if box:
-            self.gal_canvas.configure(scrollregion=box)
-        self.gal_canvas.itemconfigure(self._gal_item, width=self.gal_canvas.winfo_width())
+            canvas.configure(scrollregion=box)
+        canvas.itemconfigure(self._gal_item, width=canvas.winfo_width())
         content_h = (box[3] - box[1]) if box else 0
-        need = content_h > self.gal_canvas.winfo_height() + 1
+        need = content_h > canvas.winfo_height() + 1
         if need:
             self.gal_bar.grid()
         else:
@@ -4779,6 +4817,14 @@ class App:
             # momentarily a few pixels tall, and treating that as "everything fits" snapped the list back to the top
             # (reported 2026-10-27). Tk clamps the view anyway when the content really is shorter than the viewport.
             self.gal_bar.grid_remove()
+        # A region that is still short (a rebuild in flight) must not take the reader's place with it. `top < content_h`
+        # is the sanity check: if the place we want is past the end of the region we just installed, the region is the
+        # thing that is wrong, and jumping to a clamp of our own would be a second lie rather than a restoration.
+        try:
+            if 1 < top < content_h and canvas.canvasy(0) < top - 1:
+                canvas.yview_moveto(min(1.0, top / float(content_h)))
+        except Exception:
+            pass
 
     def _strip_has_focus(self):
         """True only when the keyboard is actually on the strip, not merely because a binding exists."""
@@ -5134,7 +5180,7 @@ class App:
             return False
         self._strength_programmatic = value
         self.denoise.set(value)
-        self.root.after_idle(self._clear_programmatic_strength)
+        self._idle(self._clear_programmatic_strength)
         return True
 
     def _clear_programmatic_strength(self):
@@ -5511,6 +5557,8 @@ class App:
 
     def probe_llm(self):
         """Ask the configured endpoint whether it is there, once, in the background."""
+        if not self._alive():
+            return                      # a window that went away while the timer ran has nothing to say
         url = self._local_llm_url(silent=True)
         if not url:
             self._llm_ok = False
@@ -5875,7 +5923,7 @@ class App:
 
     def show_run_log(self):
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         win.title('Run log - this session')
         win.geometry('760x320')
         cols = ('time', 'file', 'seed', 'model', 'style', 'wall')
@@ -5941,7 +5989,7 @@ class App:
         """Show the ComfyUI workflow the last run actually sent - the SwarmUI "look inside" trick."""
         wf = getattr(self.engine, 'last_workflow', None)
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         win.title('Workflow sent to ComfyUI')
         win.geometry('620x460')
         txt = tk.Text(win, wrap='none', font=('Consolas', 9))
@@ -5983,7 +6031,7 @@ class App:
         body = '\n'.join(lines)
 
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         win.title('Metadata - %s' % Path(path).name)
         win.geometry('560x320')
         txt = tk.Text(win, wrap='word', font=('Consolas', 9))
@@ -6641,7 +6689,7 @@ class App:
         painted = (path in (getattr(self, '_tile_widgets', {}) or {})
                    or path in (getattr(self, '_content_widgets', {}) or {}))
         if not painted:
-            self.root.after_idle(lambda p=path: self._refresh_keep_selection(p))
+            self._idle(lambda p=path: self._refresh_keep_selection(p))
 
     def _refresh_keep_selection(self, path):
         """Rebuild the grid for a picture that was not among the painted tiles, without losing the click's selection.
@@ -6690,7 +6738,7 @@ class App:
             self.hint.configure(text='no images yet')
             return
         win = tk.Toplevel(self.root)
-        self.root.after(30, lambda w=win: self.theme.titlebar(w))
+        self._later(30, self._retitle, win)
         self._browser_win = win
         win.title('View All')
         try:
@@ -6824,8 +6872,8 @@ class App:
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
         self.canvas.delete('placeholder')
-        self.root.after_idle(self._redraw)
-        self.root.after_idle(self._show_resolution)
+        self._idle(self._redraw)
+        self._idle(self._show_resolution)
 
     def _display(self, path):
         self._current = Path(path)
@@ -6843,8 +6891,8 @@ class App:
             self.hint.configure(text='cannot open %s: %s' % (Path(path).name, type(e).__name__))
             return
         self.canvas.delete('placeholder')
-        self.root.after_idle(self._redraw)
-        self.root.after_idle(self._show_resolution)
+        self._idle(self._redraw)
+        self._idle(self._show_resolution)
 
     def _set_base(self, path, from_gallery=False):
         self._base_from_gallery = from_gallery
@@ -7804,9 +7852,9 @@ class App:
                                                    getattr(self, '_scene_total', 1)),
                                              daemon=True).start()
                     if getattr(self, '_all_queue', None):
-                        self.root.after(400, self._run_next_all)   # a sweep: next model once the card is idle
+                        self._later(400, self._run_next_all)   # a sweep: next model once the card is idle
                     if getattr(self, '_scene_queue', None):
-                        self.root.after(400, self._run_next_scene)  # a storyboard: next scene once the card is idle
+                        self._later(400, self._run_next_scene)  # a storyboard: next scene once the card is idle
                     if self.chain_var.get():
                         self._set_base(path)
                         base_note = 'chained from %s' % Path(path).name
@@ -7887,7 +7935,7 @@ class App:
         self._img = Image.open(io.BytesIO(raw))
         self.canvas.delete('placeholder')
         self.root.update_idletasks()      # let the maximised window settle before measuring the canvas
-        self.root.after_idle(self._redraw)
+        self._idle(self._redraw)
 
     def _redraw(self):
         self.canvas.delete('img')
@@ -7995,16 +8043,96 @@ class App:
         self._redraw()
         return 'break'
 
-    def _on_destroy(self, event=None):
-        """Cancel the poll loop however the window goes away, not just via the close button."""
-        if event is not None and event.widget is not self.root:
-            return
-        if self._poll_id is not None:
+    def _alive(self):
+        """Is the window still there? A debounced handler can outlive it, and Tk then reports a bgerror."""
+        try:
+            if not self.root.winfo_exists():
+                return False
+        except Exception:
+            return False
+        canvas = getattr(self, 'gal_canvas', None)
+        if canvas is None:
+            return True                  # built before the widgets exist: nothing to ask about yet
+        try:
+            return bool(canvas.winfo_exists())
+        except Exception:
+            return False
+
+    def _schedule(self, book, fn, *args):
+        """Run `fn` later, remembering the handle so the window can drop it when it goes away."""
+        box = [None]
+
+        def run():
+            self._timers.discard(box[0])
+            if getattr(self, '_closing', False) or not self._alive():
+                return
+            fn(*args)
+
+        try:
+            box[0] = book(run)
+            self._timers.add(box[0])
+        except Exception:
+            return None
+        return box[0]
+
+    def _idle(self, fn, *args):
+        """`root.after_idle` that the window remembers, so a window that is going away can cancel it.
+
+        A bare `after_idle` is a Tcl command with no handle, and it comes back as `invalid command name "<lambda>"`
+        through `bgerror` when the interpreter goes first. Cancelling *someone else's* pending job is not an option -
+        Tkinter keeps the name in that widget's own command list, and its `destroy()` then fails with "can't delete Tcl
+        command" - so the ids this window schedules are tracked here and only those are cancelled.
+        """
+        return self._schedule(self.root.after_idle, fn, *args)
+
+    def _later(self, delay, fn, *args):
+        """`root.after(delay, ...)` that the window remembers - the same bargain as `_idle`, for a real delay."""
+        return self._schedule(lambda run, d=delay: self.root.after(d, run), fn, *args)
+
+    def _retitle(self, win):
+        """Ask for the Win32 caption once the window has a frame (see `Theme.titlebar`)."""
+        try:
+            if win.winfo_exists():
+                self.theme.titlebar(win)
+        except Exception:
+            pass
+
+    def _cancel_pending(self):
+        """Cancel every timed callback this window owns, so it cannot fire into a dead interpreter.
+
+        `after` scripts are registered by name in the interpreter; once the interpreter is gone the pending script
+        fails as `invalid command name "..._apply_strip_resize"`, which Tk reports through `bgerror` *after* the suite
+        has finished - turning a clean run into a noisy one on a slow machine. Named debounces and the tracked timers
+        are cancelled; anything else queued in the interpreter belongs to another widget and is left alone.
+        """
+        for attr in ('_strip_job', '_search_after', '_regroup_job', '_loading_job', '_poll_id'):
+            job = getattr(self, attr, None)
+            if job is None:
+                continue
             try:
-                self.root.after_cancel(self._poll_id)
+                self.root.after_cancel(job)
             except Exception:
                 pass
-            self._poll_id = None
+            setattr(self, attr, None)
+        for job in list(getattr(self, '_timers', None) or ()):
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            self._timers.discard(job)
+
+    def _on_destroy(self, event=None):
+        """Cancel the poll loop and every debounce however the window goes away, not just via the close button.
+
+        The flag is set *before* the cancellation because destroying the window fires <Configure> events on the way out,
+        and a handler that schedules a fresh debounce during that cascade leaves a job queued for an interpreter that no
+        longer has the command - reported afterwards as `invalid command name "..._apply_strip_resize"`, which is what
+        made one suite run in five noisy and occasionally failing.
+        """
+        if event is not None and event.widget is not self.root:
+            return
+        self._closing = True
+        self._cancel_pending()
 
     def on_close(self):
         """Closing is a deliberate act: ask while a render is in flight, and interrupt it before the window goes.
@@ -8030,12 +8158,7 @@ class App:
             except Exception as e:
                 print('close: cancel failed (%s: %s)' % (type(e).__name__, e))
         self._persist()
-        if self._poll_id is not None:
-            try:
-                self.root.after_cancel(self._poll_id)
-            except Exception:
-                pass
-            self._poll_id = None
+        self._cancel_pending()
         self.status.configure(text='stopping…')
         result = self.engine.shutdown()
         print('server: %s' % result)

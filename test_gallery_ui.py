@@ -3851,6 +3851,12 @@ def main():
     real_regroup_soon = app._regroup_soon
     app._regroup_soon = lambda: None          # a regroup would swap the plan out from under the checks
     app.busy = False
+    # Start from a known view: an earlier section may have left a search term or a star filter in place, and the folder
+    # view is what makes the strip paint folder tiles at all. Naming it here is what keeps this block from becoming the
+    # "passes on a fast run" kind of check.
+    app.search_var.set('')
+    app.starred_only.set(False)
+    app.sort_var.set('Recent')
     app.clear_selection()
     if not (app._plan and app._plan.get('groups')):
         app._plan = {'recent': [], 'ungrouped': [], 'groups': [
@@ -3861,6 +3867,8 @@ def main():
     app._grouping = False
     app.select_folder(0)
     root.update(); time.sleep(0.15); root.update()
+    check('the strip is showing the folder view these checks are about', app._folders_view_active(),
+          (bool(app._plan), app.search_var.get(), app.starred_only.get(), len(app.selected)))
 
     print('\n-- pane tiles take the keyboard, ring themselves in the accent, and activate on Enter')
     folder_tiles = app._folder_tiles()
@@ -4102,6 +4110,26 @@ def main():
     finally:
         zui.messagebox.askyesno = real_ask_reset
     check('an access key cannot run a disabled command', not delete_dialog, delete_dialog)
+
+    print('\n-- teardown: a pending debounce is cancelled, not left to fire into a dead interpreter')
+    # The strip's resize debounce is a 50 ms `after`; if it survives the window it fails later as
+    # `invalid command name "..._apply_strip_resize"` and Tk reports that through bgerror *after* the run - a clean
+    # result turned noisy by timing alone. The teardown path must cancel it, and only what this window owns: cancelling
+    # a job another widget scheduled leaves that widget's own command list pointing at a deleted command, and its
+    # destroy() then fails with "can't delete Tcl command".
+    app._on_strip_resize()
+    job = app._strip_job
+    check('a resize schedules exactly one debounce', job is not None, job)
+    idle_job = app._idle(lambda: None)
+    check('an idle callback is tracked', idle_job is not None and idle_job in app._timers, idle_job)
+    app._cancel_pending()
+    pending = [str(j) for j in (app.root.tk.call('after', 'info') or ())]
+    check('... and the teardown cancels it', app._strip_job is None and str(job) not in pending, (job, pending))
+    check('... and the tracked idle callback with it', not app._timers and str(idle_job) not in pending,
+          (idle_job, sorted(app._timers), pending))
+    app._poll_id = app.root.after(60, app._poll)     # the sections after this one still want the poll loop
+    app._closing = False                             # ... and so does everything else this window does
+    check('a handler that outlives the window is a no-op, not an exception', app._alive() is True)
 
     for w in root.winfo_children():
         if isinstance(w, tk.Toplevel):
