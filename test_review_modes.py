@@ -133,6 +133,22 @@ def main():
         root.destroy()
     except Exception:
         pass
+    # Reported 2026-10-30: a ranking run ended with "N deleted", which a ranking can never do. The wording is one
+    # function now, so both modes are checked directly.
+    import re as _re
+    import zimage_ui as _ui
+    rank_done = _ui.review_tally(True, 24, 24, 0)
+    check('a finished ranking claims no deletions', 'nothing deleted' in rank_done and not _re.search(r'\d+ deleted', rank_done),
+          rank_done)
+    rank_stop = _ui.review_tally(True, 9, 24, 0, stopped=True)
+    check('and neither does a stopped one',
+          'nothing deleted' in rank_stop and not _re.search(r'\d+ deleted', rank_stop), rank_stop)
+    rank_pair = _ui.review_tally(True, 4, 24, 0, left=('round 2 of 5', '1 min'))
+    check('nor the running tally', 'nothing deleted' in rank_pair and not _re.search(r'\d+ deleted', rank_pair), rank_pair)
+    del_done = _ui.review_tally(False, 24, 24, 11)
+    check('delete mode still reports its count', _re.search(r'11 deleted', del_done) is not None, del_done)
+    check('and never says nothing was deleted', 'nothing deleted' not in del_done, del_done)
+
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
 

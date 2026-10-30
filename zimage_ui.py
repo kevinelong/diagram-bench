@@ -782,6 +782,26 @@ def pair_review_progress_safe(state):
         return 0, 0, 0
 
 
+def review_tally(rank_mode, decided, total, deletes, stopped=False, left=None):
+    """How an A/B review reports itself, for each mode.
+
+    A ranking never deletes, so "0 deleted" in a ranking run is at best noise and at worst a false account of what
+    happened - it was printed at the end of a ranking run (reported 2026-10-30). Delete mode keeps its count.
+    """
+    if rank_mode:
+        tally = '%d of %d pairs decided, nothing deleted' % (decided, total)
+    else:
+        tally = '%d of %d pairs decided, %d deleted' % (decided, total, deletes)
+    if left is not None:
+        short = ('%d decided, nothing deleted' % decided if rank_mode else '%d decided, %d deleted' % (decided, deletes))
+        return 'pair %d of %d \u00b7 %s \u00b7 ~%s left at 3 s each \u00b7 %s' % (
+            decided + 1, total, left[0], left[1], short)
+    if stopped:
+        return 'A/B review stopped: %s - progress saved%s' % (
+            tally, '; the folder is now ordered by wins' if rank_mode and decided else '')
+    return 'done - %s. Close this window.' % tally
+
+
 def tile_plan(batch, seed, seed_step, has_base=False):
     """How many tiles a request produces, and the seed of each.
 
@@ -3546,7 +3566,7 @@ class App:
                                          % (r['state'].get('round'), r['state'].get('target_rounds'), len(more)))
                 return self._review_show_next()
         if not queue:
-            r['info'].configure(text='done - %d pairs decided, %d deleted. Close this window.' % (decided, total))
+            r['info'].configure(text=review_tally(self._review_is_rank(), decided, total, deletes))
             for w in (r['left_lbl'], r['right_lbl']):
                 w.configure(image='', text='')
             return
@@ -3558,11 +3578,9 @@ class App:
         stage = ('every pair' if r['state'].get('exhaustive')
                  else 'round %s of %s' % (r['state'].get('round', 1), r['state'].get('target_rounds', 1)))
         left_min = pair_review.estimate_minutes(queue)
-        r['info'].configure(text='pair %d of %d \u00b7 %s \u00b7 ~%s left at 3 s each \u00b7 %d deleted \u00b7 '
-                                 '%s | %s' % (decided + 1, total, stage,
-                                              ('%d min' % round(left_min)) if left_min >= 1 else '%d s' % (left_min * 60),
-                                              deletes,
-                                              Path(a).name[:30], Path(b).name[:30]))
+        line = review_tally(self._review_is_rank(), decided, total, deletes,
+                            left=(stage, ('%d min' % round(left_min)) if left_min >= 1 else '%d s' % (left_min * 60)))
+        r['info'].configure(text='%s \u00b7 %s | %s' % (line, Path(a).name[:30], Path(b).name[:30]))
 
     def _on_review_resize(self, event=None):
         r = getattr(self, '_review', None)
@@ -3669,9 +3687,7 @@ class App:
         self._render_folder_bar()
         if self._active_folder is not None and self._folders_view_active():
             self._render_contents()
-        self.status.configure(text='A/B review stopped: %d of %d pairs decided, %d deleted - progress saved'
-                                      '%s' % (decided, total, deletes,
-                                              ', ordered by wins' if decided else ''))
+        self.status.configure(text=review_tally(self._review_is_rank(), decided, total, deletes, stopped=True))
         return 'break'
 
     def _scroll_pos(self, canvas):
