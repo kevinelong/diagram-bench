@@ -44,6 +44,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 from PIL import Image, ImageDraw, ImageTk
 
@@ -1742,6 +1743,15 @@ class App:
         self.contents_title = ttk.Label(self.contents_holder, text='', anchor='w', justify='left',
                                         wraplength=CONTENTS_W)
         self.contents_title.grid(row=0, column=0, columnspan=2, sticky='we', pady=(0, 4))
+        # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
+        # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
+        base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
+        self.loading_lbl = tk.Label(self.contents_holder, text='Loading', anchor='center',
+                                    font=('Segoe UI', base * 2, 'bold'), background=plate,
+                                    foreground=self.theme.muted)
+        self._loading_job = None
+        self._loading_step = 0
+        self._loading_active = False
         self.contents_canvas = tk.Canvas(self.contents_holder, highlightthickness=0, borderwidth=0,
                                          background=plate, width=CONTENTS_W)
         self.contents_canvas.grid(row=1, column=0, sticky='nsew')
@@ -3029,6 +3039,67 @@ class App:
                                         ' (stopped at %d)' % SCAN_CAP if self._scan_capped else ''))
         return self._recursive
 
+    def _loading_show(self):
+        """Put the large centred notice up while the folders are being worked out."""
+        lbl = getattr(self, 'loading_lbl', None)
+        if lbl is None or not lbl.winfo_exists():
+            return
+        base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
+        # three times the size when the column is tall enough to carry it, twice otherwise
+        big = base * 3 if self.contents_holder.winfo_height() >= 420 else base * 2
+        try:
+            lbl.configure(font=('Segoe UI', big, 'bold'))
+        except Exception:
+            pass
+        self._loading_active = True
+        lbl.place(relx=0.5, rely=0.5, anchor='center')
+        try:
+            lbl.lift()                      # over the canvas, or the notice sits underneath the empty pane
+        except Exception:
+            pass
+        if self._loading_job is None:
+            self._loading_tick()
+
+    def _loading_hide(self):
+        self._loading_active = False
+        lbl = getattr(self, 'loading_lbl', None)
+        if lbl is not None and lbl.winfo_exists():
+            lbl.place_forget()
+        if self._loading_job is not None:
+            try:
+                self.root.after_cancel(self._loading_job)
+            except Exception:
+                pass
+            self._loading_job = None
+
+    def _loading_tick(self):
+        """The dots chase and the colour drifts from muted towards the text colour, then back: no flash, no restart."""
+        lbl = getattr(self, 'loading_lbl', None)
+        # "active", not "mapped": place() does not map until the next update, so asking about mapping made the first tick
+        # give up and never reschedule - the notice sat still saying "Loading"
+        if lbl is None or not lbl.winfo_exists() or not getattr(self, '_loading_active', False):
+            self._loading_job = None
+            return
+        step = self._loading_step % 8
+        dots = '.' * (1 + min(step // 2, 2))          # . .. ... then hold, so the eye follows a chase, not a count
+        # the text first and on its own: a colour that cannot be mixed (Windows reports system colour *names*, not hex)
+        # must not take the animation down with it, which is exactly what one swallowed exception did
+        try:
+            lbl.configure(text='Loading' + dots)
+        except Exception:
+            pass
+        phase = (step + 1) / 8.0
+        try:
+            tint = _mix(self.theme.muted, self.theme.text, 0.15 + 0.5 * (1 - abs(0.5 - phase) * 2))
+            lbl.configure(foreground=tint)
+        except Exception:
+            try:
+                lbl.configure(foreground=self.theme.muted)
+            except Exception:
+                pass
+        self._loading_step = step + 1
+        self._loading_job = self.root.after(240, self._loading_tick)
+
     def _render_folder_bar(self):
         """A folder *button*, not a dropdown: it names what is open and it opens the full-screen folder browser.
 
@@ -3040,8 +3111,10 @@ class App:
         for w in self.folder_bar.winfo_children():
             w.destroy()
         if self._grouping:
+            self._loading_show()
             ttk.Label(self.folder_bar, text='grouping prompts\u2026', foreground=self.theme.muted).pack(side='left')
             return
+        self._loading_hide()
         if not self._plan:
             return
         # the source chip: a looked-at folder and a written-to folder must never be confusable
@@ -3618,8 +3691,7 @@ class App:
                 return self._review_show_next()
         if not queue:
             r['info'].configure(text=review_tally(self._review_is_rank(), decided, total, deletes))
-            for w in (r['left_lbl'], r['right_lbl']):
-                w.configure(image='', text='')
+            self._review_finish(r, decided, total, deletes)
             return
         a, b, dist = queue[0]
         r['pair'] = (a, b)
@@ -3647,6 +3719,100 @@ class App:
         for lbl in (r['left_lbl'], r['right_lbl']):
             if getattr(lbl, 'source', None):
                 self._review_fit(lbl)
+
+    def _review_finish(self, r, decided, total, deletes):
+        """The end of a review is a result, not an empty window: the new order, and the two things to do with it.
+
+        It used to blank both pictures and leave the buttons live, which looks like a failure. Now the ranking (or the
+        survivors, in delete mode) is shown as large tiles in order, with one prominent way to start over and one to keep
+        what was decided.
+        """
+        import pair_review
+        rank_mode = self._review_is_rank()
+        win = r['win']
+        for key in ('left_lbl', 'right_lbl', 'badge'):
+            w = r.get(key)
+            if w is not None:
+                try: w.grid_remove()
+                except Exception: pass
+        for b in tuple(r.get('buttons') or ()) + tuple(r.get('gallery_buttons') or ()):
+            try: b.grid_remove()
+            except Exception: pass
+        frame = r.get('finish')
+        if frame is None:
+            frame = tk.Frame(win, background=_mix('#000000', self.theme.window, 0.25))
+            frame.grid(row=0, column=0, columnspan=2, sticky='nsew', padx=20, pady=(16, 8))
+            r['finish'] = frame
+        for w in frame.winfo_children():
+            w.destroy()
+        paths = list(r['state'].get('paths') or [])
+        if rank_mode:
+            ordered = pair_review.order(r['state'])
+            heading = 'Ranked by wins' if decided else 'Nothing to rank yet'
+        else:
+            gone = {str(p) for p in (r['state'].get('deleted') or [])}
+            ordered = [p for p in paths if str(p) not in gone]
+            heading = 'Kept %d of %d' % (len(ordered), len(paths))
+        tk.Label(frame, text=heading, font=('Segoe UI', 24, 'bold'), background=frame['background'],
+                 foreground=self.theme.text).grid(row=0, column=0, columnspan=6, pady=(2, 2))
+        tk.Label(frame, text='%d of %d pairs decided · best first' % (decided, total)
+                 if rank_mode else '%d pairs decided · %d deleted' % (decided, deletes),
+                 font=('Segoe UI', 13), background=frame['background'], foreground=self.theme.muted
+                 ).grid(row=1, column=0, columnspan=6, pady=(0, 10))
+        cols = 6
+        for c in range(cols):
+            frame.columnconfigure(c, weight=1, uniform='tile')
+        size = 148
+        shown = ordered[:cols * 3]
+        for i, path in enumerate(shown):
+            cell = tk.Frame(frame, background=frame['background'])
+            cell.grid(row=2 + i // cols, column=i % cols, padx=5, pady=5, sticky='n')
+            photo = None
+            try:
+                # build the thumbnail here: the finished screen is not the paint path, and a filename is no help
+                photo = self._photo_of(self._thumb_of(path, build=True), size, key=path)
+            except Exception:
+                photo = None
+            lab = tk.Label(cell, image=photo, text='' if photo else Path(path).name[:12],
+                           background=_mix('#000000', self.theme.window, 0.35), foreground='#ddd',
+                           width=size // 8, height=size // 16)
+            lab.image = photo
+            lab.pack()
+            tk.Label(cell, text='%d' % (i + 1), font=('Segoe UI', 12, 'bold'),
+                     background=frame['background'], foreground=self.theme.accent).pack(pady=(2, 0))
+        if len(ordered) > len(shown):
+            tk.Label(frame, text='... and %d more' % (len(ordered) - len(shown)), font=('Segoe UI', 12),
+                     background=frame['background'], foreground=self.theme.muted
+                     ).grid(row=6, column=0, columnspan=cols, pady=(6, 0))
+        actions = tk.Frame(frame, background=frame['background'])
+        actions.grid(row=7, column=0, columnspan=cols, pady=(14, 6))
+        big = ('Segoe UI', 16, 'bold')
+        tk.Button(actions, text='Reset and start over', font=big, command=self._review_restart,
+                  background=_mix(self.theme.window, '#000000', 0.25), foreground=self.theme.text,
+                  activebackground=self.theme.accent, padx=22, pady=10).pack(side='left', padx=10)
+        tk.Button(actions, text='Keep and close', font=big, command=self.review_stop,
+                  background=self.theme.accent, foreground=self.theme.on_accent, activebackground=self.theme.accent,
+                  padx=22, pady=10).pack(side='left', padx=10)
+
+    def _review_restart(self):
+        """Clear this folder's record and run the comparison again, from the finished screen."""
+        self._review_reset()
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        frame = r.pop('finish', None)
+        if frame is not None:
+            frame.destroy()
+        for key in ('left_lbl', 'right_lbl'):
+            w = r.get(key)
+            if w is not None:
+                try: w.grid()
+                except Exception: pass
+        for b in tuple(r.get('buttons') or ()):
+            try: b.grid()
+            except Exception: pass
+        r['pair'] = None
+        self._review_show_next()
 
     def _review_is_rank(self):
         """True unless the mode is explicitly delete.

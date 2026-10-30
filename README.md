@@ -661,6 +661,22 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## A finished review shows the result, and the folder column says it is working
+
+Two things were missing at the edges of the review:
+
+- **The end of a ranking was a blank window.** Both pictures were cleared and the decision buttons stayed live, which looks
+  like a failure. It now shows the new order as large numbered tiles (`pair_review.order()`, most wins first, capped at
+  eighteen with "... and N more") and two prominent actions: **Reset and start over** (clears this folder's record and
+  queues the pairs again) and **Keep and close**. Delete mode shows the survivors, worded as kept/deleted.
+- **The folder column was empty while it grouped.** It now carries a centred notice - 2x the normal font, 3x when the
+  column is tall enough - whose dots chase (`.` `..` `...`, holding at three) and whose colour drifts from muted towards
+  the text colour, 240 ms a step. It appears when the grouping starts and disappears when the plan arrives.
+
+Two bugs found while building it, both now covered by how it is written: an animation driven by `winfo_ismapped()` never
+starts, because `place()` does not map a widget until the next update (it is driven by an explicit flag), and a single
+swallowed exception in a colour mix took the whole text update with it (text and colour are configured separately).
+
 ## A caption remembers the picture it was written from
 
 `Chiaroscuro`-style merges fail differently: a *prompt* and a *caption* of the same picture share almost nothing as text - the

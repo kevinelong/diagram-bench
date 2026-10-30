@@ -123,6 +123,15 @@ def _session_order(state):
     return tuple(sorted(names, key=lambda n: (-scores.get(n, (0, 0, 0))[0], scores.get(n, (0, 0, 0))[1], n)))
 
 
+def order(state):
+    """The pictures in the order this review put them in: most wins first, then fewest losses, then by name."""
+    scores = _session_record(state)
+    paths = list(state.get('paths') or [])
+    return sorted(paths, key=lambda p: (-scores.get(Path(p).name, (0, 0, 0))[0],
+                                        scores.get(Path(p).name, (0, 0, 0))[1],
+                                        Path(p).name))
+
+
 def rounds_for(count):
     """How many rounds a full order needs: log2(n), which is what a comparison sort costs, and at least two."""
     import math
