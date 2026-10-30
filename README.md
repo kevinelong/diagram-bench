@@ -597,6 +597,16 @@ Classes, and the one thing each is judged by: `KEEP-OK` (its `image` exists), `K
 `image`), `KEEP-UNCLEAR`, `CANDIDATE`, `SHEET orphan`, `CLIP orphan`. It never deletes or moves anything; the manifest is the
 input to a decision. Pictures with no record at all are counted separately, because that is the opposite problem.
 
+`--apply --archive <zip>` prunes, in this order and no other way: **archive the orphans, verify the archive against the
+files, then delete** one record at a time, each re-checked as an orphan at that moment. If the verify step disagrees - a
+broken member, a size mismatch, a name count that does not match - it deletes **nothing**. A sidecar is the only record of
+its picture's prompt, seed, style and settings, so a copy must exist first; the zip is the way back.
+
+First real prune (2026-10-29, `C:/Users/kevin/Pictures/zimage-ui`): 1,789 orphans archived to
+`C:/Users/kevin/Pictures/zimage-ui-orphans-2026-10-29.zip` (1,496 KB, 1,789 members, `testzip` clean) and deleted, 0
+failures. The folder went from 3,118 records to **1,329, every one of which has its picture present**; the 1,345 pictures
+are untouched, including the 16 that carry no record.
+
 ## The picture column
 
 The picture is **pinned to the top right** of its column, with a small margin, so it is always in the same place instead of
