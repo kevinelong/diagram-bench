@@ -2189,6 +2189,12 @@ class App:
         self.graph_btn.pack(side='left', padx=(6, 0))
         self.describe_btn = ttk.Button(tools, text='Describe', command=self.describe, state='disabled')
         self.describe_btn.pack(side='left', padx=(6, 0))
+        # a folder made elsewhere has no prompts at all, so one picture at a time would never get there
+        self.describe_all_btn = ttk.Button(tools, text='Describe all\u2026', command=self.describe_missing,
+                                           state='disabled')
+        self.describe_all_btn.pack(side='left', padx=(4, 0))
+        self._tip(self.describe_all_btn, 'Describe every picture here that has no prompt yet, and save each result as its '
+                                         'prompt so they can be grouped. Local model only.')
         self.copy_status = ttk.Label(tools, text='', foreground=self.theme.muted)
         self.copy_status.pack(side='left', padx=(8, 0))
         # two rows: the picture column is narrow, and one row of six controls was clipped at 1180 px
@@ -3879,6 +3885,16 @@ class App:
             r['queue'] = r['queue'][1:]
         self._review_show_next()
 
+    def caption_cancel(self, event=None):
+        """Stop a batch of descriptions after the picture in hand."""
+        if getattr(self, '_describe_cancel', False):
+            return None
+        if getattr(self, '_captions_running', False):
+            self._describe_cancel = True
+            self.hint.configure(text='stopping after this picture\u2026')
+            return 'break'
+        return None
+
     def review_stop(self, event=None):
         import pair_review
         r = getattr(self, '_review', None)
@@ -5270,6 +5286,99 @@ class App:
         self.style_var.set(name)
         self.hint.configure(text='style "%s" saved (%d bytes of prompt)' % (name, len(current)))
 
+    def caption_picture(self, path, url):
+        """Ask the local vision model for a prompt describing this picture. Returns text, or raises."""
+        import base64
+        raw = Path(path).read_bytes()
+        b64 = base64.b64encode(raw).decode('ascii')
+        body = json.dumps({'model': 'local', 'temperature': 0.4, 'max_tokens': 160, 'messages': [
+            {'role': 'user', 'content': [
+                {'type': 'text', 'text': 'Describe this image as a single image-generation prompt, '
+                                         'under 40 words. Reply with the prompt only.'},
+                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + b64}}]}]}).encode()
+        req = urllib.request.Request(url + '/chat/completions', data=body,
+                                     headers={'Content-Type': 'application/json'})
+        data = json.loads(urllib.request.urlopen(req, timeout=90).read())
+        return data['choices'][0]['message']['content'].strip()
+
+    def _uncaptioned(self, paths=None):
+        """Pictures that have no prompt and no caption: what a folder made by something else looks like."""
+        out = []
+        for path in (paths if paths is not None else self._all_files()):
+            side = Path(path).with_suffix('.json')
+            prompt = caption = ''
+            if side.is_file():
+                try:
+                    meta = json.loads(side.read_text(encoding='utf-8'))
+                    prompt = (meta.get('prompt') or '').strip()
+                    caption = (meta.get('caption') or '').strip()
+                except Exception:
+                    pass
+            if not prompt and not caption:
+                out.append(str(path))
+        return out
+
+    def describe_missing(self, paths=None):
+        """Write a prompt into the sidecar of every picture that has none - the way a foreign folder becomes groupable.
+
+        Describe alone only fills the prompt box, for the picture in front of you; a folder full of someone else's pictures
+        therefore stayed as one unnamed block forever. This runs the same model over the ones with no prompt and records the
+        result as their prompt, marked `prompt_from: describe`, so grouping, A/B and prediction all see it.
+        """
+        url = self._local_llm_url()
+        if not url:
+            return
+        todo = self._uncaptioned(paths)
+        if not todo:
+            self.hint.configure(text='every picture here already has a prompt or a caption')
+            return
+        if not messagebox.askyesno(
+                'Describe %d pictures?' % len(todo),
+                '%d picture%s here have no prompt or caption.\n\nThe local model at %s will describe each one and the text '
+                'is saved as its prompt, so they can be grouped. Nothing is uploaded and no picture is changed.\n\n'
+                'Roughly %d second%s per picture.' % (
+                    len(todo), '' if len(todo) == 1 else 's', url, 2 * len(todo), '' if len(todo) == 1 else 's'),
+                parent=self.root):
+            return
+        self._describe_cancel = False
+
+        def work():
+            done = failed = 0
+            for i, path in enumerate(todo, 1):
+                if self._describe_cancel:
+                    break
+                self.ui_events.put(('caption_progress', (i, len(todo), Path(path).name)))
+                try:
+                    text = self.caption_picture(path, url)
+                except Exception as e:
+                    failed += 1
+                    log_error('caption %s' % Path(path).name, e)
+                    continue
+                if not text:
+                    failed += 1
+                    continue
+                side = Path(path).with_suffix('.json')
+                try:
+                    meta = json.loads(side.read_text(encoding='utf-8')) if side.is_file() else {}
+                except Exception:
+                    meta = {}
+                meta.setdefault('created', datetime.fromtimestamp(Path(path).stat().st_mtime).isoformat(timespec='seconds'))
+                meta['caption'] = text
+                meta['prompt'] = text
+                meta['prompt_from'] = 'describe'
+                meta['described_at'] = datetime.now().isoformat(timespec='seconds')
+                try:
+                    side.write_text(json.dumps(meta, indent=1), encoding='utf-8')
+                    done += 1
+                except Exception as e:
+                    failed += 1
+                    log_error('caption write %s' % side.name, e)
+            self.ui_events.put(('captioned', (done, failed, len(todo), )))
+
+        self._captions_running = True
+        threading.Thread(target=work, daemon=True).start()
+        self.hint.configure(text='describing %d pictures with %s\u2026 (Esc stops)' % (len(todo), url))
+
     def describe(self):
         """Caption the current picture with a local vision model, so the prompt can start from what is there."""
         if self._current is None:
@@ -6359,7 +6468,8 @@ class App:
         self._current = Path(path) if path else None
         self.copy_btn.state(['!disabled'])
         self.info_btn.state(['!disabled'] if self._current else ['disabled'])
-        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.describe_btn, self.pin_btn):
+        for b in (self.vary_btn, self.vary_soft_btn, self.upscale_btn, self.describe_btn,
+                  getattr(self, 'describe_all_btn', None), self.pin_btn):
             b.state(['!disabled' if self._current else 'disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
@@ -7188,6 +7298,19 @@ class App:
                     if not self.hint['text'].strip():
                         self.hint.configure(text=('local model ready at %s' % url) if self._llm_ok
                                             else ('no local model at %s - enhance and describe stay off' % url))
+                elif kind == 'caption_progress':
+                    # the folder-caption pass emits (i, n); the describe pass adds the file name
+                    i, n = payload[0], payload[1]
+                    name = payload[2] if len(payload) > 2 else ''
+                    self.hint.configure(text='describing %d of %d%s' % (i, n, (': ' + name[:40]) if name else ''))
+                elif kind == 'captioned':
+                    done, failed, total = payload
+                    self._captions_running = False
+                    self.hint.configure(text='wrote a prompt for %d of %d pictures%s - grouping again'
+                                        % (done, total, '' if not failed else ' (%d failed)' % failed))
+                    self.refresh_gallery()
+                    if getattr(self, 'group_var', None) is not None and self.group_var.get():
+                        self._regroup_soon()
                 elif kind == 'described':
                     self.text.delete('1.0', 'end')
                     self.text.insert('1.0', payload)

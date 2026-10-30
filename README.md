@@ -661,6 +661,21 @@ Behaviour, which the graph keeps deliberately distinct:
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
 
+## A foreign folder gets its prompts: Describe all
+
+Grouping runs on prompts, and a folder made by something else has none - so it stayed one unnamed block. `Describe` alone
+only fills the prompt box for the picture in front of you, which is fine for one and useless for two hundred.
+
+**Describe all…** sits beside Describe in the toolbar (local model only, like Describe). It finds every picture with no
+prompt *and* no caption, asks once for confirmation with the count and a rough time, then runs the same vision model over
+them one at a time, writing each result into that picture's sidecar as `prompt`, `caption`, `prompt_from: describe` and
+`described_at`. Nothing is uploaded, no picture is altered, and pictures that already carry a prompt are never touched. When
+it finishes the gallery regroups, so the new prompts can be grouped and reviewed immediately. Esc stops it after the picture
+in hand, and progress reads "describing 12 of 40: 20261030-…png".
+
+Measured on a folder of unlabelled pictures with the vision call stubbed: three sidecars written, the one picture with its
+own prompt untouched, and a second press finds nothing to do (`test_describe.py`).
+
 ## A finished review shows the result, and the folder column says it is working
 
 Two things were missing at the edges of the review:
