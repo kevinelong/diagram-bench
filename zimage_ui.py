@@ -1609,15 +1609,20 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
-        self.contents_btns.columnconfigure(0, weight=1)
-        self.contents_btns.columnconfigure(1, weight=1)
+        for col in range(3):
+            self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
         self.contents_del_btn = ttk.Button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
                                            state='disabled')
-        self.contents_del_btn.grid(row=0, column=1, sticky='we', padx=(3, 0))
+        self.contents_del_btn.grid(row=0, column=1, sticky='we', padx=3)
+        # the pane could show pairs but not start a review: the A/B entry point lived only on the strip and in the folder
+        # header, so a folder open in the second column had no way in from there
+        self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
+                                          state='disabled')
+        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=(3, 0))
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=1, column=0, columnspan=2, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=3, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -2760,21 +2765,43 @@ class App:
         self.refresh_gallery()
 
     # -- paired A/B review of one folder --------------------------------------------------------------
-    def review_start(self, index=None):
-        """Review the selected folder (or the biggest one) as most-similar-first A/B pairs, full screen."""
-        if not self._plan:
-            self.hint.configure(text='turn folders on first - A/B review works inside a prompt folder')
-            return
+    def review_paths(self, index=None, paths=None):
+        """(label, paths) for an A/B review - the given pictures, or the folder's, or the biggest folder's.
+
+        Pure: no threads, no Tk, so what a review will pair can be asserted without opening a window.
+        """
+        if paths is not None:
+            kept = [str(p) for p in paths if Path(p).exists()]
+            label = ('%d selected pictures' % len(kept)) if kept else 'selection'
+            return label, kept
+        if not self._plan or not self._plan.get('groups'):
+            return '', []
         if index is None:
             index = self._active_folder
         if index is None:
             index = max(range(len(self._plan['groups'])), key=lambda i: len(self._plan['groups'][i]['items']))
         group = self._plan['groups'][index]
-        paths = [r['path'] for r in group['items']]
+        return (group.get('label') or 'folder'), [r['path'] for r in group.get('items') or []]
+
+    def review_pane(self):
+        """A/B review the pane's selection, or the whole open folder when nothing is selected."""
+        cells = list(getattr(self, '_content_order', []) or [])
+        chosen = [p for p in (self.selected or []) if p in set(cells)]
+        self.review_start(paths=(chosen or cells))
+
+    def review_start(self, index=None, paths=None):
+        """Review the selected folder (or the biggest one) as most-similar-first A/B pairs, full screen."""
+        if not self._plan:
+            self.hint.configure(text='turn folders on first - A/B review works inside a prompt folder')
+            return
+        label, paths = self.review_paths(index=index, paths=paths)
+        if not paths:
+            self.hint.configure(text='no pictures to pair here')
+            return
         if len(paths) < 2:
             self.hint.configure(text='that folder has only one picture - nothing to pair')
             return
-        self.status.configure(text='preparing %d pairs from %s\u2026' % (len(paths) // 2, group['label'][:28]))
+        self.status.configure(text='preparing %d pairs from %s\u2026' % (len(paths) // 2, label[:28]))
         self.update_idletasks() if hasattr(self, 'update_idletasks') else None
         self.root.update_idletasks()
 
@@ -2785,7 +2812,7 @@ class App:
                 state = pair_review.load_state(key)
                 pair_review.build(paths, state, hash_store=pair_review.STATE_DIR / ('%s-hashes.json' % key))
                 pair_review.save_state(state)
-                self.ui_events.put(('review_ready', (group['label'], state)))
+                self.ui_events.put(('review_ready', (label, state)))
             except Exception as e:
                 self.ui_events.put(('review_error', '%s: %s' % (type(e).__name__, e)))
         threading.Thread(target=work, daemon=True).start()
@@ -4883,8 +4910,10 @@ class App:
             return
         n = len(self.selected)
         try:
+            cells = self._pane_cells()[0]
             self.contents_del_btn.state(['!disabled'] if n else ['disabled'])
-            self.contents_all_btn.state(['disabled'] if not self._pane_cells()[0] else ['!disabled'])
+            self.contents_all_btn.state(['disabled'] if not cells else ['!disabled'])
+            self.contents_ab_btn.state(['!disabled'] if len(cells) > 1 else ['disabled'])
         except Exception:
             pass
         self.contents_sel_label.configure(text=('%d selected' % n) if n else '')

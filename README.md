@@ -574,6 +574,13 @@ grid, with a count under it (`24 selected`). **Delete starts disabled** and foll
 in the pane, and `Delete` anywhere that is not a text box - and both go through the same confirmation as the strip: pictures,
 their `.json` and their thumbnail go to the **Recycle Bin**, so a mistake is recoverable.
 
+**Select all / Delete… / A/B…** sit under the grid. The A/B button starts the same paired review the strip and the folder
+header start, on **the pane's selection when there is one, and the whole open folder when there is not** - the review
+entry point lived only on the strip before, so a folder open in the second column had no way in from there. It is disabled
+with fewer than two pictures. `review_paths()` is the pure half (given list, or the folder's, or the biggest folder's) so
+what a review will pair can be asserted without opening a window, and `review_pane()` hands over only the pane's own cells,
+never a strip selection.
+
 **A deleted picture leaves the pane at once.** It used to stay: `delete_selected` re-rendered only the strip
 (`refresh_gallery`) while the pane is drawn from the plan, and the plan keeps its members until the next regroup - a debounce
 away. So the tile outlived its file. Now `_forget_deleted` prunes the plan (its groups, `recent` and `ungrouped`) and the

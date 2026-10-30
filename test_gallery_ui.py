@@ -951,6 +951,34 @@ def main():
             root.update()
         finally:
             _mb.askyesno, app._recycle_files = real_ask, real_recycle
+        # the review entry point: the pane hands over its own pictures
+        calls = []
+        real_review = app.review_start
+        app.review_start = lambda index=None, paths=None: calls.append(paths)
+        try:
+            app.selected = []
+            app.review_pane()
+            check('A/B with nothing selected takes the whole open folder',
+                  calls and calls[-1] == list(app._content_order), str(len(calls[-1]) if calls else 0))
+            app.selected = [Path(app._content_order[0])]
+            app.review_pane()
+            check('A/B with a selection takes just those', calls[-1] == [Path(app._content_order[0])],
+                  str(calls[-1]))
+            other = Path(app._content_order[-1]) if len(app._content_order) > 1 else Path(app._content_order[0])
+            app.selected = [Path(app._content_order[0]), other]
+            app.review_pane()
+            check('two selected pictures are both handed over', len(calls[-1]) == 2, str(len(calls[-1])))
+        finally:
+            app.review_start = real_review
+        label, kept = app.review_paths(paths=[p for p in app._content_order[:3]])
+        check('review_paths names a selection and keeps existing files', len(kept) == 3 and 'selected' in label,
+              '%s / %d' % (label, len(kept)))
+        check('and drops a picture that is not there',
+              len(app.review_paths(paths=[tmp / 'not-there.png'])[1]) == 0, 'kept a missing file')
+        check('the pane has an A/B button', hasattr(app, 'contents_ab_btn'), 'missing')
+        check('it is enabled when there is something to pair', 'disabled' not in app.contents_ab_btn.state(),
+              str(app.contents_ab_btn.state()))
+
         check('the files went', not victim.exists() and len(deleted) >= 1, str(len(deleted)))
         check('the tile left the pane immediately', victim not in app._content_order, str(len(app._content_order)))
         check('and the plan forgot it',
