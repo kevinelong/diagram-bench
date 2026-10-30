@@ -589,6 +589,10 @@ STYLE_STRENGTH = {
 # turbo calls 0.65 and 0.72 renders "an oil painting" and only reads as charcoal at **0.78** - where its details drift
 # more (hair, collar and dress changed). A sweep over both can only pick one number: it takes the larger, so no model
 # silently under-acts, and the klein half runs a little stronger than it needs.
+# A chain of prompts is copied forward on every edit, so it is bounded; beyond this the newest steps win and the root is
+# kept as `lineage_root`, because a folder family is named by where the series started.
+LINEAGE_MAX = 32
+
 MODEL_STRENGTH_OFFSET = {'flux2 klein 9b uncensored': 0.00, 'z-image turbo': 0.06, zg.ALL_MODEL: 0.06}
 
 # Measured cost of one sequential request at 4 steps, on this box, with the model cache disabled. The cost is flat
@@ -924,7 +928,7 @@ class Engine:
                                     'type': img.get('type', 'output')})
         return urllib.request.urlopen('http://%s:%d/view?%s' % (self.host, self.port, q), timeout=120).read()
 
-    def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0,
+    def generate(self, prompt, width, height, steps, cfg, seed, out_dir, base_path=None, denoise=1.0, prompt_full=None,
                  batch=1, sequential=True, sampler='euler', negative='', profile=None, mask_path=None,
                  outpaint=None, style=None, hires=0.0, hires_denoise=0.45, sweep=None, seed_step=1, name=None,
                  scene=None, of=None):
@@ -950,6 +954,22 @@ class Engine:
                         'hires': (hires if hires > 1.0 else None),
                         'hires_denoise': (hires_denoise if hires > 1.0 else None),
                         'scene': scene, 'scene_of': of}
+                # The chain of prompts that produced this picture: copied from the base's own record and extended with
+                # this step, so it never has to be reconstructed (a walk over base_image breaks as soon as a base is
+                # deleted or moved, and an enhanced draft then loses the wording it came from). `prompt_full` is what was
+                # typed, not the text the sampler received.
+                steps_chain = []
+                if base_path:
+                    try:
+                        prior = json.loads(Path(base_path).with_suffix('.json').read_text(encoding='utf-8'))
+                    except Exception:
+                        prior = {}
+                    steps_chain = list(prior.get('lineage') or ([prior['prompt']] if prior.get('prompt') else []))
+                typed = ' '.join((prompt_full or prompt or '').split())
+                if typed:
+                    steps_chain = (steps_chain + [typed])[-LINEAGE_MAX:]
+                meta['lineage'] = steps_chain
+                meta['lineage_root'] = steps_chain[0] if steps_chain else None
                 (out / 'last-prompt.txt').write_text(prompt, encoding='utf-8')
                 stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 base_name, scale_base = None, None
@@ -6856,7 +6876,7 @@ class App:
                              hires=hires, hires_denoise=0.45, sweep=sweep,
                              seed_step=(self.seed_step_var.get() if hasattr(self, 'seed_step_var') else 1),
                              scene=(_scene[0] if _scene else None), of=(_scene[1] if _scene else None),
-                             name=_shot)
+                             name=_shot, prompt_full=prompt)
         if mask_path or outpaint:
             self.clear_mask()
             self.clear_pads()

@@ -643,6 +643,33 @@ a review closed, and folder tiles were chosen by **newest four distinct** regard
 Wins themselves were already durable: `pair_rank` writes `wins/losses/ties/bouts` into each picture's own `.json`, so the
 order holds across folders and restarts.
 
+## The prompt chain is recorded, not traced
+
+Grouping cannot recover intent from wording when the *form* changes. Measured on the real gallery: the prompt
+`single candle, single person, attic, ritual, wide-shot, woman, seated, sigil` scores cosine **0.07-0.10** against its own
+prose rewrite (`An realistic photo with deep crisp depth of field, of a 40 year old woman ... attic ... candlelight ...`).
+No threshold bridges that, synonyms do not (the words differ in form), and a containment rule does not survive the data:
+"one prompt contained in another" candidate **1735** pairs, and the guarded version finds **1** - a wrong one.
+
+So the chain of prompts is written while the picture is rendered: `go`/edit reads the base's sidecar, takes its `lineage`,
+appends the step **as typed** (not the text the sampler received), and stores `lineage` + `lineage_root` (bounded to
+`LINEAGE_MAX` steps). Copy-on-write, so nothing ever has to be reconstructed by walking files - which breaks the moment a
+base is deleted.
+
+For pictures rendered before this existed, `lineage.py` recovers the chain once by following `base_image` back:
+
+```
+python lineage.py --gallery C:/Users/kevin/Pictures/zimage-ui         # dry run
+python lineage.py --gallery C:/Users/kevin/Pictures/zimage-ui --apply
+```
+
+Measured on the real gallery: **995 chains written, 327 marked `lineage_partial`** because their base is already gone
+(an honest short chain, not an invented root); a second run writes **0**.
+
+Grouping by the chain alone is *not* switched on: chained rows leave the similarity pass, which fragments the gallery
+(**50 folders become 135**). The chain is the right key for a *series*; a folder is a *family*, so the two-tier view
+(family -> series) is the change that can use it, and it is not built yet.
+
 ## A stated count no longer splits a folder; the name carries it
 
 One scene made five folders in the gallery: *"five naked women floating in the air in a circle around a pyre ..."*,
