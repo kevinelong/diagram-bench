@@ -576,6 +576,10 @@ fails *open*: with the mode variable missing or renamed, the expression went fal
 site uses it (button mapping, arrows, labels, rounds), and the destructive branch itself refuses a delete choice while
 ranking with a visible *"refused to delete while ranking"* hint.
 
+**Gallery… starts it, from the folder pane** - beside Select all / Delete… / A/B… / Recover… / Caption… - and the window
+opens **already in gallery mode** instead of making you find a radio inside the A/B window; `review_start(mode='gallery')`
+is the same thing programmatically. It walks the open folder, or the whole source when no folder is open yet.
+
 **A third mode: Gallery.** Between Rank and Delete, *Gallery* shows **one picture at a time and does nothing else** - no
 wins recorded, nothing recycled - for reading through a folder. `→`/`↓` go forward, `←`/`↑` go back, and both **wrap**: past
 the last comes the first, and back from the first comes the last. The count sits **bottom-right on the picture** (`3 / 40`),
@@ -704,7 +708,7 @@ another pipeline can be browsed, categorised, reviewed and captioned without any
 | **unfiled** | pictures with no prompt get their own bucket, because they can never be in a prompt folder and were otherwise unreachable while folders were on |
 | recursion | **off by default and never remembered**: `subfolders` is a mode you ask for, and re-opening a folder resets it to off. The walk skips `.thumbs`, `.masks`, `.previews` and dotted directories, dedupes by real path (junctions), and stops at `SCAN_CAP = 5000` saying so |
 | **deleting there** | enabled, logged as deliberate, and **Recycle Bin or nothing**: the hard-delete fallback that `--out` keeps is disabled for any other folder, so a refused Bin leaves the file alone and the window says so |
-| **thumbnails** | beside the picture when the source *is* the output folder (unchanged, self-contained); in app data keyed by the source's real path for any other folder, so nothing is written into someone else's. The cache key inside a shared cache is `stem-<hash of the path>`, because under recursion `a/foo.png` and `b/foo.png` would otherwise share a thumbnail. A thumbnail costs **20.3 ms** to build (measured), so the cache is not optional: 5,000 pictures would be ~100 s without it |
+| **thumbnails** | beside the picture when the source *is* the output folder (unchanged, self-contained); in app data keyed by the source's real path for any other folder, so nothing is written into someone else's. The cache key inside a shared cache is `stem-<hash of the path>`, because under recursion `a/foo.png` and `b/foo.png` would otherwise share a thumbnail. A thumbnail costs **15.6 ms** to build at the current size (measured), so the cache is not optional: 5,000 pictures would be ~80 s without it. They are **336 px** since 2026-10-30 (doubled from 168), and a `.px` marker records the size in force: a mismatch deletes the stale file and rebuilds, because the mtime check alone would keep serving a blurrier cache forever |
 
 ## Recovering metadata from the pictures themselves
 
