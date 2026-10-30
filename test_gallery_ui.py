@@ -904,6 +904,67 @@ def main():
     app.negative.delete('1.0', 'end')
     app.busy = False
 
+    print('\n-- the folder pane has select all and delete, and a delete leaves the pane at once')
+    check('the pane has a select-all button', hasattr(app, 'contents_all_btn'), 'missing')
+    check('the pane has a delete button', hasattr(app, 'contents_del_btn'), 'missing')
+    app.selected = []
+    app._paint()
+    check('delete is disabled with nothing selected', 'disabled' in app.contents_del_btn.state(),
+          str(app.contents_del_btn.state()))
+
+    saved_plan2, saved_soon2 = app._plan, app._regroup_soon
+    pics2 = list(app._files)[:4]
+    if len(pics2) >= 3:
+        app._regroup_soon = lambda: None
+        app._plan = {'groups': [{'label': 'pane-test', 'items': [{'path': str(p)} for p in pics2]}],
+                     'recent': [], 'ungrouped': []}
+        app._render_folder_bar(); app.select_folder(0); root.update()
+        check('the pane is drawn with the folder\'s pictures', len(app._content_order) == len(pics2),
+              str(len(app._content_order)))
+        app.selected = []
+        app._select_all_pane(); root.update()
+        check('select all takes every picture in the pane', len(app.selected) == len(pics2), str(len(app.selected)))
+        check('and enables delete', 'disabled' not in app.contents_del_btn.state(), str(app.contents_del_btn.state()))
+        check('the label counts it', 'selected' in app.contents_sel_label['text'], app.contents_sel_label['text'])
+        app._select_all_pane(); root.update()
+        check('pressing it again clears', app.selected == [], str(len(app.selected)))
+
+        victim = Path(app._content_order[0])
+        victim.with_suffix('.json').write_text(json.dumps({'prompt': 'pane test'}), encoding='utf-8')
+        app.selected = [victim]
+        app._paint()
+        deleted = []
+
+        def fake_recycle(files):
+            for f in files:
+                if f.exists():
+                    f.unlink()
+                    deleted.append(f)
+            return True
+
+        from tkinter import messagebox as _mb
+        real_ask, real_recycle = _mb.askyesno, app._recycle_files
+        _mb.askyesno = lambda *a, **k: True
+        app._recycle_files = fake_recycle
+        try:
+            app.delete_selected()
+            root.update()
+        finally:
+            _mb.askyesno, app._recycle_files = real_ask, real_recycle
+        check('the files went', not victim.exists() and len(deleted) >= 1, str(len(deleted)))
+        check('the tile left the pane immediately', victim not in app._content_order, str(len(app._content_order)))
+        check('and the plan forgot it',
+              not any(Path(str(it.get('path', ''))) == victim
+                      for g in app._plan['groups'] for it in g.get('items') or []),
+              'still in the plan')
+        app.selected = []
+        app.select_folder(None)
+        app._plan = saved_plan2
+        app._regroup_soon = saved_soon2
+        app._render_folder_bar(); app.refresh_gallery(); app.busy = False
+    else:
+        check('three pictures exist for the pane test', False, str(len(pics2)))
+
     print('\n-- a shot list renders one card per shot, named after its id')
     shot_doc = {'film': 'THE LAST POCKET', 'code': 'TLP', 'shots': [
         {'id': 'S01-0001', 'card': 1, 'scene': 1, 'place': 'EXT. PORT MERIDIAN', 'time': 'NIGHT',
@@ -2169,11 +2230,13 @@ def main():
     check('the pane is as tall as the column, not a band under it',
           app.contents_holder.winfo_height() >= app.gal_canvas.winfo_height() - 12,
           (app.contents_holder.winfo_height(), app.gal_canvas.winfo_height()))
-    check('and its pictures fill everything below the folder name',
-          app.contents_canvas.winfo_height()
-          >= app.contents_holder.winfo_height() - app.contents_title.winfo_height() - 12,
+    # everything below the folder name *and its new button row*: select all and delete own that band now
+    check('and its pictures fill everything below the folder name and buttons',
+          app.contents_canvas.winfo_height() >= (app.contents_holder.winfo_height()
+                                                 - app.contents_title.winfo_height()
+                                                 - app.contents_btns.winfo_height() - 12),
           (app.contents_canvas.winfo_height(), app.contents_holder.winfo_height(),
-           app.contents_title.winfo_height()))
+           app.contents_title.winfo_height(), app.contents_btns.winfo_height()))
     app.select_folder(None); root.update()
 
     print('\n-- a scrolling grid grows its tiles with the window instead of adding columns forever')

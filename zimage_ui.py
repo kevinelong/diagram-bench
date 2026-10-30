@@ -1605,6 +1605,19 @@ class App:
                         ('<space>', self._pane_toggle), ('<Return>', self._pane_open),
                         ('<Control-a>', self._pane_all)):
             self.contents_canvas.bind(seq, fn)
+        # The pane had no delete of its own: the strip did (select all, Delete, Ctrl+A), and a picture removed from the
+        # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
+        self.contents_btns = ttk.Frame(self.contents_holder)
+        self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
+        self.contents_btns.columnconfigure(0, weight=1)
+        self.contents_btns.columnconfigure(1, weight=1)
+        self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
+        self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
+        self.contents_del_btn = ttk.Button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
+                                           state='disabled')
+        self.contents_del_btn.grid(row=0, column=1, sticky='we', padx=(3, 0))
+        self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
+        self.contents_sel_label.grid(row=1, column=0, columnspan=2, sticky='we', pady=(2, 0))
         self._contents_cols_seen = None
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
@@ -2399,9 +2412,18 @@ class App:
     def _pane_all(self, event=None):
         if not self._pane_has_focus():
             return None
-        self.selected = list(self._pane_cells()[0])
-        self._paint()
+        self._select_all_pane()
         return 'break'
+
+    def _select_all_pane(self):
+        """Select every picture in the open folder - pressing it again clears, the way the strip's button behaves."""
+        keys = list(self._pane_cells()[0])
+        if keys and len(self.selected) == len(keys) and all(k in self.selected for k in keys):
+            self.selected = []
+        else:
+            self.selected = keys
+        self._anchor = keys[0] if keys else None
+        self._paint()
 
     def _regroup_soon(self):
         """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
@@ -4855,6 +4877,18 @@ class App:
             return                          # select_file rebuilds the grid, which paints it
         self._paint()
 
+    def _update_pane_buttons(self):
+        """Enable the pane's delete (and count the selection) from the same selection the strip uses."""
+        if not hasattr(self, 'contents_del_btn'):
+            return
+        n = len(self.selected)
+        try:
+            self.contents_del_btn.state(['!disabled'] if n else ['disabled'])
+            self.contents_all_btn.state(['disabled'] if not self._pane_cells()[0] else ['!disabled'])
+        except Exception:
+            pass
+        self.contents_sel_label.configure(text=('%d selected' % n) if n else '')
+
     def _paint(self):
         """Colour the selection ring and the base-image border without rebuilding thumbnails."""
         ring = self.theme.accent
@@ -4886,6 +4920,7 @@ class App:
                 btn.configure(text='Delete (%d)' % n if n else 'Delete', state='normal' if n else 'disabled')
             if lab is not None and lab.winfo_exists():
                 lab.configure(text='%d selected' % n if n else '')
+        self._update_pane_buttons()
 
     def _browser_mark(self, key, mode):
         """Keyboard selection inside View All, in the same vocabulary the mouse uses.
@@ -4979,6 +5014,23 @@ class App:
                 self.hint.configure(text='could not delete %s: %s' % (f.name, e))
         return gone
 
+    def _forget_deleted(self, paths):
+        """Take deleted pictures out of the plan now, so the pane stops drawing them without waiting for a regroup.
+
+        The plan is rebuilt from disk on the next regroup, but a regroup is a debounce away and the file is already gone:
+        a tile that stays on screen after its picture was recycled is the pane lying about what is there.
+        """
+        names = {Path(p).name for p in paths}
+        if not self._plan:
+            return
+        for group in self._plan.get('groups') or []:
+            items = group.get('items') or []
+            group['items'] = [it for it in items if Path(str(it.get('path', ''))).name not in names]
+        for key in ('recent', 'ungrouped'):
+            bucket = self._plan.get(key)
+            if isinstance(bucket, list):
+                self._plan[key] = [p for p in bucket if Path(str(getattr(p, 'path', p))).name not in names]
+
     def delete_selected(self):
         paths = [Path(p) for p in self.selected if Path(p).exists()]
         if not paths:
@@ -5015,7 +5067,12 @@ class App:
             self._img = None
             self._current = None
         self.selected = [p for p in self.selected if p not in paths]
+        self._forget_deleted(paths)
         self.refresh_gallery()
+        # immediately: the pane is drawn from the plan, and refresh_gallery only re-renders the strip
+        if self._active_folder is not None and self._folders_view_active():
+            self._render_contents()
+            self._render_folder_bar()
         self.status.configure(text='%s %d image%s%s'
                               % ('moved to the Recycle Bin' if recycled else 'deleted',
                                  len(gone), '' if len(gone) == 1 else 's',

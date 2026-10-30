@@ -567,6 +567,18 @@ at **0.78**, so it carries a measured **+0.06** (`MODEL_STRENGTH_OFFSET`); sweep
 never overwrites a strength you set by hand, and switching model re-proposes the number for that model only while the
 slider still holds what we put there.
 
+## Deleting from the folder pane
+
+The window's second column (the open folder's pictures) now has its own **Select all** and **Delete…** row underneath the
+grid, with a count under it (`24 selected`). **Delete starts disabled** and follows the selection; the keys work too - `Ctrl+A`
+in the pane, and `Delete` anywhere that is not a text box - and both go through the same confirmation as the strip: pictures,
+their `.json` and their thumbnail go to the **Recycle Bin**, so a mistake is recoverable.
+
+**A deleted picture leaves the pane at once.** It used to stay: `delete_selected` re-rendered only the strip
+(`refresh_gallery`) while the pane is drawn from the plan, and the plan keeps its members until the next regroup - a debounce
+away. So the tile outlived its file. Now `_forget_deleted` prunes the plan (its groups, `recent` and `ungrouped`) and the
+pane re-renders in the same gesture, which is also why the folder's picture count drops immediately.
+
 ## A picture made from a folder base is visible at once
 
 Newly generated pictures are deliberately **unfiled**: the plan keeps a recent bucket ("recent N stay ungrouped"), because a
