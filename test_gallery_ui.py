@@ -958,6 +958,55 @@ def main():
     check('with nothing to go back to it says so', 'nothing to go back' in app.hint['text'], app.hint['text'][:40])
     app._review = None
 
+    print('\n-- a batch paints without decoding, and the column fills itself')
+    lazy = Path(tempfile.mkdtemp(prefix='lazy-'))
+    for i in range(40):
+        p = lazy / ('l%02d.png' % i); Image.new('RGB', (96, 96), (20 + i, 120, 200 - i)).save(p)
+        p.with_suffix('.json').write_text(json.dumps({'prompt': 'lazy study %d' % (i % 3), 'seed': i, 'steps': 4,
+                                                      'cfg': 1.0, 'size': 512}), encoding='utf-8')
+    was_source2, was_shown = app._source, app._shown
+    app.set_source(lazy)
+    for _ in range(60):
+        app._poll(); root.update(); time.sleep(0.02)
+    check('no thumbnail is built on the paint path', len(list((lazy / zui.THUMB_DIR).glob('*.jpg'))) == 0,
+          str(len(list((lazy / zui.THUMB_DIR).glob('*.jpg')))))
+    check('tiles are waiting for their thumbnails', len(app._pending_tiles) > 0, str(len(app._pending_tiles)))
+    t0 = time.monotonic()
+    app.refresh_gallery(); root.update()
+    paint = time.monotonic() - t0
+    check('painting a batch is quick when nothing is decoded', paint < 0.35, '%.0f ms' % (paint * 1000))
+
+    queued = app._prefetch('strip')
+    check('the prefetcher queues the work in the background', queued > 0, str(queued))
+    for _ in range(200):
+        app._poll(); root.update(); time.sleep(0.02)
+        if not app._thumbs_inflight:
+            break
+    cache_dir = Path(app._thumb_root()) / zui.THUMB_DIR      # a foreign source caches in app data, not in the folder
+    built = len(list(cache_dir.glob('*.jpg'))) if cache_dir.exists() else 0
+    check('the thumbnails do get built', built > 0, str(built))
+    check('and none of them in the foreign folder', not (lazy / zui.THUMB_DIR).exists(),
+          str(lazy / zui.THUMB_DIR))
+    waiting = [lab for labs in app._pending_tiles.values() for lab in (labs or []) if lab is not None]
+    placeholder = next(iter(app._placeholder_photos.values()), None)
+    framed = [lab for lab in waiting
+              if lab.winfo_exists() and getattr(lab, 'image', None) is not None and lab.image is not placeholder]
+    check('and land in the tiles that were waiting', bool(framed) or not waiting,
+          '%d of %d tiles got a picture' % (len(framed), len(waiting)))
+
+    # the fill loop grows the list whatever the scroll position, and stops at the end
+    real_tall = app._grid_taller_than_view
+    app._grid_taller_than_view = lambda which: False      # pretend the column is taller than what is shown
+    try:
+        app._fill_view('strip', rounds=50)
+    finally:
+        app._grid_taller_than_view = real_tall
+    check('filling pulls every remaining batch until the list ends', app._shown >= len(app._files),
+          '%d shown of %d' % (app._shown, len(app._files)))
+    app.close_source()
+    app._shown = was_shown
+    app.refresh_gallery(); app.busy = False
+
     print('\n-- another folder can be viewed while renders keep their own output folder')
     src_out = Path(tempfile.mkdtemp(prefix='src-out-'))
     src_foreign = Path(tempfile.mkdtemp(prefix='src-foreign-'))
@@ -971,6 +1020,21 @@ def main():
     Image.new('RGB', (64, 64), (0, 0, 220)).save(src_foreign / 'sub' / 'deep.png')
 
     was_source, was_out = app._source, app.args.out
+    # the UI route: Open… asks for a folder and switches the view, and cancelling changes nothing
+    from tkinter import filedialog as _fd
+    bar_buttons = [str(w.cget('text')) for w in app.folder_bar.winfo_children() if w.winfo_class() == 'TButton']
+    check('the folder bar has an Open… button', any(b.startswith('Open') for b in bar_buttons), str(bar_buttons))
+    real_askdir = _fd.askdirectory
+    _fd.askdirectory = lambda **k: ''
+    try:
+        check('cancelling the picker changes nothing', app.open_source_dialog() is False
+              and Path(app._source) == Path(was_out), str(app._source))
+        _fd.askdirectory = lambda **k: str(src_foreign)
+        check('picking a folder switches the view', app.open_source_dialog() is True
+              and Path(app._source) == src_foreign, str(app._source))
+    finally:
+        _fd.askdirectory = real_askdir
+    root.update()
     app.set_source(src_foreign); root.update()
     check('the view follows the new folder', sorted(Path(p).name for p in app._files) == ['x.jpg', 'y.webp', 'z.png'],
           str(sorted(Path(p).name for p in app._files)))
@@ -3616,6 +3680,41 @@ def main():
         app._review_mode.set('delete')
         app.review_decide('keep_both'); root.update()
         check('keep both recycles nothing', len(recycled) == 1, recycled)
+
+        # gallery mode: one picture at a time, numbered, wrapping, and never destructive
+        recycled_before = len(recycled)
+        app._review_mode.set('gallery'); app._review_relabel(); root.update()
+        series = app.gallery_series()
+        check('gallery walks the folder\'s own list', len(series) >= 3, str(len(series)))
+        check('the pair half of the window is put away', r['right_lbl'].grid_info() == {},
+              str(r['right_lbl'].grid_info()))
+        check('the badge counts from one', app.gallery_badge(0, len(series)).startswith('1 /'),
+              app.gallery_badge(0, len(series)))
+        check('and FIN marks the last', app.gallery_badge(len(series) - 1, len(series)).endswith('FIN'),
+              app.gallery_badge(len(series) - 1, len(series)))
+        app.gallery_step(+1); root.update()
+        check('next moves the badge', str(r['badge']['text']).startswith('2 /'), str(r['badge']['text']))
+        app._review_arrow('right'); app._review_arrow('down'); root.update()
+        check('right and down both go forward', str(r['badge']['text']).startswith('4 /'), str(r['badge']['text']))
+        app._review_arrow('left'); app._review_arrow('up'); root.update()
+        check('left and up both go back', str(r['badge']['text']).startswith('2 /'), str(r['badge']['text']))
+        r['cur'] = len(series) - 1; app.gallery_show(); root.update()
+        check('the last picture says FIN', 'FIN' in str(r['badge']['text']), str(r['badge']['text']))
+        app.gallery_step(+1); root.update()
+        check('and next wraps to the first', str(r['badge']['text']).startswith('1 /'), str(r['badge']['text']))
+        app.gallery_step(-1); root.update()
+        check('previous wraps back to the last', 'FIN' in str(r['badge']['text']), str(r['badge']['text']))
+        before_decisions = len(r['state'].get('decisions') or {})
+        before_wins = _pr.record_of(str(series[0]))['wins']
+        app.review_decide('left'); app.gallery_step(+1); root.update()
+        check('gallery mode records no decision', len(r['state'].get('decisions') or {}) == before_decisions,
+              str(len(r['state'].get('decisions') or {})))
+        check('and marks no winner', _pr.record_of(str(series[0]))['wins'] == before_wins,
+              str(_pr.record_of(str(series[0]))['wins']))
+        check('and recycles nothing', len(recycled) == recycled_before, str(len(recycled)))
+        app._review_mode.set('rank'); app._review_relabel(); root.update()
+        check('switching back restores the pair layout', bool(r['right_lbl'].grid_info()),
+              str(r['right_lbl'].grid_info()))
         app.review_stop(); root.update()
         check('stop closes the window and says where it got to',
               app._review is None and 'progress saved' in app.status['text'], app.status['text'])

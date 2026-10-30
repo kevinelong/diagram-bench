@@ -673,7 +673,7 @@ def estimate_vram(model, batch, size):
     return mib, 'measured %s at %d px, batch %d' % (key[0], key[2], key[1])
 
 
-def thumb_for(png, cache_root=None):
+def thumb_for(png, cache_root=None, build=True):
     """Return a cached thumbnail path for `png`, creating it if missing or stale.
 
     The cache lives in a `.thumbs` folder beside the images and is keyed by the image's name, so the gallery never
@@ -693,6 +693,8 @@ def thumb_for(png, cache_root=None):
     try:
         if out.exists() and out.stat().st_mtime >= png.stat().st_mtime:
             return out
+        if not build:
+            return None          # a paint path asks what exists; the building happens off the UI thread
         im = Image.open(png)
         im.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
         im.convert('RGB').save(out, 'JPEG', quality=82, optimize=True)
@@ -701,11 +703,11 @@ def thumb_for(png, cache_root=None):
     return out
 
 
-def thumbs_for(paths, workers=8, cache_root=None):
+def thumbs_for(paths, workers=8, cache_root=None, build=True):
     """Build any missing thumbnails in parallel. Returns {path: thumb_or_None}."""
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        got = list(pool.map(lambda p: (p, thumb_for(p, cache_root)), paths))
+        got = list(pool.map(lambda p: (p, thumb_for(p, cache_root, build=build)), paths))
     return dict(got)
 
 
@@ -743,6 +745,15 @@ def prompt_clashes(text):
                 if b in low and (a, b) not in found:
                     found.append((a, b))
     return found
+
+
+def pair_review_progress_safe(state):
+    """(decided, total, deletes) or zeros - the gallery view must never fail because a counter did."""
+    try:
+        import pair_review
+        return pair_review.progress(state)
+    except Exception:
+        return 0, 0, 0
 
 
 def tile_plan(batch, seed, seed_step, has_base=False):
@@ -1509,6 +1520,12 @@ class App:
         self._current = None
         self._files = []
         # what we look at (source) and what we write to (args.out) are the same folder until somebody opens another one
+        self._thumb_cache = {}            # path -> thumbnail file, resolved once
+        self._photo_cache = {}            # (path, size) -> PhotoImage, so a repaint reuses the Tk image
+
+        self._thumbs_inflight = set()     # paths a background build is already working on
+        self._pending_tiles = {}          # path -> [tile widgets waiting for that thumbnail]
+        self._placeholder_photos = {}     # size -> one grey PhotoImage, reused instead of one per tile
         self._source = Path(self.args.out)
         self._recursive = False      # never remembered: a mode you ask for, not a property of a folder
         self._scan_capped = False
@@ -2173,6 +2190,53 @@ class App:
     # -- gallery: thumbnails -------------------------------------------------
     IMAGE_SUFFIXES = ('.png', '.webp', '.jpg', '.jpeg')
 
+    def _thumb_of(self, path, build=False):
+        """A thumbnail for a tile: from memory, then disk - a decode only when `build` says so.
+
+        The paint path calls this with build=False, so a folder of pictures that have never been thumbnailed paints at
+        once with placeholders instead of blocking for 20 ms each (measured) while the column stays empty.
+        """
+        key = str(path)
+        hit = self._thumb_cache.get(key)
+        if hit and Path(hit).exists():
+            return hit
+        got = thumb_for(path, cache_root=self._thumb_root(), build=build)
+        if got:
+            self._thumb_cache[key] = got
+        return got
+
+    def _photo_of(self, thumb_path, size, key=None):
+        """A PhotoImage from a thumbnail file, cached by (key, size). Never decodes the original.
+
+        Rebuilding the Tk image on every repaint measured at **9.5 ms a tile** (172 ms for 18 tiles) even with the
+        thumbnail on disk, which is most of a repaint; the same objects are reused now.
+        """
+        if not thumb_path:
+            return None
+        cache_key = (str(key if key is not None else thumb_path), int(size))
+        photo = self._photo_cache.get(cache_key)
+        if photo is not None:
+            return photo
+        try:
+            from PIL import ImageTk
+            with Image.open(thumb_path) as im:
+                im.thumbnail((size, size), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+        except Exception:
+            return None
+        self._photo_cache[cache_key] = photo
+        return photo
+
+    def _placeholder_photo(self, size):
+        """One grey PhotoImage per tile size, so an un-thumbnailed tile still occupies its place in the grid."""
+        size = max(8, int(size))
+        photo = self._placeholder_photos.get(size)
+        if photo is None:
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(Image.new('RGB', (size, size), self.theme.surface))
+            self._placeholder_photos[size] = photo
+        return photo
+
     def _thumb_root(self):
         """Where thumbnails for the current source belong: None for "beside the picture", else a cache folder.
 
@@ -2210,6 +2274,9 @@ class App:
         self._scan_capped = False
         self._heads.clear()
         self._wins_cache = {}
+        self._photo_cache.clear()
+        self._thumb_cache.clear()
+        self._pending_tiles.clear()
         self._plan = None
         self._active_folder = None
         if not same:
@@ -2219,6 +2286,19 @@ class App:
         if hasattr(self, 'group_var') and self.group_var.get():
             self._regroup_soon()
         return True
+
+    def open_source_dialog(self):
+        """Pick another folder to view. Renders keep going to the output folder - the dialog title says so."""
+        from tkinter import filedialog
+        try:
+            chosen = filedialog.askdirectory(parent=self.root, initialdir=str(self._source), mustexist=True,
+                                            title='View another folder (renders still go to %s)' % self.args.out)
+        except Exception as e:
+            self.hint.configure(text='could not open the folder picker: %s' % type(e).__name__)
+            return False
+        if not chosen:
+            return False
+        return self.set_source(chosen)
 
     def close_source(self):
         """Back to the folder this window writes to."""
@@ -2715,13 +2795,19 @@ class App:
             ttk.Label(self.folder_bar, text='viewing', foreground=self.theme.muted).pack(side='left', padx=(0, 3))
             ttk.Label(self.folder_bar, text=self._short_name(self._source.name)[:22],
                       foreground=self.theme.accent).pack(side='left')
-            ttk.Button(self.folder_bar, text='\u00d7', width=2, command=self.close_source).pack(side='left', padx=(3, 8))
+            back = ttk.Button(self.folder_bar, text='\u00d7', width=2, command=self.close_source)
+            back.pack(side='left', padx=(3, 8))
+            self._tip(back, 'Stop viewing %s and go back to %s' % (self._source, self.args.out))
         self._folder_choices = [None] + list(range(len(self._plan['groups'])))
         name = 'All folders' if self._active_folder is None else self._folder_text(self._active_folder)
         self.folder_pick_btn = ttk.Button(self.folder_bar, text='%s\u2026' % name, width=17,
                                           command=self.open_folder_browser)
         self.folder_pick_btn.pack(side='left')
         ttk.Button(self.folder_bar, text='A/B\u2026', width=4, command=self.review_start).pack(side='left', padx=(3, 0))
+        self.open_source_btn = ttk.Button(self.folder_bar, text='Open\u2026', width=6, command=self.open_source_dialog)
+        self.open_source_btn.pack(side='left', padx=(6, 0))
+        self._tip(self.open_source_btn, 'View and categorise another folder - a folder from another pipeline, say. '
+                                       'Renders still go to %s; Close (x) comes back here.' % self.args.out)
         self.recursive_var = tk.BooleanVar(value=bool(self._recursive))
         ttk.Checkbutton(self.folder_bar, text='subfolders', variable=self.recursive_var,
                         command=self.toggle_recursive).pack(side='left', padx=(8, 0))
@@ -3022,6 +3108,8 @@ class App:
         self._review_mode = tk.StringVar(value='rank')
         ttk.Radiobutton(mode_row, text='Rank - mark a winner, delete nothing', value='rank',
                         variable=self._review_mode, command=self._review_relabel).pack(side='left')
+        ttk.Radiobutton(mode_row, text='Gallery - one at a time, nothing deleted', value='gallery',
+                        variable=self._review_mode, command=self._review_relabel).pack(side='left', padx=(12, 0))
         ttk.Radiobutton(mode_row, text='Delete - recycle the loser', value='delete',
                         variable=self._review_mode, command=self._review_relabel).pack(side='left', padx=(12, 0))
         ttk.Button(mode_row, text='Reset wins in this folder', command=self._review_reset).pack(side='right')
@@ -3031,17 +3119,23 @@ class App:
         b_stop = ttk.Button(bar, text='Stop  (Esc)', command=self.review_stop)
         for i, b in enumerate((b_left, b_keep, b_right, b_stop)):
             b.grid(row=2, column=i, sticky='ew', padx=4)
+        # gallery mode: Prev/Next live where the three decisions were, and the count sits on the picture
+        b_prev = ttk.Button(bar, text='\u25c0  Prev  (\u2190 or \u2191)', command=lambda: self.gallery_step(-1))
+        b_next = ttk.Button(bar, text='Next  (\u2192 or \u2193)  \u25b6', command=lambda: self.gallery_step(+1))
+        badge = tk.Label(win, text='', background='#101010', foreground='#e8e8e8', font=('Segoe UI', 16, 'bold'),
+                         padx=12, pady=4)
         self._review = {'win': win, 'state': state, 'left_lbl': left_lbl, 'right_lbl': right_lbl, 'info': info,
                         'pair': None, 'deleted': 0, 'queue': None, 'path': None,
-                        'buttons': (b_left, b_keep, b_right)}
+                        'buttons': (b_left, b_keep, b_right), 'badge': badge, 'cur': 0,
+                        'gallery_buttons': (b_prev, b_next, b_stop)}
         for key, fn in (('1', lambda: self.review_decide('left')),
                         ('2', lambda: self.review_decide('middle')),
                         ('3', lambda: self.review_decide('right')),
                         ('<Escape>', self.review_stop),
                         ('<Left>', lambda: self._review_arrow('left')),
                         ('<Right>', lambda: self._review_arrow('right')),
-                        ('<Down>', lambda: self._review_arrow('middle')),
-                        ('<Up>', self.review_back),
+                        ('<Down>', lambda: self._review_arrow('down')),
+                        ('<Up>', lambda: self._review_arrow('up')),
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
@@ -3070,10 +3164,80 @@ class App:
         except Exception as e:
             lbl.configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
 
+    @staticmethod
+    def gallery_badge(index, total):
+        """'3 / 40', and 'FIN' on the last one, so the end of the series is visible rather than inferred."""
+        if total <= 0:
+            return ''
+        return '%d / %d%s' % (index + 1, total, '  FIN' if index == total - 1 else '')
+
+    def gallery_series(self):
+        """The pictures this review is about, in order - the folder's own list, not the pair schedule."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return []
+        paths = [str(p) for p in (r['state'].get('paths') or [])]
+        if paths:
+            return paths
+        seen = []
+        for a, b, _d in r['state'].get('pairs') or []:      # an older state without `paths`
+            for p in (a, b):
+                if str(p) not in seen:
+                    seen.append(str(p))
+        return seen
+
+    def gallery_step(self, delta):
+        """Move through the series, wrapping. Nothing is recorded, deleted or ranked here."""
+        r = getattr(self, '_review', None)
+        series = self.gallery_series()
+        if not r or not series:
+            return 'break'
+        r['cur'] = (int(r.get('cur') or 0) + delta) % len(series)
+        self.gallery_show()
+        return 'break'
+
+    def gallery_show(self):
+        """One picture, its place in the series bottom-right, and FIN on the last one."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        series = self.gallery_series()
+        if not series:
+            r['info'].configure(text='nothing to show')
+            return
+        index = max(0, min(int(r.get('cur') or 0), len(series) - 1))
+        r['cur'] = index
+        path = series[index]
+        r['pair'] = None
+        r['left_lbl'].source = path
+        self._review_fit(r['left_lbl'], path)
+        last = index == len(series) - 1
+        badge = r.get('badge')
+        if badge is not None:
+            badge.configure(text=self.gallery_badge(index, len(series)))
+            badge.place(relx=1.0, rely=1.0, anchor='se', x=-24, y=-112)
+        decided, total, deletes = pair_review_progress_safe(r['state'])
+        r['info'].configure(text='picture %d of %d  \u00b7  gallery  \u00b7  nothing is deleted or ranked  \u00b7  '
+                                 '%s%s' % (index + 1, len(series), Path(path).name[:48],
+                                           '  \u00b7  back at the first after this' if last else ''))
+
     def _review_arrow(self, side):
-        """Arrows rank; they never delete. In delete mode they are inert and say why - <Left> used to recycle a file."""
+        """Arrows: walk the gallery, rank in rank mode, and never delete.
+
+        In delete mode they are inert and say why - <Left> used to recycle a file.
+        """
+        if self._review_mode is not None and self._review_mode.get() == 'gallery':
+            if side in ('left', 'up'):
+                return self.gallery_step(-1)
+            if side in ('right', 'down'):
+                return self.gallery_step(+1)
+            return 'break'
         if not self._review_is_rank():
             self.hint.configure(text='arrows rank only - press 1, 2 or 3 here to delete or keep')
+            return 'break'
+        if side == 'up':
+            return self.review_back()
+        if side == 'down':
             return 'break'
         self.review_decide(side)
         return 'break'
@@ -3105,11 +3269,40 @@ class App:
         return 'break'
 
     def _review_relabel(self):
-        """Rank mode marks a winner; delete mode recycles a file. The buttons say which is which."""
+        """Rank marks a winner, gallery walks the series, delete recycles a file. The furniture says which."""
         r = getattr(self, '_review', None)
         if not r:
             return
         left, middle, right = r['buttons']
+        mode = self._review_mode.get() if self._review_mode is not None else 'rank'
+        gallery = mode == 'gallery'
+        try:
+            if gallery:
+                r['right_lbl'].grid_remove()
+                r['left_lbl'].grid_configure(columnspan=2, padx=6)
+                for b in (left, middle, right):
+                    b.grid_remove()
+                prev_btn, next_btn, _stop = r['gallery_buttons']
+                prev_btn.grid(row=2, column=0, columnspan=2, sticky='ew', padx=4)
+                next_btn.grid(row=2, column=2, columnspan=2, sticky='ew', padx=4)
+            else:
+                r['left_lbl'].grid_configure(columnspan=1, padx=(6, 3))
+                r['right_lbl'].grid()
+                for b in r.get('gallery_buttons', ())[:2]:
+                    b.grid_remove()
+                for i, b in enumerate((left, middle, right)):
+                    b.grid(row=2, column=i, sticky='ew', padx=4)
+        except Exception:
+            pass
+        if gallery:
+            try:
+                r['gallery_buttons'][2].grid(row=2, column=3, sticky='ew', padx=4)   # Stop stays reachable
+            except Exception:
+                pass
+            self.gallery_show()
+            return
+        if r.get('badge') is not None:
+            r['badge'].place_forget()
         if self._review_is_rank():
             left.configure(text='Left wins  (1 or \u2190)')
             middle.configure(text='Tie  (2 or \u2193)')
@@ -3211,7 +3404,11 @@ class App:
         import pair_review
         import pair_rank
         r = getattr(self, '_review', None)
-        if not r or not r.get('pair'):
+        if not r:
+            return
+        if getattr(self, '_review_mode', None) is not None and self._review_mode.get() == 'gallery':
+            return              # gallery mode shows pictures; it never ranks and never deletes
+        if not r.get('pair'):
             return
         a, b = r['pair']
         # the buttons say left/middle/right; the mode decides what that means
@@ -3654,22 +3851,20 @@ class App:
             order = pair_rank.sort_by_strength([r['path'] for r in items])
             pos = {p: i for i, p in enumerate(order)}
             items.sort(key=lambda r: pos.get(r['path'], len(items)))
-        thumbs = thumbs_for([r['path'] for r in items], cache_root=self._thumb_root())
         order = []                                  # the pane's own display order, for its keyboard
         for i, row in enumerate(items[:self._content_shown]):
-            tp = thumbs.get(row['path'])
-            if not tp:
-                continue
-            try:
-                with Image.open(tp) as im:
-                    im.thumbnail((tile_px, tile_px), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(im)
-            except Exception:
-                continue
+            tp = self._thumb_of(row['path'])        # cached or nothing: a decode here would empty the column
+            photo = self._photo_of(tp, tile_px, key=row['path'])
+            waiting = photo is None
+            if waiting:
+                photo = self._placeholder_photo(tile_px)
             cell = ttk.Frame(self.contents)
             cell.grid(row=i // cols, column=i % cols, padx=1, pady=1)
             lab = self._tile_widget(cell, row['path'], photo, pane=True)
             lab.pack()
+            lab.thumb_px = tile_px
+            if waiting:
+                self._pending_tiles.setdefault(str(row['path']), []).append(lab)
             order.append(Path(row['path']))
             # the corner badge: how big this file is, on the three bands - tomato red 64 kB or less, amber between,
             # medium green 1 MB or more. A pixel font because at 8 px an antialiased face is unreadable.
@@ -3702,6 +3897,7 @@ class App:
             # a re-render must not hand the keyboard to the strip: the reader was working in this pane
             self.root.after_idle(lambda: self.contents_canvas.focus_set())
         self.root.after_idle(self._on_contents_resize)
+        self.root.after_idle(lambda: self._fill_view('contents'))
         if pane_pos:
             self._restore_scroll(self.contents_canvas, pane_pos)
         else:
@@ -3731,6 +3927,79 @@ class App:
             self.contents_bar.grid()
         else:
             self.contents_bar.grid_remove()
+
+    def _grid_taller_than_view(self, which):
+        """Is the laid-out list already at least as tall as its viewport?"""
+        try:
+            canvas = self.gal_canvas if which == 'strip' else self.contents_canvas
+            box = canvas.bbox('all')
+            if not box:
+                return False
+            return (box[3] - box[1]) >= canvas.winfo_height() - 4
+        except Exception:
+            return True
+
+    def _grow(self, which):
+        """Append one batch, whatever the scroll position. True when something was added.
+
+        `_maybe_more` only fires at the bottom of a list, which is why a column shorter than its viewport could sit
+        half empty forever: the last cell never comes into view, so the next batch is never asked for.
+        """
+        if which == 'strip':
+            if self._folders_view_active():
+                groups = (self._plan or {}).get('groups') or []
+                if self._folder_shown >= len(groups):
+                    return False
+                self._folder_shown += BATCH_FOLDERS
+                self._render_folder_tiles()
+                return True
+            if self._shown >= len(self._files):
+                return False
+            self._shown += BATCH_TILES
+            self.refresh_gallery()
+            return True
+        items = getattr(self, '_content_items', None) or []
+        if self._active_folder is None or self._content_shown >= len(items):
+            return False
+        self._content_shown += BATCH_CONTENTS
+        self._render_contents()
+        return True
+
+    def _fill_view(self, which='strip', rounds=8):
+        """Keep adding batches until the column is full - then build the next ones' thumbnails in the background."""
+        if getattr(self, '_rebuilding', False):
+            return
+        for _ in range(rounds):
+            if self._grid_taller_than_view(which):
+                break
+            if not self._grow(which):
+                break
+        self._prefetch(which)
+
+    def _prefetch(self, which='strip', ahead=2):
+        """Build the thumbnails the view will need next, off the UI thread. Returns how many were queued."""
+        import threading
+        if which == 'strip':
+            pool = [] if self._folders_view_active() else list(self._files[:self._shown + ahead * BATCH_TILES])
+        else:
+            pool = [r.get('path') for r in (getattr(self, '_content_items', None) or [])
+                    [:self._content_shown + ahead * BATCH_CONTENTS]]
+        want = [str(p) for p in pool
+                if p and str(p) not in self._thumb_cache and str(p) not in self._thumbs_inflight]
+        if not want:
+            return 0
+        self._thumbs_inflight.update(want)
+        cache_root = self._thumb_root()
+
+        def work():
+            try:
+                got = thumbs_for(want, cache_root=cache_root, build=True)
+            except Exception:
+                got = {}
+            self.ui_events.put(('thumbs', got))
+
+        threading.Thread(target=work, daemon=True).start()
+        return len(want)
 
     def _maybe_more(self, which):
         """Infinite scrolling: at the bottom of a list, append the next batch."""
@@ -3807,6 +4076,7 @@ class App:
                 w.bind('<Button-1>', lambda e, i=index: self._folder_clicked(i))
         self._paint_folder_cursor()
         self.root.after_idle(self._on_strip_resize)
+        self.root.after_idle(lambda: self._fill_view('strip'))
 
     def _folder_clicked(self, index):
         """A click on a folder tile: open it, park the keyboard cursor on it, and hand the strip the arrows.
@@ -3912,25 +4182,22 @@ class App:
             return                 # action row disabled while `selected` held the path
         self.gal_title.configure(text=label)
         cols, tile_px = self._strip_metrics()
-        thumbs = thumbs_for(recent, cache_root=self._thumb_root()) if recent else {}
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
         for i, p in enumerate(recent):
-            tp = thumbs.get(p)
-            if not tp:
-                continue
-            try:
-                from PIL import ImageTk
-                im = Image.open(tp)
-                im.thumbnail((tile_px, tile_px), Image.LANCZOS)
-                ph = ImageTk.PhotoImage(im)
-            except Exception:
-                continue
+            tp = self._thumb_of(p)
+            ph = self._photo_of(tp, tile_px, key=p)
+            waiting = ph is None
+            if waiting:
+                ph = self._placeholder_photo(tile_px)
             self._thumbs[p] = ph
             lab = self._tile_widget(self.recent, p, ph)
+            lab.thumb_px = tile_px
             lab.grid(row=i // cols, column=i % cols, padx=1, pady=1)
             self._tile_widgets[Path(p)] = lab
+            if waiting:
+                self._pending_tiles.setdefault(str(p), []).append(lab)
         if files:
             self.starters.grid_remove()
         else:
@@ -6473,6 +6740,23 @@ class App:
                         self.generate()
                 elif kind == 'queued':
                     self.status.configure(text='generating…')
+                elif kind == 'thumbs':
+                    for path, thumb in (payload or {}).items():
+                        self._thumbs_inflight.discard(str(path))
+                        if not thumb:
+                            self._pending_tiles.pop(str(path), None)
+                            continue
+                        self._thumb_cache[str(path)] = thumb
+                        for lab in self._pending_tiles.pop(str(path), []) or []:
+                            try:
+                                if lab is None or not lab.winfo_exists():
+                                    continue
+                                photo = self._photo_of(thumb, getattr(lab, 'thumb_px', 64))
+                                if photo is not None:
+                                    lab.configure(image=photo)
+                                    lab.image = photo
+                            except Exception:
+                                continue
                 elif kind == 'ws':
                     self._on_ws(payload)
                 elif kind == 'ws_error':

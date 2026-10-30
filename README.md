@@ -576,6 +576,13 @@ fails *open*: with the mode variable missing or renamed, the expression went fal
 site uses it (button mapping, arrows, labels, rounds), and the destructive branch itself refuses a delete choice while
 ranking with a visible *"refused to delete while ranking"* hint.
 
+**A third mode: Gallery.** Between Rank and Delete, *Gallery* shows **one picture at a time and does nothing else** - no
+wins recorded, nothing recycled - for reading through a folder. `→`/`↓` go forward, `←`/`↑` go back, and both **wrap**: past
+the last comes the first, and back from the first comes the last. The count sits **bottom-right on the picture** (`3 / 40`),
+and the last one carries **`FIN`** beside its number so the end of the series is visible rather than inferred. Switching back to
+Rank or Delete restores the pair layout, and `review_decide` refuses outright in gallery mode, so a stray key press in a
+gallery cannot rank or delete anything.
+
 **Keys, in ranking mode only:** `←` left is better, `→` right is better, `↓` tie, `↑` back. In delete mode the arrows are
 inert and say so - `←` used to recycle a file, which is too much power for a key you press while looking at pictures. `1`,
 `2`, `3` and `Space` work in both modes, and Esc stops with the progress saved.
