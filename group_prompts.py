@@ -466,7 +466,7 @@ def label_for(prompts, members, width=60, lexicon=None):
 # count-free form - which a reader calls one series of attempts. The count now only reaches the name, and a folder whose
 # members disagree states none (see without_counts and plan).
 COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
-               'ten': 10, 'eleven': 11, 'twelve': 12}
+               'ten': 10, 'eleven': 11, 'twelve': 12, 'dozen': 12}
 PEOPLE_WORDS = ('adult', 'woman', 'women', 'man', 'men', 'people', 'person', 'persons', 'figure', 'figures', 'character',
                 'characters', 'player', 'players', 'girl', 'girls', 'boy', 'boys', 'face', 'faces')
 _PREPOSITIONS = r'(?:above|behind|near|beside|by|on|in|at|with|from|under|over|across)\b'
@@ -493,6 +493,9 @@ def stated_count(prompt):
         for match in re.finditer(pattern, low):
             found.append((match.start(), number))
     # only what the head of the prompt says counts: a numeral in the tail is a different subject
+    # a numeral states one just as plainly ("3 naked women"), and it is what the gallery's own prompts use
+    for match in re.finditer(r'\b(\d{1,2})\b\s+(?:(?!%s)\w+\s+){0,8}(?:%s)\b' % (_PREPOSITIONS, '|'.join(PEOPLE_WORDS)), low):
+        found.append((match.start(), int(match.group(1))))
     found = [pair for pair in found if pair[0] < COUNT_HEAD]
     if not found:
         return None

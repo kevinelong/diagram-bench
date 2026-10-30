@@ -475,7 +475,7 @@ def section_f(metas):
                    whole, total, 100 * whole / max(total, 1)))
     out.append('')
     weak = [(k, n) for k, n in have.items() if n < total * 0.7]
-    out.append('Fields present in fewer than 70 %% of sidecars: ' + ', '.join(
+    out.append('Fields present in fewer than 70 % of sidecars: ' + ', '.join(
         '%s (%d)' % (k, n) for k, n in sorted(weak, key=lambda kv: -kv[1])[:12]))
     out.append('')
     return out

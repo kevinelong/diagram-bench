@@ -141,6 +141,14 @@ def test_a_stated_head_count_is_a_subject():
           gp.stated_count(long_prompt))
     check('a count in the head still reads', gp.stated_count('three women sit in a semicircle') == 3,
           gp.stated_count('three women sit in a semicircle'))
+    # the gallery's own prompts state counts three ways, and the label must notice all of them or it asserts one wrongly
+    check('a numeral is a count too', gp.stated_count('3 naked women floating in a circle') == 3,
+          gp.stated_count('3 naked women floating in a circle'))
+    check('and "a dozen" is a count', gp.stated_count('a dozen naked women floating in a circle') == 12,
+          gp.stated_count('a dozen naked women floating in a circle'))
+    check('sampling settings are not a count of people',
+          gp.stated_count('9 steps euler. 1024 px one image. seed 1234') is None,
+          gp.stated_count('9 steps euler. 1024 px one image. seed 1234'))
     check('two different counts in one prompt is ambiguous, so it decides nothing',
           gp.stated_count('two women and three men in a hall') is None,
           gp.stated_count('two women and three men in a hall'))
