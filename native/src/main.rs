@@ -7,10 +7,18 @@
 //!
 //! Run: `zimage-native.exe C:\Users\kevin\Pictures\zimage-ui`   (or set ZIMAGE_GALLERY)
 
+mod comfy;
+mod graph;
+mod review;
+mod review_selftest;
+mod review_window;
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{GENERIC_READ, HWND, LPARAM, LRESULT, WPARAM};
@@ -29,11 +37,12 @@ use windows::Win32::Graphics::Imaging::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
     SetWindowTheme, LVCOLUMNW, LVIF_TEXT, LVIS_FOCUSED, LVIS_SELECTED, LVITEMW, LVN_GETDISPINFOW, LVN_ITEMCHANGED,
     LVM_DELETEALLITEMS, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW, LVM_INSERTITEMW,
-    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETICONSPACING, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS,
+    LVM_ENSUREVISIBLE, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETICONSPACING, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS,
     LVSICF_NOINVALIDATEALL, LVM_GETHEADER, NM_CUSTOMDRAW, ImageList_Add, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL,
     LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_LIST, LVS_OWNERDATA, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL, LVCF_TEXT, LVCF_WIDTH,
@@ -78,7 +87,31 @@ const ID_FOLDERS: i32 = 101;
 const ID_PICTURES: i32 = 102;
 const ID_PROMPT: i32 = 103;
 const ID_GENERATE: i32 = 104;
-const ID_STATUS: i32 = 105;
+pub(crate) const ID_STATUS: i32 = 105;
+
+const WM_GEN_DONE: u32 = WM_APP + 2;
+const ID_TICK: usize = 1;
+
+/// The render in flight. The worker thread owns the network and the disk; the window owns the clock and the button, and
+/// the two meet through this slot plus one `PostMessage`, because touching child windows from a thread that did not create
+/// them is not allowed.
+struct Render {
+    started: Instant,
+    caption: String,
+    result: Option<anyhow::Result<comfy::Rendered>>,
+}
+
+static RENDER: std::sync::LazyLock<std::sync::Mutex<Option<Render>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+/// A poisoned lock means a thread panicked mid-render; the slot's contents are still worth reading, so take them.
+fn render_slot() -> std::sync::MutexGuard<'static, Option<Render>> {
+    RENDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Set while the controls are being refilled after a render: a programmatic `LVM_SETITEMSTATE` still sends
+/// `LVN_ITEMCHANGED`, and the handler would read the list back while it is being rebuilt.
+static REFILLING: AtomicBool = AtomicBool::new(false);
 
 // ---- data ----------------------------------------------------------------------------------------------------------------
 
@@ -160,6 +193,8 @@ struct State {
     folder_label: String,
     /// text handed to the virtual list, kept alive because the control stores the pointer, not the string
     disp: Vec<Vec<u16>>,
+    /// the last render's one-line result, appended to the status so the timing survives a thumbnail repaint
+    last_render: Option<String>,
 }
 
 static mut STATE: Option<Box<State>> = None;
@@ -199,10 +234,10 @@ fn thumbs() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, isiz
     THUMBS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Decode one picture with WIC, scale it to the tile and hand back a DIB-backed `HBITMAP`.
+/// Decode one picture with WIC at an exact size and hand back a DIB-backed `HBITMAP` with that size.
 ///
 /// WIC is the same decoder Explorer uses, so this is the native path: no image crate, no Python, no intermediate PNG.
-unsafe fn decode_thumb(path: &Path, width: i32, height: i32) -> Option<isize> {
+unsafe fn decode_scaled(path: &Path, width: i32, height: i32) -> Option<(isize, i32, i32)> {
     let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory2, None, CLSCTX_INPROC_SERVER).ok()?;
     let name = wide(&path.to_string_lossy());
@@ -247,7 +282,56 @@ unsafe fn decode_thumb(path: &Path, width: i32, height: i32) -> Option<isize> {
         return None;
     }
     std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits as *mut u8, pixels.len());
-    Some(dib.0 as isize)
+    Some((dib.0 as isize, width, height))
+}
+
+unsafe fn decode_thumb(path: &Path, width: i32, height: i32) -> Option<isize> {
+    decode_scaled(path, width, height).map(|(dib, _, _)| dib)
+}
+
+/// Images decoded to fit a box, keyed by path and box size: a review pane and a ranked tile both ask for "this picture,
+/// as large as fits", and neither can re-decode on every `WM_PAINT`.
+static FITS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<(PathBuf, i32, i32), (isize, i32, i32)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// The picture scaled to fit `max_w` x `max_h` without cropping and without enlarging, plus its real size.
+pub(crate) fn fit_image(path: &Path, max_w: i32, max_h: i32) -> Option<(isize, i32, i32)> {
+    if max_w < 16 || max_h < 16 {
+        return None;
+    }
+    let fits = &FITS;
+    if let Some(hit) = fits.lock().ok().and_then(|m| m.get(&(path.to_path_buf(), max_w, max_h)).copied()) {
+        return Some(hit);
+    }
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory2, None, CLSCTX_INPROC_SERVER).ok()?;
+        let name = wide(&path.to_string_lossy());
+        let decoder = factory
+            .CreateDecoderFromFilename(PCWSTR(name.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
+            .ok()?;
+        let frame = decoder.GetFrame(0).ok()?;
+        let (mut fw, mut fh) = (0u32, 0u32);
+        frame.GetSize(&mut fw, &mut fh).ok()?;
+        // `Image.thumbnail` never enlarges, and neither does this
+        let scale = (max_w as f64 / fw.max(1) as f64)
+            .min(max_h as f64 / fh.max(1) as f64)
+            .min(1.0);
+        let (tw, th) = (
+            ((fw as f64 * scale).round() as i32).max(1),
+            ((fh as f64 * scale).round() as i32).max(1),
+        );
+        let made = decode_scaled(path, tw, th)?;
+        let mut map = fits.lock().ok()?;
+        if map.len() > 32 {
+            // a resize changes every key; the old bitmaps are unreachable and must be handed back to GDI
+            for (_, (dib, _, _)) in map.drain() {
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(dib as *mut core::ffi::c_void));
+            }
+        }
+        map.insert((path.to_path_buf(), max_w, max_h), made);
+        Some(made)
+    }
 }
 
 /// Decode every listed picture off the UI thread and poke the list as each one lands. A 336 px JPEG is ~2-4 ms, so 1 000
@@ -291,7 +375,7 @@ const THUMB_H: i32 = 84;
 
 // ---- helpers -------------------------------------------------------------------------------------------------------------
 
-fn wide(text: &str) -> Vec<u16> {
+pub(crate) fn wide(text: &str) -> Vec<u16> {
     OsString::from(text).encode_wide().chain(std::iter::once(0)).collect()
 }
 
@@ -314,12 +398,42 @@ unsafe fn text_of(hwnd: HWND) -> String {
     OsString::from_wide(&buf[..got.max(0) as usize]).to_string_lossy().to_string()
 }
 
-fn short(text: &str, n: usize) -> String {
+pub(crate) fn short(text: &str, n: usize) -> String {
     if text.chars().count() > n {
         text.chars().take(n).collect::<String>() + "\u{2026}"
     } else {
         text.to_string()
     }
+}
+
+/// The two colours a `STATIC`/`EDIT` is told to use, and the brush behind it.
+///
+/// Shared with the A/B review window: a second window in the same process must paint its text the same way, and the
+/// brush is process-wide (`DARK_BRUSH`), so there is one place that decides.
+pub(crate) unsafe fn ctl_color(wparam: WPARAM) -> LRESULT {
+    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut core::ffi::c_void);
+    let (text, back) = if dark() {
+        (
+            windows::Win32::Foundation::COLORREF(0x00E8E8E8),
+            windows::Win32::Foundation::COLORREF(0x001A1A1A),
+        )
+    } else {
+        (
+            windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOWTEXT)),
+            windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW)),
+        )
+    };
+    SetTextColor(hdc, text);
+    SetBkColor(hdc, back);
+    let brush = *DARK_BRUSH.get_or_init(|| {
+        CreateSolidBrush(if dark() {
+            windows::Win32::Foundation::COLORREF(0x001A1A1A)
+        } else {
+            windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW))
+        })
+        .0 as isize
+    });
+    LRESULT(brush)
 }
 
 // ---- window --------------------------------------------------------------------------------------------------------------
@@ -336,7 +450,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 .map(|f| f.1.clone())
                 .unwrap_or_default();
             unsafe {
-                STATE = Some(Box::new(State { gallery, shown, folder_label: first, disp: Vec::new() }));
+                STATE = Some(Box::new(State {
+                    gallery,
+                    shown,
+                    folder_label: first,
+                    disp: Vec::new(),
+                    last_render: None,
+                }));
             }
             let _ = LIST_OWNER.set(hwnd.0 as isize);
             create_controls(hwnd);
@@ -349,43 +469,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             layout(hwnd);
             LRESULT(0)
         }
-        WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => {
-            // EDIT and STATIC are not themed by the list view's dark theme; they are told what colours to use here
-            let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut core::ffi::c_void);
-            let (text, back) = if dark() {
-                (
-                    windows::Win32::Foundation::COLORREF(0x00E8E8E8),
-                    windows::Win32::Foundation::COLORREF(0x001A1A1A),
-                )
-            } else {
-                (
-                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOWTEXT)),
-                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW)),
-                )
-            };
-            SetTextColor(hdc, text);
-            SetBkColor(hdc, back);
-            let brush = *DARK_BRUSH.get_or_init(|| {
-                CreateSolidBrush(if dark() {
-                    windows::Win32::Foundation::COLORREF(0x001A1A1A)
-                } else {
-                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW))
-                })
-                .0 as isize
-            });
-            return LRESULT(brush);
-        }
+        WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => return ctl_color(wparam),
         WM_COMMAND => {
             let id = (wparam.0 & 0xffff) as i32;
             let code = ((wparam.0 >> 16) & 0xffff) as u16;
             if id == ID_GENERATE && code == BN_CLICKED as u16 {
                 // the default button: Enter from anywhere in this window lands here
-                let prompt = text_of(child(hwnd, ID_PROMPT));
-                let text = format!("A native port would send this to ComfyUI:\n\n{}", prompt);
-                let body = wide(&text);
-                let caption = wide("Generate");
-                let _ = MessageBoxW(Some(hwnd), PCWSTR(body.as_ptr()), PCWSTR(caption.as_ptr()),
-                                    MB_OK);
+                start_generation(hwnd, text_of(child(hwnd, ID_PROMPT)));
+            }
+            if id == review_window::ID_AB && code == BN_CLICKED as u16 {
+                start_review(hwnd);
             }
             if id == IDCANCEL.0 as i32 {
                 let _ = DestroyWindow(hwnd);
@@ -394,15 +487,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_NOTIFY => {
             let header = &*(lparam.0 as *const NmHdr);
+            if header.id_from == ID_FOLDERS as usize
+                && header.code == LVN_ITEMCHANGED
+                && !REFILLING.load(Ordering::SeqCst)
             {
-                // temporary probe: which notifications actually arrive, and with which code
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
-                    .open(r"C:\Users\kevin\AppData\Local\Temp\native-notify.log") {
-                    let _ = writeln!(f, "notify from {} code {:#x}", header.id_from, header.code);
-                }
-            }
-            if header.id_from == ID_FOLDERS as usize && header.code == LVN_ITEMCHANGED {
                 let list = child(hwnd, ID_FOLDERS);
                 let count = SendMessageW(list, LVM_GETITEMCOUNT, None, None).0 as i32;
                 for i in 0..count {
@@ -421,9 +509,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 }
             } else if header.code == NM_CUSTOMDRAW {
                 let cd = &mut *(lparam.0 as *mut NmcdCustomDraw);
-                let seen = format!("cd from {} stage {:#x}", header.id_from, cd.nmcd.dwDrawStage);
-                let buf = wide(&seen);
-                let _ = SetWindowTextW(child(hwnd, ID_STATUS), PCWSTR(buf.as_ptr()));
                 if cd.nmcd.dwDrawStage == CDDS_PREPAINT {
                     return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
                 }
@@ -464,6 +549,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_DESTROY => {
             PostQuitMessage(0);
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            // the elapsed clock: the worker cannot touch the status, so the window ticks it four times a second
+            if wparam.0 == ID_TICK {
+                let text = {
+                    let slot = render_slot();
+                    slot.as_ref()
+                        .map(|entry| format!("{} \u{2014} rendering {:.0} s",
+                                             entry.caption, entry.started.elapsed().as_secs_f64()))
+                };
+                if let Some(text) = text {
+                    set_status(hwnd, &text);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_GEN_DONE => {
+            finish_generation(hwnd);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -671,6 +775,22 @@ unsafe fn create_controls(hwnd: HWND) {
     .unwrap_or_default();
     SendMessageW(generate, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
 
+    // A/B…: compare the open family two pictures at a time. A plain BUTTON, because nothing about it is special - what
+    // it opens is a second *window*, not a dialog.
+    let ab = CreateWindowExW(
+        WINDOW_EX_STYLE(0),
+        w!("BUTTON"),
+        w!("&A/B\u{2026}"),   // the mnemonic is the A: the label still reads "A/B…", as the app it replaces
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32),
+        0, 0, 112, 30,
+        Some(hwnd),
+        Some(HMENU(review_window::ID_AB as isize as *mut core::ffi::c_void)),
+        Some(instance.into()),
+        None,
+    )
+    .unwrap_or_default();
+    SendMessageW(ab, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+
     let status_text = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("STATIC"),
@@ -755,15 +875,170 @@ unsafe fn fill_pictures(hwnd: HWND) {
 
 unsafe fn update_status(hwnd: HWND) {
     let st = state();
-    let text = format!(
+    let mut text = format!(
         "{} pictures, {} families \u{00b7} showing {} \u{00b7} {}",
         st.gallery.pictures.len(),
         st.gallery.folders.len(),
         st.shown.len(),
         short(&st.folder_label, 60)
     );
-    let buf = wide(&text);
+    // the render line is the interesting part of the status when there is one, and a thumbnail repaint must not eat it
+    if let Some(line) = &st.last_render {
+        text.push_str(" \u{00b7} ");
+        text.push_str(line);
+    }
+    set_status(hwnd, &text);
+}
+
+/// `A/B…` - review the family that is open (or the folder, since that is what the list is showing), two at a time.
+///
+/// The session is the Python app's: the same key from the same names, the same file, the same sidecar counters. Nothing
+/// is deleted, so the review only ever adds a record.
+unsafe fn start_review(hwnd: HWND) {
+    let st = state();
+    let paths: Vec<String> = st
+        .shown
+        .iter()
+        .filter_map(|i| st.gallery.pictures.get(*i))
+        .map(|p| p.path.to_string_lossy().to_string())
+        .collect();
+    let label = st.folder_label.clone();
+    if paths.len() < 2 {
+        set_status(hwnd, &format!(
+            "{} - {} picture{}, nothing to pair",
+            short(&label, 40),
+            paths.len(),
+            if paths.len() == 1 { "" } else { "s" }
+        ));
+        return;
+    }
+    if let Err(e) = review_window::open(hwnd, &label, &paths) {
+        set_status(hwnd, &format!("A/B review failed: {}", e));
+    }
+}
+
+// ---- generation ----------------------------------------------------------------------------------------------------------
+
+unsafe fn set_status(hwnd: HWND, text: &str) {
+    let buf = wide(text);
     let _ = SetWindowTextW(child(hwnd, ID_STATUS), PCWSTR(buf.as_ptr()));
+}
+
+/// `Generate` was pressed - or Enter, through the default button. One render at a time: the button goes grey, the status
+/// becomes a clock, and everything left (queue, poll, download, write) happens on a thread that is not this one.
+unsafe fn start_generation(hwnd: HWND, prompt: String) {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() {
+        set_status(hwnd, "type a prompt first");
+        return;
+    }
+    let mut slot = render_slot();
+    if slot.is_some() {
+        return; // a render is already in flight; the button is disabled for exactly that window
+    }
+    let model = std::env::var("ZIMAGE_MODEL").unwrap_or_else(|_| graph::DEFAULT_MODEL.to_string());
+    let job = comfy::Job::new(&prompt, &model, &gallery_root());
+    let caption = format!("{}x{} px, {} steps, seed {}, {}", job.width, job.height, job.steps, job.seed, job.model);
+    set_status(hwnd, &format!("{caption} \u{2014} rendering 0 s"));
+    let _ = EnableWindow(child(hwnd, ID_GENERATE), false);
+    let _ = SetTimer(Some(hwnd), ID_TICK, 250, None);
+    *slot = Some(Render { started: Instant::now(), caption, result: None });
+    drop(slot);
+
+    let hwnd_value = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let outcome = comfy::generate(&job, &comfy::Config::from_env());
+        if let Some(entry) = render_slot().as_mut() {
+            entry.result = Some(outcome);
+        }
+        let hwnd = HWND(hwnd_value as *mut core::ffi::c_void);
+        let _ = PostMessageW(Some(hwnd), WM_GEN_DONE, WPARAM(0), LPARAM(0));
+    });
+}
+
+/// The worker is done: put the button and the clock back, then either show the picture or say why there is none.
+unsafe fn finish_generation(hwnd: HWND) {
+    let _ = KillTimer(Some(hwnd), ID_TICK);
+    let _ = EnableWindow(child(hwnd, ID_GENERATE), true);
+    let Some((elapsed, outcome)) = render_slot()
+        .take()
+        .map(|entry| (entry.started.elapsed().as_secs_f64(), entry.result))
+    else {
+        return;
+    };
+    match outcome {
+        Some(Ok(rendered)) => {
+            let name = rendered.png.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            state_mut().last_render = Some(format!("rendered {name} in {:.1} s", rendered.seconds));
+            refresh_after_generate(hwnd, &rendered.png);
+        }
+        Some(Err(error)) => {
+            let line = format!("last render failed: {}", short(&error.to_string(), 90));
+            state_mut().last_render = Some(line);
+            set_status(hwnd, &format!("generation failed after {elapsed:.1} s: {error}"));
+        }
+        None => {
+            let line = "last render ended without a result".to_string();
+            state_mut().last_render = Some(line.clone());
+            set_status(hwnd, &line);
+        }
+    }
+}
+
+/// Re-scan the gallery and show the family the new picture landed in. `fill_pictures` hands the listed paths to the
+/// thumbnail worker, so the tile for the picture that was just written appears without a restart.
+unsafe fn refresh_after_generate(hwnd: HWND, new_path: &Path) {
+    let gallery = Gallery::scan(&gallery_root());
+    let holds_new = |indices: &Vec<usize>| {
+        indices.iter().any(|i| gallery.pictures.get(*i).map(|p| p.path == new_path).unwrap_or(false))
+    };
+    // the new picture's family, else the family that was on screen, else whatever is first
+    let target = gallery
+        .folders
+        .iter()
+        .position(|(_, indices)| holds_new(indices))
+        .or_else(|| gallery.folders.iter().position(|(label, _)| *label == state().folder_label))
+        .unwrap_or(0);
+    let (label, shown) = gallery
+        .folders
+        .get(target)
+        .map(|(label, indices)| (label.clone(), indices.clone()))
+        .unwrap_or_default();
+    {
+        let st = state_mut();
+        st.gallery = gallery;
+        st.shown = shown;
+        st.folder_label = label;
+    }
+    // programmatic selection still sends LVN_ITEMCHANGED, and the handler would read the list mid-rebuild
+    REFILLING.store(true, Ordering::SeqCst);
+    fill_folders(hwnd);
+    select_row(child(hwnd, ID_FOLDERS), target);
+    REFILLING.store(false, Ordering::SeqCst);
+    fill_pictures(hwnd);
+    // put the new picture on screen: its own row, scrolled into view
+    let row = {
+        let st = state();
+        st.shown
+            .iter()
+            .position(|i| st.gallery.pictures.get(*i).map(|p| p.path == new_path).unwrap_or(false))
+    };
+    if let Some(row) = row {
+        let list = child(hwnd, ID_PICTURES);
+        select_row(list, row);
+        let _ = SendMessageW(list, LVM_ENSUREVISIBLE, Some(WPARAM(row)), Some(LPARAM(0)));
+    }
+    update_status(hwnd);
+}
+
+/// Select one row of a list view the way the control itself would report it: selected and focused, in one message.
+unsafe fn select_row(list: HWND, row: usize) {
+    let mut item = LVITEMW {
+        state: LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0),
+        stateMask: LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0),
+        ..Default::default()
+    };
+    SendMessageW(list, LVM_SETITEMSTATE, Some(WPARAM(row)), Some(LPARAM(&mut item as *mut _ as isize)));
 }
 
 unsafe fn layout(hwnd: HWND) {
@@ -777,8 +1052,10 @@ unsafe fn layout(hwnd: HWND) {
     let _ = MoveWindow(child(hwnd, ID_PICTURES), col + 2 * pad, pad, w - col - 3 * pad, h - 2 * pad - row - 6, true);
     let _ = MoveWindow(child(hwnd, ID_PROMPT), pad, h - pad - row + 4, w - 330, 24, true);
     let _ = MoveWindow(child(hwnd, ID_GENERATE), w - pad - 150, h - pad - row + 2, 150, 28, true);
-    // the status gets its own line under the controls, tall enough for the font (at 16 px it was clipped)
-    let _ = MoveWindow(child(hwnd, ID_STATUS), pad, h - STATUS_H + 2, w - 2 * pad, STATUS_H - 4, true);
+    let _ = MoveWindow(child(hwnd, review_window::ID_AB), w - pad - 150 - 8 - 112, h - pad - row + 2, 112, 28, true);
+    // the status gets its own line under the controls, at its full height: shaving 2 px off the top and 4 off the
+    // bottom left a 12 px client for a 16 px font, so the descenders of the render clock were cut
+    let _ = MoveWindow(child(hwnd, ID_STATUS), pad, h - STATUS_H, w - 2 * pad, STATUS_H, true);
 }
 
 fn main() -> anyhow::Result<()> {
@@ -786,6 +1063,48 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--theme") {
         println!("dark = {}", dark());
         return Ok(());
+    }
+    // `--probe <png> [maxw] [maxh]` prints what the decoder hands back: the size it scaled to and the centre pixel
+    if std::env::args().nth(1).as_deref() == Some("--probe") {
+        let path = std::env::args_os().nth(2).map(PathBuf::from).expect("a png path");
+        let maxw: i32 = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(517);
+        let maxh: i32 = std::env::args().nth(4).and_then(|s| s.parse().ok()).unwrap_or(290);
+        use windows::Win32::Graphics::Gdi::HBITMAP as PROBE_BITMAP;
+        use windows::Win32::Graphics::Gdi::{DIB_RGB_COLORS as PROBE_COLORS, GetDIBits, HGDIOBJ as PROBE_OBJ};
+        unsafe {
+            match fit_image(&path, maxw, maxh) {
+                Some((dib, w, h)) => {
+                    let mut info = BITMAPINFO::default();
+                    info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                    info.bmiHeader.biWidth = w;
+                    info.bmiHeader.biHeight = -h;
+                    info.bmiHeader.biPlanes = 1;
+                    info.bmiHeader.biBitCount = 32;
+                    info.bmiHeader.biCompression = BI_RGB.0;
+                    let mut px = vec![0u8; (w * h * 4) as usize];
+                    let mem = CreateCompatibleDC(None);
+                    let old = SelectObject(mem, PROBE_OBJ(dib as *mut core::ffi::c_void));
+                    let n = GetDIBits(mem, PROBE_BITMAP(dib as *mut core::ffi::c_void), 0, h as u32, Some(px.as_mut_ptr() as *mut core::ffi::c_void), &mut info, PROBE_COLORS);
+                    SelectObject(mem, old);
+                    let _ = DeleteDC(mem);
+                    let centre = ((h / 2 * w + w / 2) * 4) as usize;
+                    println!("probe {} -> {}x{} dib={} rows={} centre=({}, {}, {})",
+                        path.display(), w, h, dib, n, px[centre + 2], px[centre + 1], px[centre]);
+                }
+                None => println!("probe {} -> the decoder returned nothing", path.display()),
+            }
+        }
+        return Ok(());
+    }
+    // `--selftest [dir]` renders once with no window and asserts the sidecar: the same path, minus the controls
+    if std::env::args().nth(1).as_deref() == Some("--selftest") {
+        let dir = std::env::args_os().nth(2).map(PathBuf::from);
+        return selftest(dir);
+    }
+    // `--review-selftest` builds its own four-picture gallery, runs an A/B review to the end, and checks the state file
+    // and the sidecars against the Python implementation - no server, no window, no screen.
+    if std::env::args().nth(1).as_deref() == Some("--review-selftest") {
+        return review_selftest::run();
     }
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -807,6 +1126,8 @@ fn main() -> anyhow::Result<()> {
             ..Default::default()
         };
         RegisterClassW(&wc);
+        // the A/B review's three classes: the window, the picture panes, the ranked tiles
+        review_window::register(instance.into())?;
         let is_dark = dark();
         if is_dark {
             let _ = DARK_BRUSH.set(
@@ -843,9 +1164,24 @@ fn main() -> anyhow::Result<()> {
 
         // IsDialogMessage is the point of the experiment: Tab between controls, Enter on the default button, Esc and Alt
         // mnemonics, from the system, with none of our code in the path.
+        //
+        // Two things had to be addressed to the *top-level* window rather than to whatever has the focus: `GetAncestor`
+        // because IsDialogMessage is what finds the default button (a child has no buttons of its own), and the A/B
+        // review's accelerator table because `1`/`2`/`3` must answer wherever the focus sits inside that window.
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-            if IsDialogMessageW(msg.hwnd, &mut msg).as_bool() {
+            if let (Some(haccel), Some(review)) = (review_window::haccel(), review_window::window()) {
+                let original = msg.hwnd;
+                msg.hwnd = review;
+                let translated = TranslateAcceleratorW(review, haccel, &msg as *const MSG);
+                msg.hwnd = original;
+                if translated != 0 {
+                    continue;
+                }
+            }
+            let root = GetAncestor(msg.hwnd, GA_ROOT);
+            let target = if root.is_invalid() { msg.hwnd } else { root };
+            if IsDialogMessageW(target, &mut msg).as_bool() {
                 continue;
             }
             let _ = TranslateMessage(&msg);
@@ -853,4 +1189,98 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+// ---- selftest ------------------------------------------------------------------------------------------------------------
+
+/// Render once headlessly and assert the sidecar, so the part the gallery depends on can be checked without a screen.
+/// Pinned values: 256 px, the profile's own steps, seed 4711 - assertions against numbers nobody can accidentally match.
+fn selftest(dir: Option<PathBuf>) -> anyhow::Result<()> {
+    let out = dir.unwrap_or_else(|| std::env::temp_dir().join("zimage-native-selftest"));
+    std::fs::create_dir_all(&out)?;
+    let config = comfy::Config::from_env();
+    let prompt = "selftest: a red apple on a wooden table, soft window light";
+    let model = std::env::var("ZIMAGE_MODEL").unwrap_or_else(|_| graph::DEFAULT_MODEL.to_string());
+    let mut job = comfy::Job::new(prompt, &model, &out);
+    job.width = 256;
+    job.height = 256;
+    job.seed = 4711;
+    job.steps = graph::profile(&job.model).steps;
+
+    println!("selftest  server {}  dir {}", config.origin(), out.display());
+    println!(
+        "          {} at {}x{} px, {} steps, cfg {}, seed {}",
+        job.model, job.width, job.height, job.steps, job.cfg, job.seed
+    );
+    let started = Instant::now();
+    let rendered = comfy::generate(&job, &config)?;
+    println!(
+        "          rendered in {:.1} s (wall {:.1} s) -> {}",
+        rendered.seconds,
+        started.elapsed().as_secs_f64(),
+        rendered.png.display()
+    );
+
+    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rendered.sidecar)?)?;
+    let text = |key: &str| record.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let number = |key: &str| record.get(key).and_then(|v| v.as_u64());
+    let name = rendered.png.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let bytes = std::fs::read(&rendered.png)?;
+    let size = (bytes.get(..4) == Some(b"\x89PNG".as_slice())).then(|| png_size(&bytes)).flatten();
+
+    let mut checked = 0;
+    let mut failed = 0;
+    macro_rules! check {
+        ($label:expr, $ok:expr, $detail:expr) => {{
+            checked += 1;
+            let ok: bool = $ok;
+            println!("          {:<14} {:<4} {}", $label, if ok { "ok" } else { "FAIL" }, $detail);
+            if !ok {
+                failed += 1;
+            }
+        }};
+    }
+    check!("prompt", text("prompt") == prompt, text("prompt"));
+    check!("seed", number("seed") == Some(job.seed), format!("{:?}", number("seed")));
+    check!("steps", number("steps") == Some(job.steps as u64), format!("{:?}", number("steps")));
+    check!("cfg", record.get("cfg").and_then(|v| v.as_f64()) == Some(job.cfg),
+           format!("{:?}", record.get("cfg")));
+    check!("model", text("model") == job.model, text("model"));
+    check!("width", number("width") == Some(rendered.width as u64), format!("{:?}", number("width")));
+    check!("height", number("height") == Some(rendered.height as u64), format!("{:?}", number("height")));
+    check!("created", is_created(&text("created")), text("created"));
+    check!("image", text("image") == rendered.png.to_string_lossy(), text("image"));
+    check!("lineage_root", text("lineage_root") == prompt, text("lineage_root"));
+    check!("file name", name.ends_with(&format!("_{}x{}_seed{}.png", rendered.width, rendered.height, job.seed))
+                          && name.as_bytes().get(8) == Some(&b'-'),
+           name);
+    check!("png", size == Some((rendered.width, rendered.height)), format!("{size:?}, {} bytes", bytes.len()));
+
+    println!("          {checked} checks, {failed} failed");
+    if failed > 0 {
+        anyhow::bail!("selftest failed: {failed} of {checked} assertions");
+    }
+    Ok(())
+}
+
+/// `2026-10-30T18:12:33`: the shape `datetime.isoformat(timespec='seconds')` writes into every Python sidecar.
+fn is_created(text: &str) -> bool {
+    let digits = |range: std::ops::Range<usize>| text.get(range).map_or(false, |s| s.bytes().all(|b| b.is_ascii_digit()));
+    text.len() == 19
+        && digits(0..4) && digits(5..7) && digits(8..10)
+        && digits(11..13) && digits(14..16) && digits(17..19)
+        && text.as_bytes()[4] == b'-'
+        && text.as_bytes()[7] == b'-'
+        && text.as_bytes()[10] == b'T'
+        && text.as_bytes()[13] == b':'
+        && text.as_bytes()[16] == b':'
+}
+
+/// The PNG's own size, for the selftest: the sidecar must describe the file, not the request.
+fn png_size(bytes: &[u8]) -> Option<(i32, i32)> {
+    if bytes.len() < 24 || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let read = |at: usize| i32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+    Some((read(16), read(20)))
 }

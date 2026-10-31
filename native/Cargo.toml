@@ -9,16 +9,23 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_System_Com",
+    "Win32_System_SystemInformation",
+    "Win32_Networking_WinHttp",
     "Win32_Graphics_Dwm",
     "Win32_UI_Controls",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-serde_json = "1"
+# preserve_order: the session and the sidecars are read, edited and written back by *two* applications, so a key order
+# that survives the round trip keeps a diff between them honest (Python's json keeps insertion order).
+serde_json = { version = "1", features = ["preserve_order"] }
+serde = "1"
 anyhow = "1"

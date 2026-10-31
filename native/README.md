@@ -66,6 +66,36 @@ rows. The picture therefore arrives where the control expects it: `ImageList_Add
 `LVIF_IMAGE` in `LVN_GETDISPINFOW`. Confirmed visually from a `PrintWindow` render (which needs no screen grab): real
 thumbnails, tall rows, tooltips of text beside each one.
 
+## A/B review (`&A/B…`)
+
+A second top-level window (`zimage-review`) with two custom panes, three `BUTTON`s and a `STATIC` tally. It reads and
+writes **the Python app's session file** - the same `state_key`, the same rounds, the same sidecar `wins`/`losses`/`ties` -
+so a review can be started in either app and finished in the other. `--review-selftest` proves it headlessly: it builds a
+four-picture gallery, plays a full review, and compares against `pair_review` run in a temp dir (same keys read, same
+winner ranked first, same counters, same order after a reset); 0 checks failed.
+
+Keyboard comes from the system: `1`/`2`/`3` and arrows record, `Up` retracts, `Esc` stops and keeps; the finish screen's
+`BS_DEFPUSHBUTTON` is why **Enter and Space activate Keep and close**.
+
+**A collision found on the way, fixed in both apps.** The session key hashes the pictures' *names*, so two folders whose
+pictures share names (`a.png`…`d.png`) resolve to one session file. `build()` used to keep the *stored* paths, so opening
+the second folder drew the *first* folder's pictures - measured, then fixed by resetting the session when the stored paths
+name a different folder (`pair_review.build` and `review::build`), with a regression test in `test_review_modes.py`.
+
+## Generation (`&Generate`)
+
+`POST /prompt` and `GET /history/<id>` over **WinHTTP** (no HTTP crate), then `GET /view` for the bytes; the graph is the
+Python client's, node for node. `--selftest` renders for real and asserts the sidecar. Measured on this machine, ComfyUI
+0.18.2 with `flux2 klein 9b uncensored`, 256 px, 4 steps, seed 4711:
+
+| | wall | note |
+|---|---|---|
+| native (WinHTTP) | **20.9 s** warm | both runs identical, same 88 807-byte PNG |
+| `zimage_gen.py` same job | 32.4 s | the floor is the server: it runs with `--cache-none`, so every prompt reloads the model |
+| native, server down | **0.64 s** | "nothing is listening on http://127.0.0.1:9", nothing written |
+
+`COMFY_HOST` moves the server; the Python app reads the sidecar it writes (`model`, `seed` read back correctly).
+
 **Theme details that only show on a dark desktop**: the list *header* is a separate HWND and needs `DarkMode_ItemsView` of
 its own, or it stays a light band across a dark list (`LVM_GETHEADER` → `SetWindowTheme`); and `WS_BORDER` draws the classic
 light client edge, so it is dropped rather than fought. The OS reports dark (`AppsUseLightTheme = 0`, both values), and `zimage-native.exe --theme` prints `dark = true`.
