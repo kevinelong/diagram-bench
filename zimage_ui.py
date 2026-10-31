@@ -1569,6 +1569,134 @@ class Tooltip:
             self._tip = None
 
 
+class SelectableTitle(tk.Text):
+    """The caption at the top of the folder column, in a label whose text can be taken.
+
+    The caption *is* the prompt - it is the text the folder was filed under - so the thing a reader wants to do with it
+    is copy it: paste it back into the box, into a note, into a message. A `ttk.Label` cannot be selected at all, so the
+    only way was to retype it by hand from a screenshot. This is a Text kept read-only: the mouse selects, Ctrl+C copies,
+    and a right click offers the whole title or just the selection. Every binding that would change the characters is
+    refused - typed keys, paste, cut, middle-click paste - because the text is the app's, not the reader's.
+
+    The height is the number of *display* lines the current width wraps it to, so a two-line caption takes two rows of the
+    column and a short one takes one; the pane's pictures never lose a row to whitespace that is not being used.
+    """
+
+    MAX_LINES = 6
+    # movement and modifiers stay, everything that could insert, delete or overwrite is refused
+    NAV = ('Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Prior', 'Next', 'Tab', 'Shift_L', 'Shift_R',
+           'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Caps_Lock', 'Num_Lock', 'Escape', 'Insert')
+
+    def __init__(self, master, width_px=CONTENTS_W, plate=None, theme=None):
+        super().__init__(master, height=1, width=1, wrap='word', relief='flat', borderwidth=0,
+                         highlightthickness=0, padx=0, pady=0, cursor='xterm', takefocus=True,
+                         insertwidth=0, insertontime=0, insertofftime=0, spacing1=0, spacing3=0,
+                         font=tkfont.nametofont('TkDefaultFont'),
+                         background=plate if plate is not None else (theme.surface if theme else None),
+                         foreground=theme.text if theme else None)
+        self._lines = 1
+        self._width_px = width_px
+        self.menu = tk.Menu(self, tearoff=0)
+        self.menu.add_command(label='Copy title', command=self.copy_all)
+        self.menu.add_command(label='Copy selection', command=self.copy_selection)
+        self.bind('<Button-3>', self._popup)
+        self.bind('<Key>', self._guard)
+        for seq in ('<<Paste>>', '<<Cut>>', '<<PasteSelection>>', '<<Clear>>'):
+            self.bind(seq, lambda _e: 'break')
+        self.bind('<Configure>', self._fit)
+        self.bind('<<Selection>>', lambda _e: None)
+
+    # -- what the rest of the app calls --------------------------------------
+    def title(self) -> str:
+        try:
+            return self.get('1.0', 'end-1c')
+        except Exception:
+            return ''
+
+    def set_title(self, text, width_px=None):
+        if width_px:
+            self._width_px = width_px
+        text = '' if text is None else str(text)
+        if text == self.title():
+            self._fit()
+            return
+        try:
+            self.delete('1.0', 'end')
+            self.insert('1.0', text)
+        except Exception:
+            return
+        try:
+            self.after_idle(self._fit)
+        except Exception:
+            pass
+
+    def copy_all(self):
+        self._to_clipboard(self.title())
+
+    def copy_selection(self):
+        try:
+            chosen = self.get('sel.first', 'sel.last')
+        except Exception:
+            chosen = ''
+        self._to_clipboard(chosen or self.title())
+
+    # -- internals -----------------------------------------------------------
+    def _to_clipboard(self, text):
+        if not text:
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except Exception:
+            pass
+
+    def _has_selection(self) -> bool:
+        try:
+            return bool(self.tag_ranges('sel'))
+        except Exception:
+            return False
+
+    def _popup(self, event):
+        try:
+            self.menu.entryconfigure(1, state='normal' if self._has_selection() else 'disabled')
+        except Exception:
+            pass
+        try:
+            self.focus_set()
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                self.menu.grab_release()
+            except Exception:
+                pass
+        return 'break'
+
+    def _guard(self, event):
+        if event.state & 0x0004:                  # Control held: copy and select-all are not edits
+            return 'break' if event.keysym.lower() in ('v', 'x', 'y', 'delete') else None
+        if event.keysym in self.NAV:
+            return None
+        return 'break'
+
+    def _fit(self, _event=None):
+        try:
+            n = self.count('1.0', 'end-1c', 'displaylines')
+        except Exception:
+            return
+        if isinstance(n, (tuple, list)):
+            n = n[0] if n else 1
+        try:
+            n = max(1, min(self.MAX_LINES, int(n)))
+        except Exception:
+            n = 1
+        if n != self._lines:
+            self._lines = n
+            try:
+                self.configure(height=n)
+            except Exception:
+                pass
+
+
 class ScrollGrid(ttk.Frame):
     """A scrolling grid of square tiles that fills whatever width it is given.
 
@@ -2300,8 +2428,10 @@ class App:
         gal.columnconfigure(2, weight=0)
         # The folder's own name at the top of its column. The pane had no identity at all: a folder was recognisable
         # only by the truncated label back in the first column, so nothing on screen said which folder you were in.
-        self.contents_title = ttk.Label(self.contents_holder, text='', anchor='w', justify='left',
-                                        wraplength=CONTENTS_W)
+        # a label could not be selected, and this caption is a prompt the reader wants to paste elsewhere: it is a
+        # read-only Text with a right-click copy menu (`SelectableTitle`)
+        self.contents_title = SelectableTitle(self.contents_holder, width_px=CONTENTS_W, plate=plate,
+                                              theme=self.theme)
         self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
@@ -5019,7 +5149,12 @@ class App:
         """
         rows = self._scan()
         files = [p for p, _m in rows]
-        if self._plan and self._active_folder is not None:
+        # Scoped to the open folder - except while a run is in flight. A picture written during a run is not in the
+        # plan yet, so scoping hid it from the list the strip draws in exactly the state the strip draws pictures;
+        # measured 2026-10-31, a tile event called refresh_gallery, `_scan()` saw the new file, and `_files` stayed at
+        # eight because the open folder (opened by default since 2026-10-31) did not contain it. That is the "not
+        # showing images as they are generated" report.
+        if self._plan and self._active_folder is not None and not getattr(self, 'busy', False):
             chosen = {r['path'] for r in self._plan['groups'][self._active_folder]['items']}
             files = [f for f in files if str(f) in chosen]
         needle = self.search_var.get().strip().lower()
@@ -5305,7 +5440,7 @@ class App:
             self._content_widgets = {}
             self._contents_geom = None
             self._content_order = []
-            self.contents_title.configure(text='folder')
+            self.contents_title.set_title('folder')
             ttk.Label(self.contents, text='No folder open.\nClick a folder to see its pictures here.',
                       foreground=self.theme.muted, justify='center', anchor='center',
                       font=('Segoe UI', 11),
@@ -5404,7 +5539,7 @@ class App:
         caption = '%s  -  %d picture%s' % (title, members, '' if members == 1 else 's')
         if fresh_rows:
             caption += ', %d new' % len(fresh_rows)
-        self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
+        self.contents_title.set_title(caption, width_px=max(200, width - 6))
         if self._sort_wins():
             try:
                 # Wins desc, losses asc, then newest, then name - the same key the flat list uses. This used to be
@@ -5624,7 +5759,7 @@ class App:
         self._strip_w, self._contents_w, self._prompt_w = (widths[COL_STRIP], widths[COL_PANE], widths[COL_PROMPT])
         try:
             self.contents_canvas.configure(width=self._contents_w)
-            self.contents_title.configure(wraplength=max(120, self._contents_w - 6))
+            self.contents_title.set_title(self.contents_title.title(), width_px=max(120, self._contents_w - 6))
             self.gal.columnconfigure(2, weight=0, minsize=0)
         except Exception:
             pass

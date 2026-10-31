@@ -1524,6 +1524,24 @@ def main():
     check('closing a window asks the main window back to the front', bool(raised), str(len(raised)))
     app._raise_main = real_raise
 
+    print('\n-- a picture that lands mid-run reaches the list even with a folder open')
+    # Reported twice: "not showing images in folder as they are being loaded in N-way layout, just some words". The
+    # list was scoped to the open folder, a picture written during a run is not in the plan yet, so it was filtered
+    # out before any tile could be drawn - and the app now opens a folder by default, which is what exposed it.
+    landed_tile = tmp / '20261031-170000_64x64_seed4242.png'
+    Image.new('RGB', (64, 64), (12, 90, 40)).save(landed_tile)
+    landed_tile.with_suffix('.json').write_text('{"prompt": "mid run", "seed": 4242}', encoding='utf-8')
+    app.busy = True
+    app.engine.events.put(('tile', (landed_tile.read_bytes(), str(landed_tile), 1, 4)))
+    app._poll(); root.update()
+    check('the tile that just landed is in the list', Path(landed_tile) in [Path(p) for p in app._files],
+          len(app._files))
+    check('and the strip has a widget for it',
+          any(Path(k) == Path(landed_tile) for k in app._tile_widgets), len(app._tile_widgets))
+    app.busy = False
+    landed_tile.unlink(missing_ok=True)
+    landed_tile.with_suffix('.json').unlink(missing_ok=True)
+
     print('\n-- the loading meter says a percentage and the stage, and only when something is loading')
     meter = zui.LoadingMeter(root, width=320, theme=app.theme)
     meter.show('grouping pictures into folders', 'reading the gallery')
@@ -3429,17 +3447,53 @@ def main():
     print("\n-- the open folder's column says which folder it is (2026-10-28)")
     if app._plan and app._plan['groups']:
         app.select_folder(0); root.update(); time.sleep(0.1); root.update()
-        caption = app.contents_title.cget('text') or ''
+        caption = app.contents_title.title() or ''
         grp = app._plan['groups'][0]
         want = (grp.get('title') or grp.get('label') or '').strip()
         check('the pane header is shown', bool(app.contents_title.winfo_ismapped()), app.contents_title.winfo_ismapped())
         check('it names the folder', bool(want) and want[:24] in caption, (want[:24], caption[:60]))
         check('and says how many pictures are in it', str(len(grp['items'])) in caption, caption)
         check('it is not a blank or empty label', len(caption) > 10, repr(caption))
+        # the caption is the prompt: being able to take it is the point of it (2026-10-31)
+        head = app.contents_title
+        check('the pane header is a selectable text, not a label', isinstance(head, zui.SelectableTitle),
+              type(head).__name__)
+        if SHOTS:
+            shot(root, 'title-selectable')
+        head.tag_add('sel', '1.0', '1.4')
+        root.update()
+        check('part of the title can be selected', bool(head.tag_ranges('sel')), head.tag_ranges('sel'))
+        head.menu.invoke(1)                     # Copy selection
+        root.update()
+        check('the right-click menu copies the selection', root.clipboard_get() == head.get('1.0', '1.4'),
+              (root.clipboard_get(), head.get('1.0', '1.4')))
+        head.menu.invoke(0)                     # Copy title
+        root.update()
+        check('and copying the title takes the whole caption', root.clipboard_get() == caption,
+              (root.clipboard_get()[:40], caption[:40]))
+        head.tag_remove('sel', '1.0', 'end')
+        menu_labels = [head.menu.entrycget(i, 'label') for i in range(head.menu.index('end') + 1)]
+        check('the menu names the copy it does', any('title' in s.lower() for s in menu_labels), menu_labels)
+        # read-only: the characters are the app's, and a stray keystroke must not edit a caption under a selection
+        class _Key:
+            def __init__(self, keysym, state=0):
+                self.keysym, self.state = keysym, state
+        check('typing into the title is refused', head._guard(_Key('a')) == 'break')
+        check('pasting into it is refused', head._guard(_Key('v', 0x4)) == 'break')
+        check('but Ctrl+C and the arrows are not', head._guard(_Key('c', 0x4)) is None
+              and head._guard(_Key('Right')) is None)
+        long_text = 'a caption long enough to need more than one row in a column this wide ' * 2
+        head.set_title(long_text)
+        for _ in range(6):
+            root.update(); time.sleep(0.02)
+        check('a wrapped title takes the rows it needs', int(head['height']) >= 2, int(head['height']))
+        check('and it still says exactly what was set', head.title() == long_text, head.title()[:40])
+        app._render_contents(); root.update()   # put the folder's own caption back
+        check('the folder caption comes back', app.contents_title.title() == caption, app.contents_title.title()[:40])
         app.select_folder(None); root.update()
         check('no folder open says so in the pane header, and the pane stays on screen',
-              app.contents_holder.winfo_ismapped() and app.contents_title.cget('text') == 'folder',
-              (app.contents_holder.winfo_ismapped(), app.contents_title.cget('text')))
+              app.contents_holder.winfo_ismapped() and app.contents_title.title() == 'folder',
+              (app.contents_holder.winfo_ismapped(), app.contents_title.title()))
 
     print("\n-- a folder is read newest-first (2026-10-28)")
     if app._plan and app._plan['groups']:
