@@ -4363,64 +4363,6 @@ class App:
         return value
 
     def _sequence_order(self, paths):
-        """Film order: numbered pictures by (scene, position in scene), then everything else newest-first.
-
-        Two passes rather than one clever key: a storyboard has an order that ends, and the pictures made outside one
-        (a test, a quick experiment) belong after it, not interleaved by a date they happened to be made on.
-        """
-        rows = [(p, self._scene_of(p), (read_meta(p) or {}).get('created') or '') for p in paths]
-        numbered = sorted((r for r in rows if r[1]), key=lambda r: (r[1][0], r[1][1], r[2]))
-        rest = sorted((r for r in rows if not r[1]), key=lambda r: r[2], reverse=True)
-        return [p for p, _scene, _created in numbered + rest]
-
-    def toggle_options(self, force=None):
-        """Fold the column's configuration away, or bring it back.
-
-        The first line - what the list *is* and the folders switch - stays: it answers "what am I looking at" rather than
-        "how is it configured". Everything else (search, the button rows, the sort row, the hints) is configuration and
-        costs vertical room the pictures want; measured, folding it returns ~150 px to the strip.
-        """
-        show = (not self._options_shown) if force is None else bool(force)
-        self._options_shown = show
-        group = [getattr(self, 'search_box', None), getattr(self, 'starred_chk', None), getattr(self, 'btns', None)]
-        for widget in group:
-            if widget is None or not widget.winfo_exists():
-                continue
-            if show:
-                widget.grid()
-            else:
-                widget.grid_remove()
-        # the folder bar has its own rule: it exists only when a plan does
-        bar = getattr(self, 'folder_bar', None)
-        if bar is not None and bar.winfo_exists():
-            if show and self._plan:
-                bar.grid()
-            else:
-                bar.grid_remove()
-        if hasattr(self, 'options_btn'):
-            self.options_btn.configure(text='\u25be options' if show else '\u25b8 options')
-
-    def _sort_wins(self):
-        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Wins'
-
-    def _sort_sequence(self):
-        return getattr(self, 'sort_var', None) is not None and self.sort_var.get() == 'Sequence'
-
-    def _scene_of(self, path):
-        """(scene, position in that scene) for a picture, or None. Memoised: the sidecars are read once per refresh."""
-        cache = getattr(self, '_scene_cache', None)
-        if cache is None:
-            cache = self._scene_cache = {}
-        if path in cache:
-            return cache[path]
-        meta = read_meta(path) or {}
-        scene, of = meta.get('scene'), meta.get('scene_of')
-        value = (int(scene), int(of or 0)) if isinstance(scene, int) or (isinstance(scene, str) and scene.isdigit()) \
-            else None
-        cache[path] = value
-        return value
-
-    def _sequence_order(self, paths):
         """Film order: scene, then the picture's position within the scene, then recency. Unnumbered pictures go last."""
         def key(item):
             path, created = item
