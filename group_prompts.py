@@ -282,7 +282,17 @@ def similarity(a, b, lexicon, cache=None):
     return s
 
 
-def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
+def _tick(progress, frac, stage):
+    """Report progress without ever being able to break the pass. `progress(frac, stage)`, frac 0..1."""
+    if progress is None:
+        return
+    try:
+        progress(max(0.0, min(1.0, float(frac))), stage)
+    except Exception:
+        pass
+
+
+def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0, progress=None):
     """Greedy incremental grouping in the order given. Returns a list of member-index lists, in that order.
 
     Order matters: the caller passes oldest first so a group is anchored by its oldest member and the folder order is
@@ -294,6 +304,8 @@ def group_texts(prompts, threshold=DEFAULT_THRESHOLD, lexicon=None, _depth=0):
     labels = [-1] * len(prompts)
     buckets = []                     # cluster -> its member indices
     for i, vec in enumerate(vecs):
+        if progress is not None and (i & 31) == 0:
+            _tick(progress, i / float(len(vecs) or 1), 'comparing prompts')
         best, best_k = 0.0, -1
         for k, members in enumerate(buckets):
             s = cosine(vec, vecs[members[0]])
@@ -625,7 +637,8 @@ def without_counts(prompt):
     return ' '.join(text.split())
 
 
-def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False):
+def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False,
+         progress=None):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
 
     Returns {'recent': [...], 'groups': [{'label', 'items', 'oldest', 'newest'}]}: the newest `recent` pictures
@@ -633,6 +646,7 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     recently added to first). Pictures whose prompt is empty are never put in
     a folder - they stay in a trailing 'ungrouped' bucket, because nothing can be said about them.
     """
+    _tick(progress, 0.03, 'reading the gallery')
     order = sorted(items, key=lambda r: r.get('created') or '', reverse=True)
     head, tail = order[:recent], order[recent:]
 
@@ -642,9 +656,11 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     with_prompt.sort(key=lambda r: r.get('created') or '')
 
     groups = []
+    small_family_rows = []      # rows from a root-family too small to be a folder: these go to `unfiled`
     # The corpus statistics are fitted on every prompt: the lexicon is what prediction and live_append use to recognise
     # "this new picture belongs to that folder", and fitting it on a reduced set quietly broke both.
     every_prompt = [r['prompt'] for r in with_prompt]
+    _tick(progress, 0.12, 'fitting the vocabulary')
     lexicon = fit_lexicon(every_prompt + [(r.get('prompt') or '') for r in head]) if every_prompt else None
 
     # A picture is filed under the prompt its SERIES started from, not under the instruction that last touched it. An edit
@@ -676,8 +692,14 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
                     a = parent[a]
                 return a
 
+            pairs_total = max(1, len(root_list) * (len(root_list) - 1) // 2)
+            pairs_done = 0
             for i, text_a in enumerate(root_list):
                 for text_b in root_list[i + 1:]:
+                    pairs_done += 1
+                    if progress is not None and (pairs_done & 255) == 0:
+                        _tick(progress, 0.15 + 0.40 * (pairs_done / float(pairs_total)),
+                              'linking prompt series')
                     if cosine(vectors[text_a], vectors[text_b]) >= ROOT_LINK:
                         parent[find(text_b)] = find(text_a)
             for text in root_list:
@@ -692,6 +714,11 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
             rows_here.sort(key=lambda r: r.get('created') or '')
             family_paths.update(r['path'] for r in rows_here)
             if len(rows_here) < min_group:
+                # Too small to be a folder, but not something to lose: measured 2026-10-31, 15 of 1427 pictures in the
+                # real gallery disappeared here - their paths are already excluded from the prompt pass below by
+                # `family_paths`, and they were in no group, so nothing drew them at all. They belong in the unfiled
+                # bucket, which is what the reader sees as "unfiled (N)".
+                small_family_rows.extend(rows_here)
                 continue
             counts = {stated_count(r.get('prompt')) for r in rows_here} - {None}
             label_prompts = ([without_counts(r['prompt']) for r in rows_here] if len(counts) > 1
@@ -710,7 +737,10 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     # everything, and the stated count is handled in the label instead of by splitting.
     if with_prompt and lexicon is not None:
         prompts = [r['prompt'] for r in with_prompt]
-        for members in group_texts(prompts, threshold=threshold, lexicon=lexicon):
+        def _sub(i, n, _p=progress):
+            if _p is not None:
+                _tick(_p, 0.55 + 0.38 * (i / float(n or 1)), 'grouping prompts into folders')
+        for members in group_texts(prompts, threshold=threshold, lexicon=lexicon, progress=_sub):
             if len(members) < min_group:
                 continue
             rows = sorted((with_prompt[m] for m in members), key=lambda r: r.get('created') or '')
@@ -738,10 +768,11 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     # render in the position it had when it was created. Ties fall back to the label so the order stays deterministic.
     groups.sort(key=lambda g: g['label'])
     groups.sort(key=lambda g: g.get('newest') or '', reverse=True)
-    out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + without,
+    out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + small_family_rows + without,
            'threshold': threshold, 'recent_n': recent}
     if keep_lexicon and lexicon is not None:
         out['_lexicon'] = lexicon      # the open-folder view re-matches new pictures against the same corpus statistics
+    _tick(progress, 1.0, 'done')
     return out
 
 

@@ -411,7 +411,15 @@ def main():
     canvas = app.gal_canvas
     cw, ch = canvas.winfo_width(), canvas.winfo_height()
     cols, tile = app._strip_metrics()
-    check('three columns', cols == zui.STRIP_FIT_COLS == 3, (cols, cw))
+    # 2026-10-31: the column count is no longer pinned at three. It follows the tile's maximum width - as many
+    # columns as fit while the tile stays at or below the cap - and steps down towards two and one as the column
+    # narrows. So the expectation is the rule itself, not the number it used to produce.
+    # The count is no longer a constant, and it is not the bare width grid either: `_strip_metrics` also caps the tile by
+    # the height and gives up a column that would hang off the edge. So the claim is the contract - the row fits, the
+    # tile is within its bounds, and there is at least one column.
+    check('the columns fit the strip canvas', cols * (tile + zui.TILE_CHROME) <= cw, (cols, tile, cw))
+    check('the tile stays between the floor and the base width',
+          zui.STRIP_TILE_MIN <= tile <= zui.STRIP_TILE_FIT, (tile, zui.STRIP_TILE_MIN, zui.STRIP_TILE_FIT))
     check('the tile is the width three of them fill', tile == cw // cols - zui.TILE_CHROME, (tile, cw))
     check('at least the 160 px fit size', tile >= zui.STRIP_TILE_FIT, tile)
     check('inside the 320 px cap', tile <= zui.STRIP_TILE_MAX, tile)
@@ -419,7 +427,7 @@ def main():
           tile <= ch // zui.STRIP_FIT_ROWS - zui.TILE_CHROME, (tile, ch))
     shown = cells(app)
     nine = strip_rows(shown)[:zui.STRIP_FIT_COLS * zui.STRIP_FIT_ROWS]
-    check('nine tiles are laid out', len(nine) >= 9, (len(shown), len(nine)))
+    check('a full row of tiles is laid out', len(nine) >= cols, (len(shown), len(nine), cols))
     check('the first nine do not run under the scrollbar', right_edge(nine) <= cw,
           (right_edge(nine), cw))
     check('nor under the bottom of the viewport', bottom_edge(nine) <= ch, (bottom_edge(nine), ch))
@@ -443,8 +451,8 @@ def main():
           (cols2, tile2, cw2))
     check('and the tiles it laid out agree', right_edge(narrow) <= cw2, (right_edge(narrow), cw2))
     check('a narrow column never goes below the 96 px floor', tile2 >= zui.STRIP_TILE_MIN, tile2)
-    check('the smallest window still shows the nine',
-          len([w for w in narrow if int(w.grid_info()['row']) < zui.STRIP_FIT_ROWS]) >= 9,
+    check('the smallest window still shows a full row',
+          len([w for w in narrow if int(w.grid_info()['row']) < zui.STRIP_FIT_ROWS]) >= cols2,
           (len(narrow), cw2))
     root.state('zoomed')
     pump(root, app, 0.9)
@@ -466,7 +474,10 @@ def main():
     bar = app.contents_bar
     pcols, ptile = app._contents_metrics(pane.winfo_width())
     pane_cells = cells(app, app.contents)
-    check('the pane laid out three per row', pcols == 3, (pcols, pane.winfo_width()))
+    # 2026-10-31: the pane steps down to two and one column as it narrows, so three is no longer a constant. What must
+    # hold is that the columns fit its width and the tile is inside the band.
+    check('the pane lays out the columns its width allows',
+          pcols >= 1 and pcols * (ptile + zui.TILE_CHROME) <= pane.winfo_width(), (pcols, ptile, pane.winfo_width()))
     check('its cells sit inside the canvas', right_edge(pane_cells) <= pane.winfo_width(),
           (right_edge(pane_cells), pane.winfo_width()))
     check('the scrollbar is a real width, queried from the widget',
@@ -801,8 +812,10 @@ def main():
     check('with the width written to the settings file on the release',
           zui.load_settings().get('contents_w') == app._contents_w,
           (zui.load_settings().get('contents_w'), app._contents_w))
-    check('the strip keeps its full row of columns at the narrow end of the pane',
-          app._strip_metrics()[0] == zui.STRIP_FIT_COLS, app._strip_metrics())
+    check('the strip keeps a full row of columns at the narrow end of the pane',
+          app._strip_metrics()[0] >= 1
+          and app._strip_metrics()[0] * (app._strip_metrics()[1] + zui.TILE_CHROME) <= app.gal_canvas.winfo_width(),
+          (app._strip_metrics(), app.gal_canvas.winfo_width()))
     # a drag is a burst of <Configure> events: count what it queues
     counts = {'refresh': 0, 'tiles': 0, 'resize': 0}
     real_refresh, real_tiles, real_resize = (zui.App.refresh_gallery, zui.App._render_folder_tiles,
@@ -917,7 +930,7 @@ def main():
     check('the canvas asks for the keyboard those keys need', bool(int(app.canvas.cget('takefocus'))),
           app.canvas.cget('takefocus'))
 
-    print('\n-- zoom: Fit is today\'s behaviour - shrink a big picture, never enlarge a small one')
+    print('\n-- zoom: Fit is the largest size that fits - it shrinks a big picture and enlarges a small one')
     app._set_zoom('Fit')
     pump(root, app, 0.3)
     fw, fh = app._draw[2:]
@@ -925,7 +938,12 @@ def main():
     check('and keeps its proportions', abs(fw / float(fh) - 2400 / 1600.0) < 0.02, fw / float(fh))
     app.select_file(small)
     pump(root, app, 0.4)
-    check('Fit leaves a picture smaller than the canvas alone', app._draw[2:] == (200, 150), app._draw[2:])
+    # Asked for 2026-10-31: "zoom fit should scale small images up just as it scales large images down". So a 200x150
+    # picture in a 271 px canvas is enlarged to fill it, still inside the canvas and still in proportion.
+    fw2, fh2 = app._draw[2:]
+    check('Fit enlarges a picture smaller than the canvas', fw2 > 200 and fh2 > 150, (fw2, fh2))
+    check('without overflowing the canvas it fits into', fw2 <= cw and fh2 <= ch, (fw2, fh2, cw, ch))
+    check('and keeps its proportions while doing it', abs(fw2 / float(fh2) - 200 / 150.0) < 0.04, fw2 / float(fh2))
 
     print('\n-- zoom: the level is a view setting, so it outlives the picture')
     app._set_zoom('200%')

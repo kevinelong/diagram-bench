@@ -83,6 +83,11 @@ class _SheetShim:
 
 
 
+# A test window must never take the foreground, pin itself on top, or open maximised over the desktop: the reader may
+# be working in a real instance while a suite runs (asked 2026-10-31). Set before App is constructed anywhere below.
+os.environ['ZIMAGE_NO_FOCUS'] = '1'
+
+
 class StubEngine:
     """Only what App touches: events, generate, cancel, shutdown."""
 
@@ -1274,10 +1279,10 @@ def main():
           str(app._content_order[0].name))
     # Reported 2026-10-31: "initial order seems almost random not date or alpha or ranked". Fitted strength had no
     # tie-break for pictures that never faced a bout, so a fresh folder's order was whatever the fitting returned.
-    # Wins is now one key everywhere: wins, losses, then created, then name. This fixture's rows carry no `created`,
-    # so the tie-break lands on the name - the point is that it is a rule and not an accident, so the expectation is
-    # computed the same way rather than guessed.
-    expect = [victim] + sorted((p for p in made if p != victim), key=lambda p: p.name)
+    # Wins is now one key everywhere: wins, losses, then newest, then name. Rows without `created` fall back to the
+    # file's mtime, so ties in this fixture are broken newest-first, by name. The point is that it is a rule and not an
+    # accident, so the expectation is computed the same way rather than guessed.
+    expect = [victim] + sorted((p for p in made if p != victim), key=lambda p: p.name, reverse=True)
     check('and equal ranks are broken by a stated rule, not by the fitting',
           [Path(p) for p in app._content_order] == expect,
           str([Path(p).name for p in app._content_order]))
@@ -1507,6 +1512,50 @@ def main():
     check('closing drops every highlight',
           not app.text.tag_ranges('findall') and not app.text.tag_ranges('findhit'), 'tags')
     check('and the bar is hidden again', not app.find_row.winfo_ismapped(), 'mapped')
+
+    print('\n-- a dialog hands the front back to the main window when it closes')
+    raised = []
+    real_raise = app._raise_main
+    app._raise_main = lambda event=None: raised.append(1)
+    win = app._closing_raises_main(tk.Toplevel(root))
+    root.update()
+    win.destroy()
+    root.update(); time.sleep(0.1); root.update()
+    check('closing a window asks the main window back to the front', bool(raised), str(len(raised)))
+    app._raise_main = real_raise
+
+    print('\n-- the loading meter says a percentage and the stage, and only when something is loading')
+    meter = zui.LoadingMeter(root, width=320, theme=app.theme)
+    meter.show('grouping pictures into folders', 'reading the gallery')
+    root.update()
+    check('a meter starts at 0% with its stage named',
+          meter.percent_lbl['text'] == '0%' and meter.stage_lbl['text'].startswith('grouping'),
+          '%s / %s' % (meter.percent_lbl['text'], meter.stage_lbl['text']))
+    meter.set(0.5, 'grouping pictures into folders', '600 of 1427 prompts')
+    root.update()
+    check('half way reads 50%', meter.percent_lbl['text'] == '50%', meter.percent_lbl['text'])
+    check('and the detail line carries what is known', '1427' in meter.detail_lbl['text'], meter.detail_lbl['text'])
+    meter.set(stage='labelling the folders')
+    root.update()
+    check('a stage change does not invent progress', meter.percent_lbl['text'] == '50%', meter.percent_lbl['text'])
+    meter.hide()
+    root.update()
+    check('hiding removes it', not bool(meter.place_info()), str(meter.place_info()))
+    meter.destroy()
+    # the grouping pass reports through it: at least one load event reaches the queue
+    while True:
+        try:
+            app.ui_events.get_nowait()
+        except Exception:
+            break
+    app._compute_groups()
+    kinds = []
+    while True:
+        try:
+            kinds.append(app.ui_events.get_nowait()[0])
+        except Exception:
+            break
+    check('the grouping pass posts loading progress', kinds.count('load') >= 1, str(sorted(set(kinds))))
 
     print('\n-- a picture that lands mid-run is given a thumbnail, so its tile is not just its caption')
     landed = tmp / 'landed-tile.png'
@@ -2719,7 +2768,13 @@ def main():
         info = cell.grid_info()
         if info:
             pane_cols[int(info['column'])] = info
-    check('the pane lays out three per row', sorted(pane_cols) == [0, 1, 2], sorted(pane_cols))
+    # The pane used to be floored at three columns whatever its width; the count is now driven by the tile width, so
+    # the expectation is computed from the same rule rather than hard-coded (asked for 2026-10-31: step down to two and
+    # one as the column narrows, add columns when a wider column would push the tile past its cap).
+    want_cols, _want_tile = zui.tile_grid(max(1, app.contents_canvas.winfo_width() - 8),
+                                          zui.STRIP_TILE_MIN, zui.STRIP_TILE_MAX, zui.TILE_CHROME)
+    check('the pane lays out the number of columns its width allows',
+          sorted(pane_cols) == list(range(want_cols)), (sorted(pane_cols), want_cols))
     if pane_cols:
         cell_w = max(int(c.winfo_width()) for c in app.contents.winfo_children())
         pane_w = app.contents_canvas.winfo_width()

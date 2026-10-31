@@ -732,7 +732,12 @@ THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show 
 RECENT_N = 12
 # How many of the newest pictures plan() holds out of families (they get their own 'Recent' tile instead). A policy, not
 # a coincidence: tests that exercise family grouping set this to 0 so a small fixture is not entirely "recent".
-RECENT_POLICY = 24        # thumbnails in the sidebar strip: the nine it shows at once, plus a row before it scrolls
+# Pictures the grouping leaves out of every family, so a brand-new render has somewhere to appear.
+# Asked for 2026-10-31: "are the 24 recent items ... also in their proper folders or are they being prevented from being
+# categorized? i think we should categorize all of them and open the folder with the most recent image." So the window
+# is 0: every picture is filed by its prompt, and a new picture joins its family immediately. A picture whose prompt
+# matches nothing stays visible in the `unfiled` tile rather than in a Recent bucket.
+RECENT_POLICY = 0
 RECENT_COLS = 3       # fallback; the strip computes its own from the size it has
 RECENT_PX = 92       # fallback tile size, before the canvas has been laid out
 CONTENTS_W = 300     # width of the pictures in the open-folder pane; the scrollbar is reserved on top of it
@@ -939,6 +944,63 @@ def thumbs_for(paths, workers=8, cache_root=None, build=True):
     with ThreadPoolExecutor(max_workers=workers) as pool:
         got = list(pool.map(lambda p: (p, thumb_for(p, cache_root, build=build)), paths))
     return dict(got)
+
+
+def tile_grid(available, min_tile=STRIP_TILE_MIN, max_tile=STRIP_TILE_MAX, chrome=TILE_CHROME):
+    """(columns, tile) for a column of tiles, from the width it has.
+
+    Asked for 2026-10-31: the left strip and the picture column "should have a width at which they switch down to two
+    and even one inner column of tiles", and a "max tile width that causes extra columns to be added if there is room".
+    So the count is driven by the cap rather than by a fixed number of columns: as many columns as fit while the tile
+    stays at or below `max_tile`, fewer when a column would fall under `min_tile`, and one when the column is too narrow
+    for two. The tile then takes whatever is left of the width.
+
+    The pane used to be floored at three columns whatever its width, so a narrow pane kept three slivers of thumbnail;
+    the strip stopped at three however wide it got, so a maximised window posted billboards instead of more pictures.
+    """
+    available = max(1, int(available))
+    cols = max(1, int(math.ceil(available / float(max_tile + chrome))))
+    tile = available // cols - chrome
+    while cols > 1 and tile < min_tile:
+        cols -= 1
+        tile = available // cols - chrome
+    return cols, max(1, min(max_tile, tile))
+
+
+def folder_event(name, **detail):
+    """One line per folder-lifecycle event, so "I have to toggle it twice" stops being invisible.
+
+    Written unconditionally to %LOCALAPPDATA%/zimage-ui/folder-events.log - a handful of lines per action, and the only
+    record of which of the four steps (toggle, start, compute, apply) went missing in a session where the folders did
+    not appear (reported twice on 2026-10-31). Never raises.
+    """
+    try:
+        path = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'zimage-ui' / 'folder-events.log'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rec = {'t': datetime.now().isoformat(timespec='milliseconds'), 'ev': name}
+        rec.update(detail)
+        with path.open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps(rec, separators=(',', ':')) + '\n')
+    except Exception:
+        pass
+
+
+def row_stamp(row):
+    """A sortable date for a plan row, falling back to the file's mtime.
+
+    Plan rows normally carry `created`, but a group built in a test, or by `live_append`, may not - and without the
+    fallback the tie-break silently became "by file name". Module-level rather than a method because the folder-tile
+    tests drive `_sheet_paths` through a shim that has none of the App's methods.
+    """
+    created = row.get('created')
+    if created:
+        return created
+    try:
+        # microsecond precision: a 16-up run writes sixteen files inside one second, and at second precision they
+        # all tied - which is why a batch's order used to fall back to the file name
+        return datetime.fromtimestamp(Path(row['path']).stat().st_mtime).isoformat()
+    except Exception:
+        return ''
 
 
 def read_meta(png):
@@ -1953,6 +2015,94 @@ class Sash(tk.Frame):
         return 'break'
 
 
+class LoadingMeter(ttk.Frame):
+    """A large green percentage bar that says what is being loaded.
+
+    Anything in this app that can take longer than a second reports here, so "loading" looks the same everywhere and
+    carries information instead of a spinner: "50 % - grouping 1427 pictures into folders" is a state; a spinning dot is
+    an apology. Drawn on a Canvas rather than with a ttk.Progressbar because the Windows `vista` theme ignores
+    `background` and `troughcolor`, so a themed bar cannot be made green.
+
+        meter.show('grouping pictures', 'reading sidecars')
+        meter.set(0.42, 'grouping pictures', 'comparing 600 of 1427 prompts')
+        meter.hide()
+
+    Percent is only ever what the caller measured. `set()` without a fraction leaves the number where it was and
+    updates the words, so a stage change never invents progress - the same rule as the rest of this harness.
+    """
+
+    GREEN = '#22c55e'
+    GREEN_DIM = '#15803d'
+    TROUGH = '#12351f'
+
+    def __init__(self, master, width=440, height=30, theme=None):
+        super().__init__(master)
+        self._meter_w = width          # NOT self._w: that name is tkinter's widget path
+        self._frac = None
+        self._started = None
+        self._theme = theme
+        self.percent_lbl = ttk.Label(self, text='', font=('Segoe UI', 40, 'bold'), foreground=self.GREEN)
+        self.percent_lbl.pack()
+        self.canvas = tk.Canvas(self, width=width, height=height, highlightthickness=0, bd=0,
+                                background=(theme.window if theme is not None else None))
+        self.canvas.pack(fill='x', pady=(2, 4))
+        self.stage_lbl = ttk.Label(self, text='', font=('Segoe UI', 13, 'bold'))
+        self.stage_lbl.pack()
+        self.detail_lbl = ttk.Label(self, text='', foreground=(theme.muted if theme is not None else None),
+                                    wraplength=width, justify='center')
+        self.detail_lbl.pack()
+        self.eta_lbl = ttk.Label(self, text='', foreground=(theme.muted if theme is not None else None),
+                                 font=('Segoe UI', 9))
+        self.eta_lbl.pack()
+
+    # -- drawing ---------------------------------------------------------
+    def _redraw(self):
+        c = self.canvas
+        c.delete('all')
+        w = max(60, c.winfo_width() if c.winfo_width() > 1 else self._meter_w)
+        h = int(c.cget('height'))
+        pad = 2
+        # the bracket ends the user asked for: [ ###      ]
+        c.create_text(pad, h // 2, text='[', font=('Consolas', max(10, h - 8), 'bold'), fill=self.GREEN_DIM, anchor='w')
+        c.create_text(w - pad, h // 2, text=']', font=('Consolas', max(10, h - 8), 'bold'), fill=self.GREEN_DIM, anchor='e')
+        x0, x1 = 18, w - 18
+        c.create_rectangle(x0, 5, x1, h - 5, outline=self.GREEN_DIM, fill=self.TROUGH)
+        if self._frac is not None:
+            filled = x0 + max(0.0, min(1.0, self._frac)) * (x1 - x0)
+            if filled - x0 >= 2:
+                c.create_rectangle(x0 + 1, 6, filled, h - 6, outline='', fill=self.GREEN)
+
+    # -- api -------------------------------------------------------------
+    def show(self, stage='', detail=''):
+        self._started = time.monotonic()
+        self._frac = None
+        self.percent_lbl.configure(text='0%')
+        self.stage_lbl.configure(text=stage)
+        self.detail_lbl.configure(text=detail)
+        self.eta_lbl.configure(text='')
+        self.place(relx=0.5, rely=0.5, anchor='center')
+        self.lift()
+        self._redraw()
+
+    def set(self, frac=None, stage=None, detail=None):
+        if frac is not None:
+            self._frac = max(0.0, min(1.0, float(frac)))
+            self.percent_lbl.configure(text='%d%%' % round(self._frac * 100))
+        if stage is not None:
+            self.stage_lbl.configure(text=stage)
+        if detail is not None:
+            self.detail_lbl.configure(text=detail)
+        if self._started is not None and self._frac and self._frac > 0.02:
+            elapsed = time.monotonic() - self._started
+            left = elapsed * (1.0 - self._frac) / self._frac
+            self.eta_lbl.configure(text='%.0fs elapsed, about %.0fs left' % (elapsed, max(0.0, left)))
+        self._redraw()
+
+    def hide(self):
+        self.place_forget()
+        self._started = None
+
+
 class App:
     def __init__(self, root, engine, args):
         self.root, self.engine, self.args = root, engine, args
@@ -2129,6 +2279,9 @@ class App:
         # in the content flow it sat in the top-left corner of a large empty column, which read as a caption, not a state
         self.grouping_badge = ttk.Label(holder, text='grouping prompts\u2026', foreground=self.theme.muted,
                                         font=('Segoe UI', 18), anchor='center', justify='center')
+        # The loading meter every long pass reports through. Placed in the same holder as the badge, centred, so the
+        # strip shows a green percentage and the stage instead of a bare "grouping prompts..." (asked for 2026-10-31).
+        self.load_meter = LoadingMeter(holder, width=460, theme=self.theme)
         # the open folder's pictures get their own pane beside the folder list, so the list never has to disappear
         self.contents_holder = ttk.Frame(gal)
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
@@ -2815,6 +2968,10 @@ class App:
         # for the first paint instead of running during construction.
         if self.group_var.get():
             self._idle(lambda: self.toggle_groups(True) if not self._plan else None)
+            # Watchdog. Reported twice that folders only appeared after the switch was toggled twice, and the harness
+            # could not reproduce it - so if folders are on and two and a half seconds later there is still no plan and
+            # no worker, start one. It is idempotent: `_regroup_now` refuses while a compute is in flight.
+            self.root.after(2500, self._folders_watchdog)
 
     def _ensure_maximized(self):
         """Ask again once the window is mapped.
@@ -3174,6 +3331,8 @@ class App:
     def toggle_groups(self, on=None):
         """Turn the prompt folders on: compute them in the background, oldest first, and touch nothing on disk."""
         want = bool(self.group_var.get()) if on is None else bool(on)
+        folder_event('toggle', want=want, had_plan=bool(self._plan), grouping=bool(self._grouping),
+                     files=len(getattr(self, '_files', []) or []))
         self.group_var.set(want)
         self._settings['folders'] = want
         save_settings(self._settings)
@@ -3294,6 +3453,11 @@ class App:
                     pass
                 done += 1
                 self.ui_events.put(('caption_progress', (done, total)))
+                # the same meter the grouping pass uses: a describe-all over a folder is a minutes-long job, and
+                # "describing 12 of 40" with a green percentage beats a hint line that scrolls away
+                self.ui_events.put(('load', (done / float(max(1, total)) if total else 1.0,
+                                             'describing the pictures',
+                                             '%d of %d written' % (done, total))))
             self.ui_events.put(('caption_done', (done, total)))
 
         import threading
@@ -3476,6 +3640,17 @@ class App:
                 pass
         self._regroup_job = self.root.after(1200, self._regroup_now)
 
+    def _folders_watchdog(self):
+        """If the folders are on but nothing is computing and no plan exists, start the pass."""
+        try:
+            if getattr(self, '_closing', False) or not self._alive():
+                return
+            if self.group_var.get() and not self._plan and not getattr(self, '_grouping', False):
+                folder_event('watchdog_kick', files=len(getattr(self, '_files', []) or []))
+                self._regroup_now()
+        except Exception:
+            pass
+
     def _regroup_now(self):
         self._regroup_job = None
         if not self.group_var.get():
@@ -3489,12 +3664,14 @@ class App:
             self._regroup_job = self.root.after(600, self._regroup_now)
             return
         self._grouping = True
+        folder_event('start', files=len(getattr(self, '_files', []) or []))
         # Say it now. Grouping 1427 pictures takes 5.1 s measured (p90 prompt is 911 words), and until this line the
         # column went on saying "No folder open" for the whole of it - which reads as a broken start rather than a busy
         # one (reported 2026-10-31, with a screenshot of exactly that state).
         try:
             self._loading_show()
             self._render_folder_bar()
+            self.load_meter.show('grouping pictures into folders', 'reading the gallery')
         except Exception:
             pass
         threading.Thread(target=self._compute_groups, daemon=True).start()
@@ -3512,7 +3689,12 @@ class App:
         try:
             import group_prompts
             rows = []
-            for path, stamp in self._scan():          # (path, mtime); the prompt lives in the sidecar
+            scan = self._scan()
+            total_files = max(1, len(scan))
+            for i, (path, stamp) in enumerate(scan):  # (path, mtime); the prompt lives in the sidecar
+                if (i & 63) == 0:
+                    self.ui_events.put(('load', (0.10 * i / total_files, 'reading the gallery',
+                                                 '%d of %d pictures' % (i, total_files))))
                 meta = read_meta(path) or {}
                 prompt = meta.get('prompt') or ''
                 topic = ''
@@ -3529,7 +3711,11 @@ class App:
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
                              'root': meta.get('lineage_root'), 'lineage': meta.get('lineage'),
                              'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
-            plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY)
+            def _say(frac, stage, _rows=rows):
+                # 0.10 is the sidecar read above; the grouping pass owns the rest
+                self.ui_events.put(('load', (0.10 + 0.90 * frac, stage,
+                                             '%d pictures in the gallery' % len(_rows))))
+            plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
             for group in plan.get('groups') or []:
@@ -3555,6 +3741,11 @@ class App:
             self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
 
     def _apply_plan(self, plan):
+        folder_event('apply', groups=len(plan.get('groups') or []), files=len(getattr(self, '_files', []) or []))
+        try:
+            self.load_meter.hide()
+        except Exception:
+            pass
         was_open = None
         if self._plan and self._active_folder is not None and self._active_folder < len(self._plan['groups']):
             was_open = self._plan['groups'][self._active_folder].get('label')
@@ -3588,7 +3779,11 @@ class App:
         if (self._active_folder is None and plan.get('groups')
                 and not getattr(self, '_opened_default_folder', False)):
             self._opened_default_folder = True
-            pick = next((i for i, g in enumerate(plan['groups']) if not g.get('synthetic')), 0)
+            # The folder holding the most recent picture - "open the folder with the most recent image" (2026-10-31).
+            # plan() already sorts families newest-first, but choosing by the stated key means a change to that sort
+            # cannot silently open a different folder.
+            real = [(i, g) for i, g in enumerate(plan['groups']) if not g.get('synthetic')]
+            pick = max(real, key=lambda t: t[1].get('newest') or '')[0] if real else 0
             self._active_folder = pick
             self._see_folder(pick)
         self._render_folder_bar()
@@ -3601,8 +3796,12 @@ class App:
         synthetic = sum(len(g.get('items') or []) for g in plan['groups'] if g.get('synthetic'))
         total = (sum(len(g.get('items') or []) for g in plan['groups']) - synthetic
                  + len(plan.get('ungrouped') or []) + len(plan.get('recent') or []))
-        self.status.configure(text='%d folders from %d pictures in %.1fs - recent %d stay ungrouped'
-                              % (len(plan['groups']), total, plan.get('seconds') or 0, len(plan['recent'])))
+        if plan.get('recent'):
+            tail = 'recent %d stay ungrouped' % len(plan['recent'])
+        else:
+            tail = 'every picture is filed'
+        self.status.configure(text='%d folders from %d pictures in %.1fs - %s'
+                              % (len(plan['groups']), total, plan.get('seconds') or 0, tail))
 
     def _show_new_results(self):
         """Keep the open folder open when a render lands.
@@ -3737,6 +3936,50 @@ class App:
             self._tip(label, 'The prompt as typed would land in this folder, so the next render appears there.')
 
     # -- the full-screen folder browser -------------------------------------------------------------
+    def _raise_main(self, event=None):
+        """Bring the main window back to the front and give it focus.
+
+        Silent under ZIMAGE_NO_FOCUS, which the test suite sets: a test window that grabs the foreground and pins itself
+        to the top of the Z order is stealing the machine from whatever the reader is using - asked directly on
+        2026-10-31 whether the tests bring their instances in front of the working one. They must not.
+
+        Reported 2026-10-31: closing the ranking or a folder window left the main window behind whatever was in
+        front, so the next click went nowhere. `lift()` alone does not do it on Windows - a Tk window that never held
+        focus stays down the Z order - so this also forces focus, restores an iconified window, and puts the caret back
+        in the prompt box where it usually belongs.
+        """
+        if os.environ.get('ZIMAGE_NO_FOCUS'):
+            return
+        try:
+            if self.root.state() == 'iconic':
+                self.root.deiconify()
+            self.root.lift()
+            self.root.attributes('-topmost', True)
+            self.root.after(150, lambda: self.root.attributes('-topmost', False))
+            self.root.focus_force()
+            if getattr(self, 'text', None) is not None and self.text.winfo_exists():
+                self.text.focus_set()
+        except Exception:
+            pass
+
+    def _closing_raises_main(self, win):
+        """Prepare a child window: open it maximised, and hand the front back when it goes away.
+
+        Asked for 2026-10-31: "when gallery or a b or any other child windows are opened they should also be opened full
+        screen maximized initially", whatever size the main window was restored to. They used to open at whatever size
+        Tk chose, which on a large screen left a small dialog over a big empty desktop.
+        """
+        if not os.environ.get('ZIMAGE_NO_FOCUS'):
+            try:
+                win.state('zoomed')
+            except Exception:
+                pass
+        try:
+            win.bind('<Destroy>', self._raise_main, add='+')
+        except Exception:
+            pass
+        return win
+
     def open_folder_browser(self):
         """Every folder, full screen: 4-up tiles on the left, the open folder's pictures in a grid on the right.
 
@@ -3753,7 +3996,7 @@ class App:
             return
         from PIL import ImageTk
 
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         self._folder_win = win
         win.title('Prompt folders (%d)' % len(self._plan['groups']))
@@ -4015,7 +4258,7 @@ class App:
         if getattr(self, '_review', None) is not None and self._review.get('win') and self._review['win'].winfo_exists():
             self._review['win'].lift()
             return
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         win.title('A/B review - %s' % label[:50])
         try:
@@ -4658,6 +4901,7 @@ class App:
         return None
 
     def review_stop(self, event=None):
+        self._raise_main()
         import pair_review
         r = getattr(self, '_review', None)
         if not r:
@@ -4913,8 +5157,19 @@ class App:
         # wins first, and among equal wins the plan's own order newest-first - the tile has always trusted the list
         # rather than the filesystem's mtimes, which are coarse and lie after a copy
         try:
-            ranked = [row for _pos, row in sorted(enumerate(window),
-                                                  key=lambda t: (-self._wins_of(t[1]['path']), -t[0]))]
+            # The same key the open folder's pane uses: wins desc, losses asc, then newest, then name. The tile used
+            # to rank by wins alone and break ties by plan position, so a featured picture could sit at position 11 in
+            # the pane while the tile showed it and skipped the two ranked above it (reported 2026-10-31: "why is one
+            # of four featured images ... not in the top ranked folder items"). Stable two-pass: newest first, then
+            # rank, so ties keep the newest.
+            # wins desc, losses asc, then the plan's own position - which is oldest-first in `items`, so -position is
+            # newest-first. The same three keys the pane uses, and the tile can never feature a picture that outranks
+            # nothing: measured 2026-10-31, a W4/L2 picture sat at pane position 11 yet was featured, because this
+            # ranked on wins alone and broke ties by position.
+            def _rank(t):
+                rec = self._record_of(Path(t[1]['path']))
+                return (-rec['wins'], rec['losses'], -t[0])
+            ranked = [row for _pos, row in sorted(enumerate(window), key=_rank)]
         except Exception as exc:
             log_error('rank order in a folder tile', exc)             # newest-first, as if nobody had won
             ranked = list(window)
@@ -5157,10 +5412,12 @@ class App:
                 # all for pictures that never faced one, so the first order of a fresh folder read as random
                 # (reported 2026-10-31). One ordering everywhere is also the reason a tile's best matches the pane's
                 # first picture.
-                def win_key(r):
-                    rec = self._record_of(Path(r['path']))
-                    return (-rec['wins'], rec['losses'], r.get('created') or '', r['path'])
-                items.sort(key=win_key)
+                # Stable two-pass, exactly as the folder tiles do it: newest first, then rank. One key, one order -
+                # the pane and a tile in the strip must never disagree about which pictures are the best four.
+                items.sort(key=lambda r: r['path'])                    # name ascending within a tie
+                items.sort(key=lambda r: row_stamp(r), reverse=True)   # newest first
+                items.sort(key=lambda r: (-self._record_of(Path(r['path']))['wins'],
+                                          self._record_of(Path(r['path']))['losses']))
             except Exception as exc:
                 # A rank that cannot be computed must not empty the pane. Reported 2026-10-31 as a pass where the folder
                 # list worked and the pictures did not; this is the one path that could produce exactly that, so it now
@@ -5872,11 +6129,13 @@ class App:
         if w <= 1:
             w = STRIP_FIT_W                                  # not laid out yet: the nine at the fit size
         roomy = max(1, int(w // (STRIP_TILE_MIN + TILE_CHROME)))
-        cols = max(1, min(STRIP_FIT_COLS, roomy))
-        tile = w // cols - TILE_CHROME
+        # The cap is the standard base width, not the 320 ceiling: "a max tile width that causes extra columns to be
+        # added if there is room for the extra inner columns of the standard base width max" (2026-10-31). So the strip
+        # adds columns as it widens instead of growing tiles past the base size - which also keeps the finish view's
+        # tiles larger than the strip's, as B2 asked.
+        cols, tile = tile_grid(w, STRIP_TILE_MIN, STRIP_TILE_FIT, TILE_CHROME)
         if h > 1:
-            tile = min(tile, h // STRIP_FIT_ROWS - TILE_CHROME)
-        tile = max(STRIP_TILE_MIN, min(STRIP_TILE_MAX, tile))
+            tile = max(STRIP_TILE_MIN, min(tile, h // STRIP_FIT_ROWS - TILE_CHROME))
         while cols > 1 and cols * (tile + TILE_CHROME) > w:
             cols -= 1           # a tile raised off the floor needs the width back, or the last column hangs off
         return cols, tile
@@ -5926,9 +6185,10 @@ class App:
             except Exception:
                 width = CONTENTS_W
         width = max(1, int(width))
-        cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
-        tile = max(48, width // cols - TILE_CHROME)
-        return cols, tile
+        cols, tile = tile_grid(width - 8, STRIP_TILE_MIN, STRIP_TILE_MAX, TILE_CHROME)
+        while cols > 1 and cols * (tile + TILE_CHROME) > width - 8:
+            cols -= 1
+        return cols, max(48, tile)
 
     @timed_panel('refresh_gallery')
     def refresh_gallery(self, select=None):
@@ -6552,7 +6812,7 @@ class App:
     def ask_style_conflict(self, style_name, prompt, spans):
         """Remove, keep, or stop and edit. Modal: the caller needs the answer before it dispatches."""
         words = sorted({prompt[a:b] for a, b in spans})
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         win.title('Style and prompt disagree')
         win.transient(self.root)
         ttk.Label(win, justify='left', wraplength=460,
@@ -6605,7 +6865,7 @@ class App:
         Measured reason to ask at all: "black line only, white background" plus a charcoal suffix came back as graphite.
         """
         words = sorted({prompt[a:b] for a, b in spans})
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         win.title('The prompt asks for two things')
         win.transient(self.root)
         groups = {}
@@ -7215,7 +7475,7 @@ class App:
         self.last_label.configure(text='%s  ·  %s' % (text, desc) if desc else text)
 
     def show_run_log(self):
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         win.title('Run log - this session')
         win.geometry('760x320')
@@ -7281,7 +7541,7 @@ class App:
     def show_graph(self):
         """Show the ComfyUI workflow the last run actually sent - the SwarmUI "look inside" trick."""
         wf = getattr(self.engine, 'last_workflow', None)
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         win.title('Workflow sent to ComfyUI')
         win.geometry('620x460')
@@ -7323,7 +7583,7 @@ class App:
             lines.append('tiles: %d separate files' % len(meta['tiles']))
         body = '\n'.join(lines)
 
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         win.title('Metadata - %s' % Path(path).name)
         win.geometry('560x320')
@@ -8055,7 +8315,7 @@ class App:
         if not self._all_files():
             self.hint.configure(text='no images yet')
             return
-        win = tk.Toplevel(self.root)
+        win = self._closing_raises_main(tk.Toplevel(self.root))
         self._later(30, self._retitle, win)
         self._browser_win = win
         win.title('View All')
@@ -9134,11 +9394,17 @@ class App:
                         self.hint.configure(text=('local model ready at %s' % url) if self._llm_ok
                                             else ('no local model at %s - enhance and describe stay off' % url))
                 elif kind == 'caption_progress':
+                    if not bool(self.load_meter.place_info()):
+                        self.load_meter.show('describing the pictures', '')
                     # the folder-caption pass emits (i, n); the describe pass adds the file name
                     i, n = payload[0], payload[1]
                     name = payload[2] if len(payload) > 2 else ''
                     self.hint.configure(text='describing %d of %d%s' % (i, n, (': ' + name[:40]) if name else ''))
                 elif kind == 'captioned':
+                    try:
+                        self.load_meter.hide()
+                    except Exception:
+                        pass
                     done, failed, total = payload
                     self._captions_running = False
                     self.hint.configure(text='wrote a prompt for %d of %d pictures%s - grouping again'
@@ -9168,11 +9434,22 @@ class App:
                 elif kind == 'review_error':
                     self.hint.configure(text='A/B review failed: %s' % payload)
                     self.status.configure(text='ready')
+                elif kind == 'load':
+                    frac, stage, detail = payload
+                    try:
+                        self.load_meter.set(frac, stage, detail)
+                    except Exception:
+                        pass
                 elif kind == 'thumb_ready':
                     # a picture that was only a caption now has its thumbnail: repaint, once per burst
                     self._thumb_repaint_soon()
                 elif kind == 'groups_error':
+                    folder_event('error', detail=str(payload)[:120])
                     self._grouping = False
+                    try:
+                        self.load_meter.hide()
+                    except Exception:
+                        pass
                     self.hint.configure(text='grouping failed: %s' % payload)
                     self._render_folder_bar()
         except queue.Empty:
@@ -9415,7 +9692,11 @@ class App:
         if box >= 2:
             k = int(box)
             iw, ih = iw // k, ih // k
-        ratio = min(w / float(iw), h / float(ih), 1.0)      # 1.0: Fit shrinks a big picture and never enlarges a small one
+        # Fit is the largest size that fits the view, up or down: a 256 px render should fill a 700 px pane just as a
+        # 1536 px one is brought down to fit it. Asked for 2026-10-31 ("zoom fit should scale small images up just as it
+        # scales large images down"). The 1.0 cap that used to be here was the only thing stopping it, and `_slice_of`
+        # already resamples the other way with a bilinear step, so an enlarged small picture is smooth, not blocky.
+        ratio = min(w / float(iw), h / float(ih))
         return max(1, int(iw * ratio)), max(1, int(ih * ratio))
 
     def _origin(self, dw, dh):
