@@ -44,9 +44,30 @@ tile, Enter/Space handlers, F6, Alt keys, and a `_closing` guard so a debounce c
 | grouping scan (read 1 000 sidecars, build families) | included in that startup; the list is virtual, so scrolling is O(visible) |
 | first compile to a running window | **6 build/fix rounds** (`windows` 0.62 types: `PWSTR` vs `PCWSTR`, `LIST_VIEW_ITEM_STATE_FLAGS`, `MESSAGEBOX_RESULT`; my errors, not the API's) |
 
+## Thumbnails (added, wiring verified, painting unconfirmed)
+
+WIC decode on a worker thread (`IWICImagingFactory` → `IWICBitmapScaler` → 32bppBGR → DIB `HBITMAP`), a process-wide cache
+keyed by path, and `NM_CUSTOMDRAW` painting each row: tile on the left, file name and prompt beside it, selection colours
+from the system. Rows need an image list to be tall enough in report mode (`ImageList_Create(1, 90, ILC_COLOR32, …)` +
+`LVM_SETIMAGELIST(LVSIL_SMALL)`), because report rows size themselves from that list.
+
+Three defects were found and fixed in this step, all mine:
+
+- `CDDS_ITEMPREPAINT` is `CDDS_ITEM | CDDS_PREPAINT` = **0x10001**, not `0x10000` — with the wrong constant no row ever asked
+  to be painted;
+- `/MANIFESTDEPENDENCY:"type='win32' name='…'"` is one argument containing spaces, and the linker word-splits it
+  (`LNK1181: cannot open input file "name='Microsoft.Windows.Common-Controls'"`); the manifest is a file passed with
+  `/MANIFEST:EMBED` + `/MANIFESTINPUT:<path>` instead;
+- rows in `LVS_REPORT` are one line tall until an image list sets their height, so the tile had nowhere to go.
+
+**Verification gap**: the window was confirmed running (25.4 MB, 1 000 sidecars scanned, tall rows, family list, virtual
+list) but the *painted tiles* were not confirmed visually - the desktop was in use when the last capture was attempted.
+That is the next five minutes of work, not a claim.
+
 ## Not done yet (deliberately)
 
-- **thumbnails** — needs WIC (`IWICImagingFactory` → scaled `HBITMAP`) and custom draw; the rows show names and prompt text
+- the A/B overlay and finish screen, generation against ComfyUI, Describe-all
+- the grouping/naming rules of `group_prompts` (families are keyed by a raw root prefix here)
 - the A/B review overlay, the finish screen, generation against ComfyUI, Describe-all, search/filter
 - the grouping/naming rules of `group_prompts` (families are keyed by a raw root prefix here)
 

@@ -13,13 +13,27 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
 use windows::core::{w, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{GetStockObject, InvalidateRect, DEFAULT_GUI_FONT};
+use windows::Win32::Foundation::{GENERIC_READ, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, DrawTextW, GetStockObject, InvalidateRect,
+    SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW, COLOR_WINDOWTEXT, DEFAULT_GUI_FONT, DIB_RGB_COLORS, HBRUSH,
+    DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE,
+    SRCCOPY, STRETCH_DELETESCANS, TRANSPARENT,
+};
+use windows::Win32::Graphics::Imaging::{
+    CLSID_WICImagingFactory2, IWICImagingFactory, WICBitmapDitherTypeNone, WICBitmapInterpolationModeFant,
+    WICBitmapInterpolationMode, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
+    GUID_WICPixelFormat32bppBGR,
+};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
     SetWindowTheme, LVCOLUMNW, LVIF_TEXT, LVIS_FOCUSED, LVIS_SELECTED, LVITEMW, LVN_GETDISPINFOW, LVN_ITEMCHANGED,
     LVM_DELETEALLITEMS, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW, LVM_INSERTITEMW,
-    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS, LVSICF_NOINVALIDATEALL, LVS_EX_DOUBLEBUFFER,
+    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETICONSPACING, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS,
+    LVSICF_NOINVALIDATEALL, NM_CUSTOMDRAW, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL, LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_LIST, LVS_OWNERDATA, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL, LVCF_TEXT, LVCF_WIDTH,
 };
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
@@ -138,6 +152,96 @@ struct NmLvDispInfo {
     item: LVITEMW,
 }
 
+/// Decoded thumbnails, keyed by picture path. Created in worker threads (GDI handles are process-wide) and read by the
+/// custom-draw handler on the UI thread, so the map is behind a lock and painting never decodes.
+static THUMBS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, isize>>> =
+    std::sync::OnceLock::new();
+const WM_THUMB: u32 = WM_APP + 1;
+
+fn thumbs() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, isize>> {
+    THUMBS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Decode one picture with WIC, scale it to the tile and hand back a DIB-backed `HBITMAP`.
+///
+/// WIC is the same decoder Explorer uses, so this is the native path: no image crate, no Python, no intermediate PNG.
+unsafe fn decode_thumb(path: &Path, width: i32, height: i32) -> Option<isize> {
+    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory2, None, CLSCTX_INPROC_SERVER).ok()?;
+    let name = wide(&path.to_string_lossy());
+    let decoder = factory
+        .CreateDecoderFromFilename(PCWSTR(name.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
+        .ok()?;
+    let frame = decoder.GetFrame(0).ok()?;
+    let scaler = factory.CreateBitmapScaler().ok()?;
+    scaler
+        .Initialize(&frame, width as u32, height as u32,
+                    WICBitmapInterpolationModeFant)
+        .ok()?;
+    let converter = factory.CreateFormatConverter().ok()?;
+    converter
+        .Initialize(
+            &scaler,
+            &GUID_WICPixelFormat32bppBGR,
+            WICBitmapDitherTypeNone,
+            None,
+            0.0,
+            WICBitmapPaletteTypeCustom,
+        )
+        .ok()?;
+
+    let stride = width as usize * 4;
+    let mut pixels = vec![0u8; stride * height as usize];
+    converter.CopyPixels(std::ptr::null(), stride as u32, &mut pixels).ok()?;
+
+    let mut info = BITMAPINFO::default();
+    info.bmiHeader = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: width,
+        biHeight: -height, // top-down, the order WIC gives us
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        ..Default::default()
+    };
+    let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    let dib = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+    if bits.is_null() {
+        return None;
+    }
+    std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits as *mut u8, pixels.len());
+    Some(dib.0 as isize)
+}
+
+/// Decode every listed picture off the UI thread and poke the list as each one lands. A 336 px JPEG is ~2-4 ms, so 1 000
+/// of them would stall the window if painting did it; the list simply draws a placeholder until its tile is ready.
+unsafe fn spawn_thumbs(hwnd: HWND, paths: Vec<PathBuf>) {
+    let hwnd_value = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        for (i, path) in paths.iter().enumerate() {
+            let already = thumbs().lock().map(|m| m.contains_key(path)).unwrap_or(true);
+            if !already {
+                if let Some(bitmap) = decode_thumb(path, THUMB_W, THUMB_H) {
+                    if let Ok(mut map) = thumbs().lock() {
+                        map.insert(path.clone(), bitmap);
+                    }
+                }
+            }
+            if i % 8 == 0 {
+                let hwnd = HWND(hwnd_value as *mut core::ffi::c_void);
+                let _ = PostMessageW(Some(hwnd), WM_THUMB, WPARAM(0), LPARAM(0));
+            }
+        }
+        let hwnd = HWND(hwnd_value as *mut core::ffi::c_void);
+        let _ = PostMessageW(Some(hwnd), WM_THUMB, WPARAM(1), LPARAM(0));
+    });
+}
+
+static LIST_OWNER: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+
+const THUMB_W: i32 = 112;
+const THUMB_H: i32 = 84;
+
 // ---- helpers -------------------------------------------------------------------------------------------------------------
 
 fn wide(text: &str) -> Vec<u16> {
@@ -187,6 +291,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             unsafe {
                 STATE = Some(Box::new(State { gallery, shown, folder_label: first, disp: Vec::new() }));
             }
+            let _ = LIST_OWNER.set(hwnd.0 as isize);
             create_controls(hwnd);
             fill_folders(hwnd);
             fill_pictures(hwnd);
@@ -233,6 +338,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         break;
                     }
                 }
+            } else if header.id_from == ID_PICTURES as usize && header.code == NM_CUSTOMDRAW {
+                let cd = &mut *(lparam.0 as *mut NmcdCustomDraw);
+                if cd.nmcd.dwDrawStage == CDDS_PREPAINT {
+                    return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
+                }
+                if cd.nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
+                    paint_row(cd, hwnd);
+                    return LRESULT(CDRF_SKIPDEFAULT as isize);
+                }
+                return LRESULT(CDRF_DODEFAULT as isize);
             } else if header.id_from == ID_PICTURES as usize && header.code == LVN_GETDISPINFOW {
                 // the control holds no rows of its own: it asks for the text of the row it is about to paint
                 let info = &mut *(lparam.0 as *mut NmLvDispInfo);
@@ -245,12 +360,127 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             LRESULT(0)
         }
+        WM_THUMB => {
+            let list = child(hwnd, ID_PICTURES);
+            let _ = InvalidateRect(Some(list), None, false);
+            if wparam.0 == 1 {
+                update_status(hwnd);
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
             PostQuitMessage(0);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+#[repr(C)]
+struct NmcdCustomDraw {
+    hdr: NmHdr,
+    nmcd: NmCustomDraw,
+}
+
+#[repr(C)]
+struct NmCustomDraw {
+    hdr: NmHdr,
+    dwDrawStage: u32,
+    hdc: *mut core::ffi::c_void,
+    rc: windows::Win32::Foundation::RECT,
+    dwItemSpec: usize,
+    uItemState: u32,
+    lItemlParam: isize,
+}
+
+const CDDS_PREPAINT: u32 = 0x0000_0001;
+const CDDS_ITEMPREPAINT: u32 = 0x0001_0001; // CDDS_ITEM | CDDS_PREPAINT, not CDDS_ITEM alone
+const CDRF_DODEFAULT: isize = 0x0000_0000;
+const CDRF_NOTIFYITEMDRAW: isize = 0x0000_0020;
+const CDRF_SKIPDEFAULT: isize = 0x0000_0004;
+
+/// One row: the decoded tile, then the file name and the prompt. The list owns selection, focus and scrolling.
+unsafe fn paint_row(cd: &mut NmcdCustomDraw, hwnd: HWND) {
+    let st = state();
+    let Some(&index) = st.shown.get(cd.nmcd.dwItemSpec) else { return };
+    let Some(picture) = st.gallery.pictures.get(index) else { return };
+    let hdc = windows::Win32::Graphics::Gdi::HDC(cd.nmcd.hdc as *mut core::ffi::c_void);
+    let rect = cd.nmcd.rc;
+    let selected = (cd.nmcd.uItemState as u32) & 0x0002 != 0; // CDIS_SELECTED
+    let background: HBRUSH = windows::Win32::Graphics::Gdi::GetSysColorBrush(
+        if selected { COLOR_HIGHLIGHT } else { COLOR_WINDOW },
+    );
+    windows::Win32::Graphics::Gdi::FillRect(hdc, &rect, background);
+
+    let tile = windows::Win32::Foundation::RECT {
+        left: rect.left + 4,
+        top: rect.top + 2,
+        right: rect.left + 4 + THUMB_W,
+        bottom: rect.top + 2 + THUMB_H,
+    };
+    let bitmap = thumbs().lock().ok().and_then(|m| m.get(&picture.path).copied());
+    match bitmap {
+        Some(dib) => {
+            let mem = CreateCompatibleDC(Some(hdc));
+            let old = SelectObject(mem, windows::Win32::Graphics::Gdi::HGDIOBJ(dib as *mut core::ffi::c_void));
+            SetStretchBltMode(hdc, STRETCH_DELETESCANS);
+            let _ = StretchBlt(hdc, tile.left, tile.top, THUMB_W, THUMB_H, Some(mem), 0, 0, THUMB_W, THUMB_H, SRCCOPY);
+            SelectObject(mem, old);
+            let _ = DeleteDC(mem);
+        }
+        None => {
+            let placeholder = windows::Win32::Graphics::Gdi::CreateSolidBrush(windows::Win32::Foundation::COLORREF(
+                if selected { 0x00302010 } else { 0x00181818 },
+            ));
+            windows::Win32::Graphics::Gdi::FillRect(hdc, &tile, placeholder);
+            let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(placeholder.0));
+        }
+    }
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(
+        hdc,
+        windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(
+            if selected { COLOR_HIGHLIGHTTEXT } else { COLOR_WINDOWTEXT },
+        )),
+    );
+    let old_font = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+    let mut y = rect.top + 4;
+    for line in row_lines(picture, 70).into_iter().take(3) {
+        let mut r = windows::Win32::Foundation::RECT {
+            left: rect.left + THUMB_W + 14,
+            top: y,
+            right: rect.right - 6,
+            bottom: rect.bottom,
+        };
+        let mut text = wide(&line);
+        DrawTextW(hdc, &mut text, &mut r as *mut _, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        y += 17;
+    }
+    SelectObject(hdc, old_font);
+    let _ = hwnd;
+}
+
+fn row_lines(picture: &Picture, per_line: usize) -> Vec<String> {
+    let mut out = vec![picture.name()];
+    let body = if picture.prompt.trim().is_empty() { "(no prompt recorded)" } else { &picture.prompt };
+    let mut line = String::new();
+    for word in body.split_whitespace() {
+        if line.len() + word.len() + 1 > per_line {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+        if out.len() >= 3 {
+            break;
+        }
+    }
+    if out.len() < 3 && !line.is_empty() {
+        out.push(line);
+    }
+    out
 }
 
 unsafe fn create_controls(hwnd: HWND) {
@@ -289,6 +519,11 @@ unsafe fn create_controls(hwnd: HWND) {
     .unwrap_or_default();
     SetWindowTheme(pictures, w!("Explorer"), PCWSTR::null());
     SendMessageW(pictures, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+    // In report mode the row height comes from the *small* image list, so a 84 px tile needs an image list that tall:
+    // the list never draws from it (we paint every row ourselves), it only sets the height of a row.
+    let row_images = ImageList_Create(1, THUMB_H + 6, windows::Win32::UI::Controls::ILC_COLOR32, 1, 1);
+    let _ = SendMessageW(pictures, LVM_SETIMAGELIST, Some(WPARAM(LVSIL_SMALL as usize)),
+                         Some(LPARAM(row_images.0 as isize)));
     SendMessageW(
         pictures,
         LVM_SETEXTENDEDLISTVIEWSTYLE,
@@ -390,7 +625,15 @@ unsafe fn fill_pictures(hwnd: HWND) {
         .collect();
     let count = st.shown.len();
     SendMessageW(list, LVM_SETITEMCOUNT, Some(WPARAM(count)), Some(LPARAM(LVSICF_NOINVALIDATEALL as isize)));
-    InvalidateRect(Some(list), None, true);
+    let _ = InvalidateRect(Some(list), None, true);
+    if let Some(hwnd_value) = LIST_OWNER.get().copied() {
+        let paths: Vec<PathBuf> = st
+            .shown
+            .iter()
+            .filter_map(|i| st.gallery.pictures.get(*i).map(|p| p.path.clone()))
+            .collect();
+        spawn_thumbs(HWND(hwnd_value as *mut core::ffi::c_void), paths);
+    }
 }
 
 unsafe fn update_status(hwnd: HWND) {
