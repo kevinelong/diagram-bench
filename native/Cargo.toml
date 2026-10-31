@@ -8,6 +8,7 @@ description = "prototype: the gallery built from real Windows controls instead o
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
+    "Win32_System_Registry",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_Graphics_Gdi",

@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{GENERIC_READ, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, DrawTextW, GetStockObject, InvalidateRect,
+    CreateCompatibleDC, CreateDIBSection, CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, GetStockObject,
+    InvalidateRect, SetBkColor,
     SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
     COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW, COLOR_WINDOWTEXT, DEFAULT_GUI_FONT, DIB_RGB_COLORS, HBRUSH,
     DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE,
@@ -33,13 +34,45 @@ use windows::Win32::UI::Controls::{
     SetWindowTheme, LVCOLUMNW, LVIF_TEXT, LVIS_FOCUSED, LVIS_SELECTED, LVITEMW, LVN_GETDISPINFOW, LVN_ITEMCHANGED,
     LVM_DELETEALLITEMS, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW, LVM_INSERTITEMW,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETICONSPACING, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS,
-    LVSICF_NOINVALIDATEALL, NM_CUSTOMDRAW, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL, LVS_EX_DOUBLEBUFFER,
+    LVSICF_NOINVALIDATEALL, NM_CUSTOMDRAW, ImageList_Add, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL,
+    LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_LIST, LVS_OWNERDATA, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL, LVCF_TEXT, LVCF_WIDTH,
 };
 use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const SS_LEFT: u32 = 0; // SS_LEFT is 0; the named constant sits behind a feature this prototype does not need
+const SS_LEFT: u32 = 0;
+const SS_NOPREFIX: u32 = 0x0080;
+const STATUS_H: i32 = 22; // SS_LEFT is 0; the named constant sits behind a feature this prototype does not need
+
+/// Whether Windows is in dark mode, from the same registry value the Tk app reads: dark mode is a mode, not a colour.
+fn os_prefers_dark() -> bool {
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let mut value: u32 = 1;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let ok = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            windows::Win32::System::Registry::HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            w!("AppsUseLightTheme"),
+            windows::Win32::System::Registry::RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    if ok.is_err() {
+        return false;
+    }
+    value == 0
+}
+
+static DARK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static DARK_BRUSH: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+
+fn dark() -> bool {
+    *DARK.get_or_init(os_prefers_dark)
+}
 
 const ID_FOLDERS: i32 = 101;
 const ID_PICTURES: i32 = 102;
@@ -152,7 +185,11 @@ struct NmLvDispInfo {
     item: LVITEMW,
 }
 
-/// Decoded thumbnails, keyed by picture path. Created in worker threads (GDI handles are process-wide) and read by the
+static IMAGE_LIST: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+
+/// Decoded thumbnails, keyed by picture path, holding an *image list index* - an owner-data list draws its own rows, so
+/// the picture has to arrive through LVSIL_SMALL rather than through custom draw (measured: NM_CUSTOMDRAW arrives a
+/// handful of times for the window itself and never per row in owner-data mode). Created in worker threads (GDI handles are process-wide) and read by the
 /// custom-draw handler on the UI thread, so the map is behind a lock and painting never decodes.
 static THUMBS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, isize>>> =
     std::sync::OnceLock::new();
@@ -220,10 +257,20 @@ unsafe fn spawn_thumbs(hwnd: HWND, paths: Vec<PathBuf>) {
     std::thread::spawn(move || {
         for (i, path) in paths.iter().enumerate() {
             let already = thumbs().lock().map(|m| m.contains_key(path)).unwrap_or(true);
-            if !already {
-                if let Some(bitmap) = decode_thumb(path, THUMB_W, THUMB_H) {
-                    if let Ok(mut map) = thumbs().lock() {
-                        map.insert(path.clone(), bitmap);
+            if already {
+                continue;
+            }
+            if let Some(hbitmap) = decode_thumb(path, THUMB_W, THUMB_H) {
+                if let Some(list) = IMAGE_LIST.get().copied() {
+                    let index = ImageList_Add(
+                        windows::Win32::UI::Controls::HIMAGELIST(list),
+                        windows::Win32::Graphics::Gdi::HBITMAP(hbitmap as *mut core::ffi::c_void),
+                        None,
+                    );
+                    if index >= 0 {
+                        if let Ok(mut map) = thumbs().lock() {
+                            map.insert(path.clone(), index as isize);
+                        }
                     }
                 }
             }
@@ -302,6 +349,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             layout(hwnd);
             LRESULT(0)
         }
+        WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT => {
+            // EDIT and STATIC are not themed by the list view's dark theme; they are told what colours to use here
+            let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut core::ffi::c_void);
+            let (text, back) = if dark() {
+                (
+                    windows::Win32::Foundation::COLORREF(0x00E8E8E8),
+                    windows::Win32::Foundation::COLORREF(0x001A1A1A),
+                )
+            } else {
+                (
+                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOWTEXT)),
+                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW)),
+                )
+            };
+            SetTextColor(hdc, text);
+            SetBkColor(hdc, back);
+            let brush = *DARK_BRUSH.get_or_init(|| {
+                CreateSolidBrush(if dark() {
+                    windows::Win32::Foundation::COLORREF(0x001A1A1A)
+                } else {
+                    windows::Win32::Foundation::COLORREF(windows::Win32::Graphics::Gdi::GetSysColor(COLOR_WINDOW))
+                })
+                .0 as isize
+            });
+            return LRESULT(brush);
+        }
         WM_COMMAND => {
             let id = (wparam.0 & 0xffff) as i32;
             let code = ((wparam.0 >> 16) & 0xffff) as u16;
@@ -321,6 +394,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_NOTIFY => {
             let header = &*(lparam.0 as *const NmHdr);
+            {
+                // temporary probe: which notifications actually arrive, and with which code
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
+                    .open(r"C:\Users\kevin\AppData\Local\Temp\native-notify.log") {
+                    let _ = writeln!(f, "notify from {} code {:#x}", header.id_from, header.code);
+                }
+            }
             if header.id_from == ID_FOLDERS as usize && header.code == LVN_ITEMCHANGED {
                 let list = child(hwnd, ID_FOLDERS);
                 let count = SendMessageW(list, LVM_GETITEMCOUNT, None, None).0 as i32;
@@ -338,8 +419,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         break;
                     }
                 }
-            } else if header.id_from == ID_PICTURES as usize && header.code == NM_CUSTOMDRAW {
+            } else if header.code == NM_CUSTOMDRAW {
                 let cd = &mut *(lparam.0 as *mut NmcdCustomDraw);
+                let seen = format!("cd from {} stage {:#x}", header.id_from, cd.nmcd.dwDrawStage);
+                let buf = wide(&seen);
+                let _ = SetWindowTextW(child(hwnd, ID_STATUS), PCWSTR(buf.as_ptr()));
                 if cd.nmcd.dwDrawStage == CDDS_PREPAINT {
                     return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
                 }
@@ -351,6 +435,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             } else if header.id_from == ID_PICTURES as usize && header.code == LVN_GETDISPINFOW {
                 // the control holds no rows of its own: it asks for the text of the row it is about to paint
                 let info = &mut *(lparam.0 as *mut NmLvDispInfo);
+                if info.item.mask.0 & windows::Win32::UI::Controls::LVIF_IMAGE.0 != 0 {
+                    let st = state();
+                    if let Some(picture) = st.shown.get(info.item.iItem as usize)
+                        .and_then(|i| st.gallery.pictures.get(*i))
+                    {
+                        if let Some(index) = thumbs().lock().ok().and_then(|m| m.get(&picture.path).copied()) {
+                            info.item.iImage = index as i32;
+                        }
+                    }
+                }
                 if info.item.mask.0 & LVIF_TEXT.0 != 0 && info.item.iSubItem == 0 {
                     if let Some(text) = state().disp.get(info.item.iItem as usize) {
                         info.item.pszText = PWSTR(text.as_ptr() as *mut u16);
@@ -501,6 +595,7 @@ unsafe fn create_controls(hwnd: HWND) {
     )
     .unwrap_or_default();
     SetWindowTheme(folders, w!("Explorer"), PCWSTR::null());
+    paint_list_dark(folders);
     SendMessageW(folders, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
 
     // virtual: LVS_OWNERDATA tells the control "ask me for what you need", so 1 000 pictures cost 1 000 indices
@@ -518,10 +613,12 @@ unsafe fn create_controls(hwnd: HWND) {
     )
     .unwrap_or_default();
     SetWindowTheme(pictures, w!("Explorer"), PCWSTR::null());
+    paint_list_dark(pictures);
     SendMessageW(pictures, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
     // In report mode the row height comes from the *small* image list, so a 84 px tile needs an image list that tall:
     // the list never draws from it (we paint every row ourselves), it only sets the height of a row.
-    let row_images = ImageList_Create(1, THUMB_H + 6, windows::Win32::UI::Controls::ILC_COLOR32, 1, 1);
+    let row_images = ImageList_Create(THUMB_W, THUMB_H + 6, windows::Win32::UI::Controls::ILC_COLOR32, 8, 8);
+    let _ = IMAGE_LIST.set(row_images.0 as isize);
     let _ = SendMessageW(pictures, LVM_SETIMAGELIST, Some(WPARAM(LVSIL_SMALL as usize)),
                          Some(LPARAM(row_images.0 as isize)));
     SendMessageW(
@@ -572,8 +669,8 @@ unsafe fn create_controls(hwnd: HWND) {
         WINDOW_EX_STYLE(0),
         w!("STATIC"),
         w!(""),
-        WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT),
-        0, 0, 400, 20,
+        WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT | SS_NOPREFIX),
+        0, 0, 400, STATUS_H,
         Some(hwnd),
         Some(HMENU(ID_STATUS as isize as *mut core::ffi::c_void)),
         Some(instance.into()),
@@ -581,6 +678,20 @@ unsafe fn create_controls(hwnd: HWND) {
     )
     .unwrap_or_default();
     SendMessageW(status_text, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+}
+
+/// A dark list view: the colours are the control's own (LVM_SET*COLOR), not the system's classic palette, which never
+/// becomes dark. Without this the window stays light in a dark OS however the theme is set.
+unsafe fn paint_list_dark(list: HWND) {
+    if !dark() {
+        return;
+    }
+    let text = windows::Win32::Foundation::COLORREF(0x00E8E8E8);
+    let back = windows::Win32::Foundation::COLORREF(0x001A1A1A);
+    let _ = SendMessageW(list, windows::Win32::UI::Controls::LVM_SETBKCOLOR, None, Some(LPARAM(back.0 as isize)));
+    let _ = SendMessageW(list, windows::Win32::UI::Controls::LVM_SETTEXTCOLOR, None, Some(LPARAM(text.0 as isize)));
+    let _ = SendMessageW(list, windows::Win32::UI::Controls::LVM_SETTEXTBKCOLOR, None,
+                         Some(LPARAM(back.0 as isize)));
 }
 
 unsafe fn fill_folders(hwnd: HWND) {
@@ -660,10 +771,16 @@ unsafe fn layout(hwnd: HWND) {
     let _ = MoveWindow(child(hwnd, ID_PICTURES), col + 2 * pad, pad, w - col - 3 * pad, h - 2 * pad - row - 6, true);
     let _ = MoveWindow(child(hwnd, ID_PROMPT), pad, h - pad - row + 4, w - 330, 24, true);
     let _ = MoveWindow(child(hwnd, ID_GENERATE), w - pad - 150, h - pad - row + 2, 150, 28, true);
-    let _ = MoveWindow(child(hwnd, ID_STATUS), pad, h - pad + 2, w - 2 * pad, 16, true);
+    // the status gets its own line under the controls, tall enough for the font (at 16 px it was clipped)
+    let _ = MoveWindow(child(hwnd, ID_STATUS), pad, h - STATUS_H + 2, w - 2 * pad, STATUS_H - 4, true);
 }
 
 fn main() -> anyhow::Result<()> {
+    // `--theme` prints the decision and exits: the only honest way to know whether the registry read works
+    if std::env::args().nth(1).as_deref() == Some("--theme") {
+        println!("dark = {}", dark());
+        return Ok(());
+    }
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let instance = GetModuleHandleW(None)?;
@@ -673,13 +790,23 @@ fn main() -> anyhow::Result<()> {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            hbrBackground: windows::Win32::Graphics::Gdi::GetSysColorBrush(
-                windows::Win32::Graphics::Gdi::COLOR_BTNFACE,
-            ),
+            hbrBackground: if dark() {
+                HBRUSH(windows::Win32::Graphics::Gdi::GetStockObject(
+                    windows::Win32::Graphics::Gdi::BLACK_BRUSH,
+                ).0)
+            } else {
+                windows::Win32::Graphics::Gdi::GetSysColorBrush(windows::Win32::Graphics::Gdi::COLOR_BTNFACE)
+            },
             lpszClassName: class,
             ..Default::default()
         };
         RegisterClassW(&wc);
+        let is_dark = dark();
+        if is_dark {
+            let _ = DARK_BRUSH.set(
+                CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x001A1A1A)).0 as isize,
+            );
+        }
 
         let _hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -692,6 +819,21 @@ fn main() -> anyhow::Result<()> {
             Some(instance.into()),
             None,
         )?;
+
+        if dark() {
+            // the immersive dark title bar, and the Explorer list-view theme that goes with it
+            let yes: i32 = 1;
+            let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                _hwnd,
+                windows::Win32::Graphics::Dwm::DWMWA_USE_IMMERSIVE_DARK_MODE,
+                &yes as *const i32 as *const core::ffi::c_void,
+                4,
+            );
+            for id in [ID_FOLDERS, ID_PICTURES] {
+                SetWindowTheme(child(_hwnd, id), w!("DarkMode_Explorer"), PCWSTR::null());
+            }
+            let _ = InvalidateRect(Some(_hwnd), None, true);
+        }
 
         // IsDialogMessage is the point of the experiment: Tab between controls, Enter on the default button, Esc and Alt
         // mnemonics, from the system, with none of our code in the path.

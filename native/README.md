@@ -60,9 +60,20 @@ Three defects were found and fixed in this step, all mine:
   `/MANIFEST:EMBED` + `/MANIFESTINPUT:<path>` instead;
 - rows in `LVS_REPORT` are one line tall until an image list sets their height, so the tile had nowhere to go.
 
-**Verification gap**: the window was confirmed running (25.4 MB, 1 000 sidecars scanned, tall rows, family list, virtual
-list) but the *painted tiles* were not confirmed visually - the desktop was in use when the last capture was attempted.
-That is the next five minutes of work, not a claim.
+**Thumbnails land through the image list, not custom draw.** A probe that logged every `WM_NOTIFY` settled it: the picture
+list sent `NM_CUSTOMDRAW` only a handful of times, for the window itself, and never per row - an owner-data list draws its own
+rows. The picture therefore arrives where the control expects it: `ImageList_Add` into the `LVSIL_SMALL` list and
+`LVIF_IMAGE` in `LVN_GETDISPINFOW`. Confirmed visually from a `PrintWindow` render (which needs no screen grab): real
+thumbnails, tall rows, tooltips of text beside each one.
+
+**Theme**: the OS reports dark (`AppsUseLightTheme = 0`, both values), and `zimage-native.exe --theme` prints `dark = true`.
+`DarkMode_Explorer` alone does **not** recolour a list view, so the lists get their colours explicitly
+(`LVM_SETBKCOLOR`/`LVM_SETTEXTCOLOR`/`LVM_SETTEXTBKCOLOR`), the window class background becomes `BLACK_BRUSH`, and `EDIT`/
+`STATIC` are coloured through `WM_CTLCOLOR*`. The title bar uses `DWMWA_USE_IMMERSIVE_DARK_MODE`. Still light: the list
+*header* and the thin control borders - the header needs its own theme call.
+
+**Status bar** was clipped at 16 px; it now owns a 22 px line under the controls (`SS_NOPREFIX`, so a prompt containing `&`
+is not eaten as a mnemonic).
 
 ## Not done yet (deliberately)
 
