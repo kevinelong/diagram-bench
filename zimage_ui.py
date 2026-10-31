@@ -3097,7 +3097,7 @@ class App:
         # Folders are the default view. Grouping reads a sidecar per picture, so it waits for the window to exist and
         # for the first paint instead of running during construction.
         if self.group_var.get():
-            self._idle(lambda: self.toggle_groups(True) if not self._plan else None)
+            self._idle(self._startup_folders)
             # Watchdog. Reported twice that folders only appeared after the switch was toggled twice, and the harness
             # could not reproduce it - so if folders are on and two and a half seconds later there is still no plan and
             # no worker, start one. It is idempotent: `_regroup_now` refuses while a compute is in flight.
@@ -3770,6 +3770,77 @@ class App:
                 pass
         self._regroup_job = self.root.after(1200, self._regroup_now)
 
+    # -- the grouping plan, cached ---------------------------------------------------------------
+    # Grouping 1427 pictures costs 5.1 s, and nothing about it changes between two launches of the same gallery: the
+    # prompts live in the sidecars, which are rewritten only when a picture changes. So the plan is cached against a
+    # fingerprint of the pictures (every name and its mtime) and shown instantly on the next start, with a fresh pass
+    # running behind it. A stale cache is not applied - the signature has to match - so a new render, a deletion or a
+    # re-described prompt all fall back to the 5 s path rather than showing a plan that lies.
+
+    def _plan_signature(self):
+        """sha1 over every picture's name and mtime in the source, or None if the source cannot be read."""
+        try:
+            rows = ['%s:%d' % (Path(p).name, int(m * 1_000_000)) for p, m in self._scan()]
+        except Exception:
+            return None
+        if not rows:
+            return None
+        h = hashlib.sha1()
+        h.update('\n'.join(sorted(rows)).encode('utf-8', 'replace'))
+        return h.hexdigest()
+
+    def _plan_cache_file(self):
+        src = str(Path(getattr(self, '_source', None) or self.args.out)).lower()
+        tag = hashlib.sha1(src.encode('utf-8', 'replace')).hexdigest()[:12]
+        return (Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'zimage-ui' / ('plan-%s.json' % tag))
+
+    def _plan_save(self, plan, signature):
+        """Write the plan beside the settings. One file per source folder, replaced atomically."""
+        try:
+            if not signature:
+                return
+            rec = {'signature': signature,
+                   'created': datetime.now().isoformat(timespec='seconds'),
+                   'source': str(Path(getattr(self, '_source', None) or self.args.out)),
+                   'plan': plan}
+            path = self._plan_cache_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(rec), encoding='utf-8')
+            tmp.replace(path)
+            folder_event('plan_cached', groups=len(plan.get('groups') or []), files=len(getattr(self, '_files', []) or []))
+        except Exception:
+            pass
+
+    def _plan_load(self):
+        """The cached plan if it still matches the pictures on disk, else None."""
+        try:
+            path = self._plan_cache_file()
+            if not path.exists():
+                return None
+            rec = json.loads(path.read_text(encoding='utf-8'))
+            if rec.get('signature') != self._plan_signature():
+                folder_event('plan_cache_stale')
+                return None
+            plan = rec.get('plan') or {}
+            if not plan.get('groups'):
+                return None
+            folder_event('plan_cache_hit', groups=len(plan['groups']), created=rec.get('created'))
+            return plan
+        except Exception:
+            return None
+
+    def _startup_folders(self):
+        """Folders on at startup: show the cached plan at once, then compute a fresh one behind it."""
+        if not self.group_var.get() or getattr(self, '_closing', False):
+            return
+        cached = self._plan_load() if self._plan is None else None
+        if cached:
+            self._apply_plan(cached)
+            self._regroup_soon()          # the fresh pass, debounced, so the cached view is never flashed away
+            return
+        self.toggle_groups(True)
+
     def _folders_watchdog(self):
         """If the folders are on but nothing is computing and no plan exists, start the pass."""
         try:
@@ -3845,6 +3916,7 @@ class App:
                 # 0.10 is the sidecar read above; the grouping pass owns the rest
                 self.ui_events.put(('load', (0.10 + 0.90 * frac, stage,
                                              '%d pictures in the gallery' % len(_rows))))
+            signature = self._plan_signature()      # before the work: the pictures this plan describes
             plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
@@ -3866,6 +3938,7 @@ class App:
                 plan.setdefault('groups', []).append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,
                                                       'oldest': None, 'newest': None, 'synthetic': True})
             plan['seconds'] = round(time.time() - started, 2)
+            self._plan_save(plan, signature)
             self.ui_events.put(('groups', plan))
         except Exception as e:
             self.ui_events.put(('groups_error', '%s: %s' % (type(e).__name__, e)))
@@ -5203,10 +5276,22 @@ class App:
         identically, because a dHash compares neighbours and ignores absolute level. Collage and colour are both cheap, so
         both are kept - and the colour part is what tells a red render from a green one.
         """
-        if path in self._hashes:
-            return self._hashes[path]
+        # Memoised by the picture's mtime, not just its path: the old memo was wiped on every refresh, so a run that
+        # delivered sixteen tiles recomputed every signature sixteen times, and 52 folder sheets walked hundreds of
+        # pictures each time. Measured 2026-10-31: the first paint of the strip cost 4.47 s for this reason.
+        key = str(path)
+        try:
+            stamp = Path(path).stat().st_mtime
+        except OSError:
+            stamp = 0.0
+        hit = self._hashes.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
         value = None
-        thumb = thumbs_for([path], cache_root=self._thumb_root()).get(path)
+        # one thumbnail, no thread pool: `thumbs_for` spins a pool per call, which is overhead for a single picture.
+        # The fallback is for the test shim that borrows `_sheet_paths` without the rest of the App.
+        thumb = (self._thumb_of(path, build=True) if hasattr(self, '_thumb_of')
+                 else thumbs_for([path], cache_root=self._thumb_root()).get(path))
         if thumb:
             try:
                 from PIL import Image as _I
@@ -5233,7 +5318,7 @@ class App:
                 value = (bits, tuple(quadrants))
             except Exception:
                 value = None
-        self._hashes[path] = value
+        self._hashes[key] = (stamp, value)
         return value
 
     def _different(self, a, b):
@@ -5372,7 +5457,7 @@ class App:
         except Exception:
             recent = []
         sheets = []
-        for g in (self._plan or {}).get('groups', [])[:BATCH_FOLDERS]:
+        for g in (self._plan or {}).get('groups', []):
             sheets += [Path(it['path']) for it in (g.get('items') or [])[:4]]
 
         def work():
@@ -5404,7 +5489,11 @@ class App:
         sheet = _I.new('RGB', (size, size), gutter or self.theme.sheet_bg)
         paths = list(head)
         boxes = self._sheet_cells(size, len(paths))
-        thumbs = thumbs_for(paths, cache_root=self._thumb_root())
+        # build=False: a sheet must never decode on the paint path. With 52 folders that was 208 synchronous decodes,
+        # measured at 4.47 s for the first paint of the whole strip - which is why a cached plan still took five
+        # seconds to show. The thumbnails are warmed in the background by `_prewarm_thumbs` and the strip repaints
+        # when they land, so a folder tile fills in a moment after the first paint instead of holding it up.
+        thumbs = thumbs_for(paths, cache_root=self._thumb_root(), build=False)
         for i, path in enumerate(paths):
             tp = thumbs.get(path)
             if not tp or i >= len(boxes):
@@ -6352,7 +6441,9 @@ class App:
 
     def _refresh_gallery(self, select=None):
         self._scene_cache = {}
-        self._hashes = {}                 # a new or deleted picture invalidates its hash and the heads that used it
+        # NOT cleared: the signatures are memoised by mtime, so a rewrite invalidates its own entry and everything else
+        # stays. `_heads` (the composed sheets) is still cleared, because wins and ordering can change without a pixel
+        # changing.
         self._heads = {}
         everything = self._all_files()
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
