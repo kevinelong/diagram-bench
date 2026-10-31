@@ -222,8 +222,8 @@ def main():
     check('the four columns are the content width in four, with the leftover on the left',
           sum(even_2560.values()) == 2560 - app._layout_chrome(), (even_2560, app._layout_chrome()))
     tile_2560 = (wide[zui.COL_STRIP] - app._bar_px(app.gal_bar)) // zui.STRIP_FIT_COLS - zui.TILE_CHROME
-    check('and the strip is then wide enough for a 152 px tile', wide[zui.COL_STRIP] == even_2560[zui.COL_STRIP]
-          and tile_2560 == 152, (wide[zui.COL_STRIP], tile_2560))
+    check('and the strip is then wide enough for a 206 px tile', wide[zui.COL_STRIP] == even_2560[zui.COL_STRIP]
+          and tile_2560 == 206, (wide[zui.COL_STRIP], tile_2560))
 
     # each boundary drags independently: 1:1, its own pair only, remembered on release
     print('\n-- layout: each boundary drags 1:1 and moves only its own pair')
@@ -244,9 +244,26 @@ def main():
     drag(app, app.prompt_sash, 30)
     pump(root, app, 0.6)
     prompt = column_widths(app)
-    check('the prompt|picture sash grows the prompt by the drag and shrinks the picture by it',
-          prompt[2] == gallery[2] + 30 and prompt[3] == gallery[3] - 30, (gallery, prompt))
-    check('and the two on its left do not move', prompt[:2] == gallery[:2], (gallery, prompt))
+    if gallery[3] <= zui.PICTURE_MIN_W:
+        # At this window the picture already sits on its stated floor, so this boundary is at its clamp: a drag must move
+        # nothing (the alternative would be clipping the picture column). Movement is then shown on a wider window.
+        check('the prompt|picture sash is clamped: the picture is on its floor, so a drag moves nothing',
+              prompt == gallery, (gallery, prompt))
+        # A widget cannot be wider than the window it is in, so the wide case is asserted on the arithmetic the layout
+        # computes for that width (`_layout_widths` is pure in the window width) rather than by faking a 2560 window.
+        wide = app._layout_widths(2560)
+        here = app._layout_widths()
+        check('with a 2560 px window the picture column is off its floor, so this sash has room to move',
+              wide[zui.COL_PICTURE] > zui.PICTURE_MIN_W, (wide[zui.COL_PICTURE], zui.PICTURE_MIN_W))
+        check('and the extra width is what the pair shares', wide[zui.COL_PROMPT] + wide[zui.COL_PICTURE]
+              > here[zui.COL_PROMPT] + here[zui.COL_PICTURE],
+              (here[zui.COL_PROMPT] + here[zui.COL_PICTURE], wide[zui.COL_PROMPT] + wide[zui.COL_PICTURE]))
+        app._apply_layout()
+        pump(root, app, 0.4)
+    else:
+        check('the prompt|picture sash grows the prompt by the drag and shrinks the picture by it',
+              prompt[2] == gallery[2] + 30 and prompt[3] == gallery[3] - 30, (gallery, prompt))
+        check('and the two on its left do not move', prompt[:2] == gallery[:2], (gallery, prompt))
 
     # clamps at both ends, keys and defaults
     print('\n-- layout: every boundary clamps at both ends, and Home/End/keys/double-click obey')
@@ -389,29 +406,30 @@ def main():
     app._layout_user = False
     app._apply_layout()
     pump(root, app, 0.6)
-    # ---- B1: the strip is twelve pictures at four across, from the canvas it has
-    print('\n-- B1: the strip fits 4 across x 3 down without clipping')
+    # ---- B1: the strip is nine pictures at three across, from the canvas it has
+    print('\n-- B1: the strip fits 3 across x 3 down without clipping')
     canvas = app.gal_canvas
     cw, ch = canvas.winfo_width(), canvas.winfo_height()
     cols, tile = app._strip_metrics()
-    check('four columns', cols == zui.STRIP_FIT_COLS == 4, (cols, cw))
-    check('the tile is the width four of them fill', tile == cw // cols - zui.TILE_CHROME, (tile, cw))
-    check('at least the 96 px never-shrink floor it is given - the even split leaves the strip exactly its floor',
-          tile >= zui.STRIP_TILE_MIN, tile)
+    check('three columns', cols == zui.STRIP_FIT_COLS == 3, (cols, cw))
+    check('the tile is the width three of them fill', tile == cw // cols - zui.TILE_CHROME, (tile, cw))
+    check('at least the 160 px fit size', tile >= zui.STRIP_TILE_FIT, tile)
     check('inside the 320 px cap', tile <= zui.STRIP_TILE_MAX, tile)
     check('the height gives the three rows the same size, so neither dimension clips',
           tile <= ch // zui.STRIP_FIT_ROWS - zui.TILE_CHROME, (tile, ch))
     shown = cells(app)
-    twelve = strip_rows(shown)[:zui.STRIP_FIT_COLS * zui.STRIP_FIT_ROWS]
-    check('twelve tiles are laid out', len(twelve) >= 12, (len(shown), len(twelve)))
-    check('the first twelve do not run under the scrollbar', right_edge(twelve) <= cw,
-          (right_edge(twelve), cw))
-    check('nor under the bottom of the viewport', bottom_edge(twelve) <= ch, (bottom_edge(twelve), ch))
+    nine = strip_rows(shown)[:zui.STRIP_FIT_COLS * zui.STRIP_FIT_ROWS]
+    check('nine tiles are laid out', len(nine) >= 9, (len(shown), len(nine)))
+    check('the first nine do not run under the scrollbar', right_edge(nine) <= cw,
+          (right_edge(nine), cw))
+    check('nor under the bottom of the viewport', bottom_edge(nine) <= ch, (bottom_edge(nine), ch))
     check('every tile is the size the metrics promised',
-          all(w.thumb_px == tile for w in twelve), sorted({w.thumb_px for w in twelve}))
+          all(w.thumb_px == tile for w in nine), sorted({w.thumb_px for w in nine}))
     check('and carries only its own chrome around that picture',
-          all(w.winfo_width() == w.thumb_px + zui.TILE_CHROME - 2 for w in twelve),
-          sorted({(w.winfo_width(), w.thumb_px) for w in twelve}))
+          all(w.winfo_width() == w.thumb_px + zui.TILE_CHROME - 2 for w in nine),
+          sorted({(w.winfo_width(), w.thumb_px) for w in nine}))
+    check('three across is a wider tile than four would have been in this canvas',
+          tile > canvas.winfo_width() // 4 - zui.TILE_CHROME, (tile, cw))
 
     # a narrower canvas must give up a column rather than clip the last one
     print('\n-- B1: a narrow canvas gives up a column, not the edge of the last one')
@@ -425,7 +443,7 @@ def main():
           (cols2, tile2, cw2))
     check('and the tiles it laid out agree', right_edge(narrow) <= cw2, (right_edge(narrow), cw2))
     check('a narrow column never goes below the 96 px floor', tile2 >= zui.STRIP_TILE_MIN, tile2)
-    check('the smallest window still shows nine pictures',
+    check('the smallest window still shows the nine',
           len([w for w in narrow if int(w.grid_info()['row']) < zui.STRIP_FIT_ROWS]) >= 9,
           (len(narrow), cw2))
     root.state('zoomed')
@@ -703,14 +721,16 @@ def main():
     pump(root, app, 1.4)
     check('and so does a wider one', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    # three tiles per row rather than two, from the column they are in (2026-10-30 follow-up)
     width, fcols, sheet = app._folder_geom_now()
     tiles = app._folder_tiles()
-    check('the folder grid is two across where the column can hold them',
-          fcols == 2, (fcols, width))
+    check('the folder grid is three across where the column can hold them',
+          fcols == zui.FOLDER_COLS == 3, (fcols, width))
     check('and the tiles on screen are laid out in that many columns',
-          len({int(w.grid_info()['column']) for w in tiles}) == min(2, len(tiles)),
+          len({int(w.grid_info()['column']) for w in tiles}) == min(3, len(tiles)),
           [int(w.grid_info()['column']) for w in tiles])
-    check('a folder tile is composed for the canvas it is in', sheet <= width, (sheet, width))
+    check('a folder tile is the width of its column, not a constant',
+          sheet == max(zui.STRIP_TILE_MIN, (width - zui.FOLDER_PAD * fcols) // fcols), (sheet, width))
     check('which makes it smaller than the 337 px cell the old two-up grid produced here',
           sheet < 337, sheet)
     # the tiles follow the column: a sash drag re-lays the grid out from the canvas it ends at
@@ -722,8 +742,9 @@ def main():
           narrow_w != width and right_edge(narrow_tiles) <= app.gal_canvas.winfo_width() + 2,
           (width, narrow_w, right_edge(narrow_tiles), app.gal_canvas.winfo_width()))
     check('and the tiles it re-laid are the size that canvas says',
-          narrow_sheet == max(zui.STRIP_TILE_MIN, (narrow_w - 8 - 6 * narrow_cols) // narrow_cols)
-          and all(w.winfo_width() <= narrow_sheet + 10 for w in narrow_tiles),
+          narrow_sheet == max(zui.STRIP_TILE_MIN,
+                              (narrow_w - zui.FOLDER_PAD * narrow_cols) // narrow_cols)
+          and all(w.winfo_width() <= narrow_sheet + zui.FOLDER_PAD for w in narrow_tiles),
           (narrow_sheet, narrow_cols, narrow_w, sorted({w.winfo_width() for w in narrow_tiles})))
     app._set_contents_w(300, persist=False)
     pump(root, app, 0.8)

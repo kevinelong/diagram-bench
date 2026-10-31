@@ -728,37 +728,42 @@ def _px_setting(settings, key):
 THUMB_DIR = '.thumbs'
 SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
 THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show them larger than the old size
-RECENT_N = 18        # thumbnails in the sidebar strip: the twelve it shows at once, plus a row before it scrolls
+RECENT_N = 12        # thumbnails in the sidebar strip: the nine it shows at once, plus a row before it scrolls
 RECENT_COLS = 3       # fallback; the strip computes its own from the size it has
 RECENT_PX = 92       # fallback tile size, before the canvas has been laid out
 CONTENTS_W = 300     # width of the pictures in the open-folder pane; the scrollbar is reserved on top of it
 STRIP_TILE_MIN = 96  # a tile never shrinks below this: the row count follows the width, the tile follows the row
-# B1 (2026-10-30): the strip's column fits four pictures across and three down - twelve before it scrolls - at a fit
-# size of 160 px, and the tile grows with the window up to 320 so an ultra-wide does not post billboards. The 96 px
-# floor above is only the never-shrink-below for a window too small to hold the twelve at the fit size.
-STRIP_FIT_COLS = 4
+# B1 (2026-10-30, revised): the strip's column fits three pictures across and three down - nine before it scrolls -
+# at a fit size of 160 px, and the tile grows with the column up to 320 so an ultra-wide does not post billboards.
+# Three across rather than four is the 2026-10-30 follow-up: for the same column a three-across tile is a third wider
+# (measured at the app's own 510 px canvas: 160 px for three, 117 px for four), and the 96 px floor above is only the
+# never-shrink-below for a column too narrow to hold the nine at the fit size.
+STRIP_FIT_COLS = 3
 STRIP_FIT_ROWS = 3
 STRIP_TILE_FIT = 160
 STRIP_TILE_MAX = 320
 # What one tile costs beyond its picture: bd=1 and the 3 px focus ring on each side (8), plus the 1 px of grid padding
-# each side (2). Measured from the live window - a tile of 96 px is a 104 px cell - and the reason a 4-across column
-# needs 680 px of canvas for four 160 px pictures.
+# each side (2). Measured from the live window - a tile of 96 px is a 104 px cell - and the reason a three-across
+# column needs 510 px of canvas for three 160 px pictures.
 TILE_CHROME = 10
+# 510: the canvas at which the nine fit at the fit size (3 * (160 + 10)). It is the strip column's floor, so the nine
+# are what the layout promises rather than what a share happens to leave over.
+STRIP_FIT_W = STRIP_FIT_COLS * (STRIP_TILE_FIT + TILE_CHROME)
 # The columns' widths are set by the sashes now, so the strip is no longer given a share of the window: it starts at
-# the width four 96 px columns need and grows only when a sash is dragged (2026-10-30).
-GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 1320: four columns at the cap
-# The canvas *asks* for three columns at the floor, not for the twelve: a request is a hard minimum, and asking for
-# 680 would leave the picture column 220 px at a 1200 px window (measured: its action bar needs 283).
-GAL_ASK_W = 3 * (STRIP_TILE_MIN + TILE_CHROME)                 # 318
+# the width the nine need and grows only when a sash is dragged (2026-10-30).
+GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 990: three columns at the cap
+# The canvas *asks* for three columns at the 96 px floor, not for the nine: a request is a hard minimum, and asking for
+# 510 here would leave the picture column 220 px at a 1200 px window (measured: its action bar needs 283).
+GAL_ASK_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)    # 318
 # The boundaries are draggable (2026-10-30). The pane has a width instead of a share: 180 is the narrowest the pictures
 # stay readable in, 480 the widest before they stop growing and the strip starves. `SASH_W` is the whole hit area,
-# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip's four columns need at the 96 px never-shrink
-# floor: no boundary may take a column below its own floor.
+# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip needs for its nine at the 160 px fit size: no
+# boundary may take a column below its own floor.
 CONTENTS_W_MIN = 180
 CONTENTS_W_MAX = 480
 SASH_W = 8
 SASH_STEP = 16        # one arrow key; Shift makes it four
-GAL_FLOOR_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)   # 424
+GAL_FLOOR_W = STRIP_FIT_W                                      # 510
 # The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
 # it is four: the strip and the open-folder pane share the gallery column (`gal`, boundary 1), and the gallery column,
 # the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
@@ -815,6 +820,11 @@ REVIEW_FINISH_ROWS = 3
 REVIEW_TILE_MIN = 200
 REVIEW_TILE_MAX = 420
 FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
+FOLDER_COLS = 3      # tiles per row when the column can hold them (2026-10-30 follow-up: it was two, and a 337 px
+                     # folder tile was the "thumbnails in folders need to be a little smaller" complaint). Measured on
+                     # this desktop: 3 across a 510 px strip canvas is a 152 px sheet, 2 across a 674 px one is 319.
+FOLDER_PAD = 18      # what one folder tile costs beyond its sheet: 2 px of frame, 6 px of body padding, 10 px of grid
+FOLDER_CELL_MIN = 150  # below this the four pictures of a 2x2 sheet stop being tellable apart: give up a column
 # How different two pictures must be to share a tile. Raised from 8/24 after seeing sheets that were still four
 # near-copies while clearly different pictures sat further down the folder - the old bar was passed by small changes.
 FOLDER_DISTINCT = 16   # of 64 difference-hash bits
@@ -5457,22 +5467,32 @@ class App:
         `_render_contents` already follows: a pane that has just been gridded has not been laid out yet, and reading
         the width now would answer the old one.
 
+        Three per row rather than two is the 2026-10-30 follow-up ("thumbnails in folders need to be a little
+        smaller"): six tiles in two rows instead of four in two, at 158 px each on this window rather than 337. It
+        falls back to two and then one as the column narrows, because a folder tile is a 2x2 sheet and below ~150 px
+        the four pictures in it stop being tellable apart. The width comes from the canvas every time, so a dragged
+        sash re-lays the grid out through the same `_apply_strip_resize` path the pictures use.
         """
         try:
             self.gal_canvas.update_idletasks()
         except Exception:
             pass
-        width = max(STRIP_TILE_MIN, self.gal_canvas.winfo_width() - 10)
-        cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
-        sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
+        width = max(STRIP_TILE_MIN, self.gal_canvas.winfo_width())
+        cols = 1
+        for candidate in range(FOLDER_COLS, 1, -1):
+            if (width - FOLDER_PAD * candidate) // candidate >= FOLDER_CELL_MIN:
+                cols = candidate
+                break
+        sheet_px = max(STRIP_TILE_MIN, (width - FOLDER_PAD * cols) // cols)
         return width, cols, sheet_px
 
     def _render_folder_tiles(self):
-        """Folder tiles, two per row: a 4-up (2x2) sheet, the full name wrapped, and the picture count.
+        """Folder tiles, three per row: a 4-up (2x2) sheet, the full name wrapped, and the picture count.
 
-        Two per row is the point of the 4-up sheet - at 3x3 one tile needed ~270 px and the column held exactly one,
-        which is what the 2026-10-27 screenshot showed. The tile width is derived from the column, so both tiles always
-        fill it instead of leaving a gutter.
+        Three per row is the 2026-10-30 follow-up ("thumbnails in folders need to be a little smaller"): at the strip's
+        own width that is a 152 px sheet rather than the 337 px two-up cell it replaced, with the same 4-up sheet, and
+        the count falls back to two and then one as the column narrows (`FOLDER_CELL_MIN`). The tile width is derived
+        from the column, so the row always fills it instead of leaving a gutter.
         """
         from PIL import ImageTk
         for w in self.recent.winfo_children():
@@ -5548,10 +5568,12 @@ class App:
 
         The tile used to follow the *width* alone, and the width used to come from a constant, so a maximised window
         posted three columns of 101 px thumbnails while the picture column took the rest. It is now the size at which
-        four pictures across and three down fit the canvas - twelve before it scrolls - taken from whichever dimension
-        is tighter, floored at the 160 px fit size and capped at 320 so an ultra-wide does not post billboards.
+        three pictures across and three down fit the canvas - nine before it scrolls - taken from whichever dimension
+        is tighter: `min(w // 3, h // 3)`, floored at the 160 px fit size and capped at 320 so an ultra-wide does not
+        post billboards. Three across rather than four is the 2026-10-30 follow-up: for the same column a three-across
+        tile is a third wider, which was the "thumbnails need to be larger" half of it.
 
-        A canvas too narrow to hold the twelve at the fit size keeps four columns and drops towards the 96 px
+        A canvas too narrow to hold the nine at the fit size keeps three columns and drops towards the 96 px
         never-shrink floor; one too narrow even for that gives up a column rather than clipping its last one. The
         debounce and the preserved pixel offset in `_apply_strip_resize` (commit 5c02ad1) sit on top of this and are
         untouched, which is also how a dragged sash re-tiles the strip: the drag defers, the release applies once.
@@ -5562,7 +5584,7 @@ class App:
         except Exception:
             w = h = 0
         if w <= 1:
-            w = STRIP_FIT_COLS * (STRIP_TILE_FIT + TILE_CHROME)     # not laid out yet: the twelve at the fit size
+            w = STRIP_FIT_W                                  # not laid out yet: the nine at the fit size
         roomy = max(1, int(w // (STRIP_TILE_MIN + TILE_CHROME)))
         cols = max(1, min(STRIP_FIT_COLS, roomy))
         tile = w // cols - TILE_CHROME

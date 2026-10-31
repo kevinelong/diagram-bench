@@ -2535,8 +2535,8 @@ def main():
         check('the sheet is square, so four thumbnails sit in it as a 2x2',
               pic.image.width() == pic.image.height(), (pic.image.width(), pic.image.height()))
         two_up = [w for w in app.recent.winfo_children() if w.grid_info()]
-        check('two folder tiles per row in the first column',
-              len({int(w.grid_info()['column']) for w in two_up}) == min(2, len(two_up)),
+        check('three folder tiles per row in the first column',
+              len({int(w.grid_info()['column']) for w in two_up}) == min(zui.FOLDER_COLS, len(two_up)),
               [int(w.grid_info()['column']) for w in two_up])
         full_title = app._plan['groups'][0].get('title') or app._plan['groups'][0]['label']
         check('the tile title is the first ten words, with an ellipsis when there is more',

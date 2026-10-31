@@ -1770,9 +1770,10 @@ Two states are visible at once and do not conflict: a **blue ring** means "selec
 as the base", so one tile can be both. Deleting the base clears it and resets the picture pane. The **More…** window
 shares the same selection and carries its own Delete, so a sweep can span both.
 
-The strip holds 18 (`RECENT_N`, `RECENT_COLS`, `RECENT_PX` at the top of the module) 4 across by 5 deep; the title
-reads *Recent (18 of 26)* once there are more files, the strip scrolls when the window is too short, and the scrollbar
-hides itself when everything fits. *Select all* therefore covers 18; use **More…** for a bigger sweep.
+The strip holds 12 (`RECENT_N`, `RECENT_COLS`, `RECENT_PX` at the top of the module) 3 across by 4 deep, nine before
+it scrolls (`STRIP_FIT_COLS` x `STRIP_FIT_ROWS`); the title reads *Recent (12 of 26)* once there are more files, the
+strip scrolls when the window is too short, and the scrollbar hides itself when everything fits. *Select all*
+therefore covers 12; use **More…** for a bigger sweep.
 There is no undo inside the window, but the delete itself is reversible in Explorer's Recycle Bin.
 
 `test_gallery_ui.py` drives the real window with a stubbed engine and a temp gallery (clicks arrive as synthetic events
