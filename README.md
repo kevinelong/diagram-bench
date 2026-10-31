@@ -263,6 +263,17 @@ first column, each with its full name wrapped in small type (never elided) and i
 ~270 px and left room for exactly one folder per row - measured on a 1707x960 desktop, which is where the request came
 from.
 
+**A folder tile is composed for the canvas it is drawn in, and re-laid out when that canvas moves** (2026-10-30).
+Both the tile width and the sheet size were read from `gal_canvas.winfo_width()` at the instant they were drawn, and
+nothing re-laid them out when the width changed - a folder tile is not one of `_tile_widgets`, so the refresh that
+rebuilds picture tiles stepped over them. Two 337 px tiles could be left in a 343 px canvas, which is the "folders
+looked twice the size on the redraw after a render, with the right column cut off" report. The renderer now records
+the geometry it composed for - and measures the canvas *after* settling the layout, the rule `_render_contents` already
+follows - and `_apply_strip_resize` re-lays the tiles out when the canvas no longer matches. `test_sizing.py` pins
+that a `refresh_gallery()` and the `_regroup_soon()` that follows a render leave (minsize, gal, canvas, pane, prompt,
+tile widths) identical, and that closing the pane, opening it, and narrowing or widening the window all leave the
+tiles inside the canvas.
+
 **Opening a folder does not replace the list.** Its pictures appear in a **second pane to the right of the folder
 list**, **three across**, sized from the pane's live width and as tall as the column. Selecting in that pane never
 moves the folder list. All three lists - pictures, folder tiles, folder contents - use **infinite scrolling**: they

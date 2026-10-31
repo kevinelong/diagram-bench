@@ -4852,6 +4852,25 @@ class App:
             self._content_shown += BATCH_CONTENTS
             self._render_contents()
 
+    def _folder_geom_now(self):
+        """(width, cols, sheet_px) for the folder tiles, from the canvas they have to fill - settled first.
+
+        The tiles were sized from `gal_canvas.winfo_width()` at the instant they were drawn and nothing re-laid them out
+        when that width changed: opening the folder pane halves the strip's canvas, and the tiles kept the width they
+        were composed for. Two 337 px tiles in a 343 px canvas is the "folders doubled in size on the redraw after a
+        render, cutting off the right column" report of 2026-10-30. The `update_idletasks` is the measure-first rule
+        `_render_contents` already follows: a pane that has just been gridded has not been laid out yet, and reading
+        the width now would answer the old one.
+        """
+        try:
+            self.gal_canvas.update_idletasks()
+        except Exception:
+            pass
+        width = max(STRIP_TILE_MIN, self.gal_canvas.winfo_width() - 10)
+        cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
+        sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
+        return width, cols, sheet_px
+
     def _render_folder_tiles(self):
         """Folder tiles, two per row: a 4-up (2x2) sheet, the full name wrapped, and the picture count.
 
@@ -4863,10 +4882,11 @@ class App:
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
-        width = max(190, self.gal_canvas.winfo_width() - 10)
-        cols = 2 if width >= 2 * (STRIP_TILE_MIN + 8) else 1
+        width, cols, sheet_px = self._folder_geom_now()
         self._folder_cols = cols          # the keyboard reads the same number the renderer just used
-        sheet_px = max(STRIP_TILE_MIN, (width - 8 - 6 * cols) // cols)
+        # what these tiles were composed for: `_apply_strip_resize` compares it with the canvas's current width and
+        # re-lays them out when it moved, because a folder tile is not one of `_tile_widgets` and nothing else did
+        self._folder_geom = (width, cols, sheet_px)
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
             # sheet's own gutter, in the same colour), with the caption on an inverted bar. Strong enough to find at a
@@ -5169,6 +5189,15 @@ class App:
             self._strip_cols_seen = (cols, tile)
             if self._tile_widgets and not getattr(self, '_closing', False):
                 self._idle(self.refresh_gallery)   # the tile grid follows the width
+                return
+        # The folder view is the same rule with a different container: its tiles are laid out in `self.recent` but are
+        # not `_tile_widgets`, so the branch above could not see them and a strip that narrowed under them (the pane
+        # opening) kept the tiles they were composed for. Compare what they were built for with what the canvas asks
+        # for now, and re-lay them out when it moved; the 50 ms debounce above already absorbs a drag.
+        if self._folders_view_active():
+            geom = self._folder_geom_now()
+            if geom != getattr(self, '_folder_geom', None):
+                self._idle(self._render_folder_tiles)
                 return
         # Measure a real layout, not a stale bbox. This runs 50 ms after a rebuild, and at that instant the inner frame
         # is populated but not yet laid out: `bbox('all')` answers a few hundred pixels while the canvas still believes

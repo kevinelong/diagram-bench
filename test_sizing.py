@@ -355,6 +355,67 @@ def main():
     check('the bar keeps its cell instead of appearing and disappearing',
           app.gal_bar.winfo_manager() == 'grid',
           (app.gal_bar.winfo_manager(), sorted(app.gal_bar.state())))
+    # ---- L1: a redraw must not leave the folder tiles sized for a canvas they are no longer in
+    print('\n-- L1: folder tiles are composed for the canvas they are drawn in, redrawn or not')
+    app.toggle_groups(True)
+    pump(root, app, 1.6)
+    for _ in range(120):
+        app._poll()
+        root.update()
+        if app._plan and app._plan.get('groups'):
+            break
+        time.sleep(0.05)
+    pump(root, app, 0.6)
+    app.select_folder(0)
+    pump(root, app, 1.2)
+
+    def laid_out():
+        """Everything a second redraw must not move, plus the widths of the folder tiles it must not resize."""
+        return (int(root.grid_columnconfigure(0)['minsize']), app.gal.winfo_width(),
+                app.gal_canvas.winfo_width(), app.contents_canvas.winfo_width(),
+                app.text.master.winfo_reqwidth(),
+                tuple(sorted(w.winfo_width() for w in app._folder_tiles())))
+
+    def tiles_fit():
+        tiles = app._folder_tiles()
+        return bool(tiles) and right_edge(tiles) <= app.gal_canvas.winfo_width() + 2
+
+    settled = laid_out()
+    check('with a folder open the folder tiles are inside the strip canvas', tiles_fit(),
+          (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width(), settled[5]))
+    check('and the predicate agrees with the tiles that are on screen',
+          bool(app._folders_view_active()) == bool(app._folder_tiles()),
+          (app._folders_view_active(), len(app._folder_tiles())))
+    app.refresh_gallery()
+    pump(root, app, 0.9)
+    check('a redraw leaves the layout where it was', laid_out() == settled, (laid_out(), settled))
+    app._regroup_soon()
+    pump(root, app, 3.5)
+    for _ in range(80):
+        app._poll()
+        root.update()
+        time.sleep(0.05)
+    check('and so does the re-group that follows a render', laid_out() == settled, (laid_out(), settled))
+    # the widths move: a pane that closes, and a window that narrows, must re-lay the tiles out - the "folders doubled
+    # in size and the right column is cut off" report was tiles composed at 337 px still sitting in a 343 px canvas
+    app.select_folder(None)
+    pump(root, app, 1.0)
+    check('closing the pane re-lays the folder tiles out for the wider canvas', tiles_fit(),
+          (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    app.select_folder(0)
+    pump(root, app, 1.0)
+    check('and opening it again re-lays them out for the narrower one', tiles_fit(),
+          (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    root.state('normal')
+    root.geometry('1200x700+20+20')
+    pump(root, app, 1.4)
+    check('a narrower window re-lays them out too', tiles_fit(),
+          (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    root.state('zoomed')
+    pump(root, app, 1.4)
+    check('and so does a wider one', tiles_fit(),
+          (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+
     root.destroy()
 
     print('\n%d failure(s)' % len(FAILS))
