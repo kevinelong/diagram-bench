@@ -1,0 +1,5 @@
+/target/
+/main.exe
+/main.exe.obj
+/zimage-zig.exe
+/.zig-cache/
