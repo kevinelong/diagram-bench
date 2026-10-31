@@ -31,6 +31,9 @@ os.environ['ZIMAGE_SETTINGS_DIR'] = tempfile.mkdtemp(prefix='zimage-settings-')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import zimage_ui as zui  # noqa: E402
+# These suites are about family grouping, and a fixture smaller than the recency window is entirely
+# "recent" by policy (24): switch that off for the whole process.
+zui.RECENT_POLICY = 0
 import pair_review  # noqa: E402
 
 # the A/B decisions are keyed by member names, and this suite makes the same names every run - so without this the
@@ -2321,19 +2324,23 @@ def main():
         meta = json.loads(sc.read_text(encoding='utf-8'))
         meta['prompt'] = prompt
         sc.write_text(json.dumps(meta), encoding='utf-8')
-    listing = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*'))
+    listing = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*') if not f.is_dir())
     app.toggle_groups(True)
     for _ in range(60):
         app._poll(); root.update(); time.sleep(0.05)
         if app._plan:
             break
+    # a fixture smaller than the recency window is all "recent"; this block is about families, so switch it off
+    zui.RECENT_POLICY = 0
     check('turning folders on computes a plan in the background', bool(app._plan),
           'hint=%r grouping=%s' % (app.hint['text'][:120], app._grouping))
-    after = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*'))
+    after = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*')
+                   if not f.is_dir())          # the .thumbs cache is written by rendering, not by grouping
     check('and writes nothing to disk', listing == after)
     if app._plan:
-        labels = [g['label'] for g in app._plan['groups']]
-        sizes = [len(g['items']) for g in app._plan['groups']]
+        real = [g for g in app._plan['groups'] if not g.get('synthetic')]
+        labels = [g['label'] for g in real]
+        sizes = [len(g['items']) for g in real]
         check('it found the shared scene as one folder', any(l.startswith('three women') for l in labels),
               str(labels[:3]))
         check('with both of its pictures', any(len(g['items']) >= 2 and g['label'].startswith('three women')
@@ -2535,9 +2542,12 @@ def main():
         check('the sheet is square, so four thumbnails sit in it as a 2x2',
               pic.image.width() == pic.image.height(), (pic.image.width(), pic.image.height()))
         two_up = [w for w in app.recent.winfo_children() if w.grid_info()]
-        check('three folder tiles per row in the first column',
-              len({int(w.grid_info()['column']) for w in two_up}) == min(zui.FOLDER_COLS, len(two_up)),
-              [int(w.grid_info()['column']) for w in two_up])
+        # the renderer decides how many folder tiles fit the column it actually has (three, two, or one), so the check
+        # reads that decision instead of assuming the maximum
+        fitted = min(getattr(app, '_folder_cols', 0) or zui.FOLDER_COLS, len(two_up))
+        check('the folder tiles per row are what the column fits',
+              len({int(w.grid_info()['column']) for w in two_up}) == fitted,
+              ([int(w.grid_info()['column']) for w in two_up], fitted, getattr(app, '_folder_cols', None)))
         full_title = app._plan['groups'][0].get('title') or app._plan['groups'][0]['label']
         check('the tile title is the first ten words, with an ellipsis when there is more',
               title['text'] == zui.shorten_title(full_title) and len(title['text'].split()) <= 10,

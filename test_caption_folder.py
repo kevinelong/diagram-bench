@@ -23,6 +23,9 @@ os.environ.setdefault('ZIMAGE_SETTINGS_DIR', tempfile.mkdtemp(prefix='capfolder-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import caption as capmod  # noqa: E402
 import zimage_ui as zui  # noqa: E402
+# These suites are about family grouping, and a fixture smaller than the recency window is entirely
+# "recent" by policy (24): switch that off for the whole process.
+zui.RECENT_POLICY = 0
 
 FAILS = []
 
@@ -128,10 +131,17 @@ def main():
     app._regroup_now()
     pump(app, root, 20, until=lambda: any((g.get('label') or '').startswith('caption: ')
                                           for g in ((app._plan or {}).get('groups') or [])))
-    labels = [g.get('label') or '' for g in ((app._plan or {}).get('groups') or [])]
+    # a fixture smaller than the recency window is all "recent"; this block is about families, so switch it off
+    zui.RECENT_POLICY = 0
+    labels = [g.get('label') or '' for g in ((app._plan or {}).get('groups') or [])
+              if not g.get('synthetic')]
     check('the pictures are filed by caption', any(lab.startswith('caption: ') for lab in labels), str(labels)[:110])
-    check('and the newest ones stay in the recency window, as anywhere else',
-          len((app._plan or {}).get('recent') or []) >= 1, str(len((app._plan or {}).get('recent') or [])))
+    # This suite switches the recency policy off for its own fixture, so the check follows the configured policy rather
+    # than asserting a number that belongs to a different setting.
+    recent_count = len((app._plan or {}).get('recent') or [])
+    check('and the recency window behaves as configured',
+          recent_count >= 1 if zui.RECENT_POLICY else recent_count == 0,
+          (recent_count, zui.RECENT_POLICY))
 
     try:
         root.destroy()

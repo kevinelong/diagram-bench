@@ -62,7 +62,7 @@ MIN_MEMBER_COVERAGE = 0.30
 # one folder of 8 and the folder count moves 97 -> 96, while the e2e paraphrase recall of `test_groups.py` is unchanged
 # because the 0.20 anchor path is untouched. At 0.55 the gallery collapses to 73 folders; 0.75 loses a member again.
 MEMBER_MATCH = 0.70
-DEFAULT_RECENT = 18
+DEFAULT_RECENT = 24
 MIN_GROUP = 2                  # a "folder" of one picture is just the picture
 
 STOP = set('''a an the and or of to in on at by for with from as is are was were be been being this that these those it

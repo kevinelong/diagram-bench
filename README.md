@@ -1810,6 +1810,18 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### Recent is a folder too (2026-10-30)
+
+`plan()` holds the newest `RECENT_POLICY` pictures (24) out of every family, so they were drawn nowhere: the folders view
+draws groups, and a gallery smaller than that window had *no* groups at all - which is how a finished render came to be
+invisible no matter how the drawing was fixed. They now get their own synthetic `Recent (N)` tile at the head of the folder
+list, exactly the way `unfiled (N)` already covered the leftovers at the tail, so a young gallery is never an empty strip and
+a new render is visible in folders view immediately. The policy is unchanged and grouping still excludes them.
+
+`RECENT_POLICY` is an explicit constant (24) rather than an inherited default, so a test that exercises *family* grouping can
+set it to 0 instead of being quietly swallowed by the window: `test_gallery_ui.py` and `test_caption_folder.py` do exactly
+that, and the caption suite's recency check now asserts the configured policy rather than a number.
+
 ### Enter means the default action (2026-10-30)
 
 `ttk::button` in Tk 8.6.12 has **no `-default` option and no `<Return>` binding** - only `<space>`, via

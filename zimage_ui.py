@@ -728,7 +728,10 @@ def _px_setting(settings, key):
 THUMB_DIR = '.thumbs'
 SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
 THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show them larger than the old size
-RECENT_N = 12        # thumbnails in the sidebar strip: the nine it shows at once, plus a row before it scrolls
+RECENT_N = 12
+# How many of the newest pictures plan() holds out of families (they get their own 'Recent' tile instead). A policy, not
+# a coincidence: tests that exercise family grouping set this to 0 so a small fixture is not entirely "recent".
+RECENT_POLICY = 24        # thumbnails in the sidebar strip: the nine it shows at once, plus a row before it scrolls
 RECENT_COLS = 3       # fallback; the strip computes its own from the size it has
 RECENT_PX = 92       # fallback tile size, before the canvas has been laid out
 CONTENTS_W = 300     # width of the pictures in the open-folder pane; the scrollbar is reserved on top of it
@@ -3353,7 +3356,7 @@ class App:
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
                              'root': meta.get('lineage_root'), 'lineage': meta.get('lineage'),
                              'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
-            plan = group_prompts.plan(rows, keep_lexicon=True)
+            plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
             for group in plan.get('groups') or []:
@@ -3361,6 +3364,14 @@ class App:
                 if items and all(row.get('from_caption') for row in items):
                     group['label'] = 'caption: ' + (group.get('label') or '').strip()
                     group['from_caption'] = True
+            # The newest `recent` pictures are held out of every family by plan(), so in the folders view they were
+            # drawn nowhere - and a gallery younger than that window had no groups at all, which is how a finished render
+            # came to be invisible (measured 2026-10-30). They get their own tile, at the head, the way `unfiled` already
+            # covers the leftovers at the tail.
+            recent_rows = [row for row in (plan.get('recent') or []) if row.get('path')]
+            if recent_rows:
+                plan['groups'] = [{'label': 'Recent (%d)' % len(recent_rows), 'items': recent_rows,
+                                   'oldest': None, 'newest': None, 'synthetic': True}] + list(plan['groups'])
             unfiled = [row for row in (plan.get('ungrouped') or []) if row.get('path')]
             if unfiled:
                 plan.setdefault('groups', []).append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,

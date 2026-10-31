@@ -100,7 +100,9 @@ def test_folder_order_follows_newest_member():
     for subject, day in ((poodle, '05'), (car, '02'), (lighthouse, '01')):
         rows += [{'path': r'C:\x\g-%s-%d.png' % (day, j), 'prompt': subject,
                   'created': '2026-10-%sT10:%02d:00' % (day, j)} for j in range(20)]
-    plan = gp.plan(rows)
+    # the fixture's three subjects are older than the 18 newest rows, which is what makes it three folders; pin the
+    # window rather than inheriting the policy default (24 since 2026-10-30)
+    plan = gp.plan(rows, recent=18)
     print('order:', [(g['label'][:22], g['oldest'][:10], g['newest'][:10]) for g in plan['groups']])
     check('the corpus makes three folders', len(plan['groups']) == 3, [len(g['items']) for g in plan['groups']])
     check('the folder touched most recently comes first', 'lighthouse' in plan['groups'][0]['label'],
@@ -353,7 +355,7 @@ def main():
                 continue
             rows.append({'path': str(png), 'prompt': (d.get('prompt') or ''), 'created': d.get('created') or ''})
         t0 = time.monotonic()
-        plan = gp.plan(rows)
+        plan = gp.plan(rows, recent=0)
         secs = time.monotonic() - t0
         folded = sum(len(g['items']) for g in plan['groups'])
         print('   %d pictures, %d folders, %d in folders, %d recent, %d ungrouped, %.1fs'
