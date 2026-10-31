@@ -73,6 +73,7 @@ class _SheetShim:
 
     _signature = zui.App._signature
     _different = zui.App._different
+    _record_of = zui.App._record_of
     _wins_of = zui.App._wins_of
     _thumb_root = lambda self: None       # the shim's pictures are temp files: cache beside them, as for the output folder
     _sheet_paths = zui.App._sheet_paths

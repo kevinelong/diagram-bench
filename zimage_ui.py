@@ -676,11 +676,35 @@ def save_settings(data):
 THUMB_DIR = '.thumbs'
 SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
 THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show them larger than the old size
-RECENT_N = 18        # thumbnails in the sidebar strip (3 columns x 6 rows)
-RECENT_COLS = 3       # fallback; the strip computes its own from the width it has
-RECENT_PX = 92       # on-screen size of a strip tile; the cache keeps 168 px
-CONTENTS_W = 300     # requested width of the open-folder pane beside the folder list; it grows with the column
+RECENT_N = 18        # thumbnails in the sidebar strip: the twelve it shows at once, plus a row before it scrolls
+RECENT_COLS = 3       # fallback; the strip computes its own from the size it has
+RECENT_PX = 92       # fallback tile size, before the canvas has been laid out
+CONTENTS_W = 300     # width of the pictures in the open-folder pane; the scrollbar is reserved on top of it
 STRIP_TILE_MIN = 96  # a tile never shrinks below this: the row count follows the width, the tile follows the row
+# B1 (2026-10-30): the strip's column fits four pictures across and three down - twelve before it scrolls - at a fit
+# size of 160 px, and the tile grows with the window up to 320 so an ultra-wide does not post billboards. The 96 px
+# floor above is only the never-shrink-below for a window too small to hold the twelve at the fit size.
+STRIP_FIT_COLS = 4
+STRIP_FIT_ROWS = 3
+STRIP_TILE_FIT = 160
+STRIP_TILE_MAX = 320
+# What one tile costs beyond its picture: bd=1 and the 3 px focus ring on each side (8), plus the 1 px of grid padding
+# each side (2). Measured from the live window - a tile of 96 px is a 104 px cell - and the reason a 4-across column
+# needs 680 px of canvas for four 160 px pictures.
+TILE_CHROME = 10
+GALLERY_SHARE = 0.42  # the strip's column takes this share of the window, which is what pays for the twelve
+GAL_FIT_W = STRIP_FIT_COLS * (STRIP_TILE_FIT + TILE_CHROME)    # 680: the twelve at the fit size
+GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 1320: four columns at the cap
+# The canvas *asks* for three columns at the floor, not for the twelve: a request is a hard minimum, and asking for
+# 680 would leave the picture column 220 px at the 1200 px minimum window (measured: its action bar needs 283).
+GAL_ASK_W = 3 * (STRIP_TILE_MIN + TILE_CHROME)                 # 318
+PICTURE_KEEP = 360    # the width the picture column keeps before the strip's column stops asking for more
+# B2 (2026-10-30): the finish screen is the same 4x3 grid, scaled up from the strip: the ranking is the answer, and a
+# folder that ranked more than twelve scrolls rather than dropping its tail.
+REVIEW_FINISH_COLS = 4
+REVIEW_FINISH_ROWS = 3
+REVIEW_TILE_MIN = 200
+REVIEW_TILE_MAX = 420
 FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
 # How different two pictures must be to share a tile. Raised from 8/24 after seeing sheets that were still four
 # near-copies while clearly different pictures sat further down the folder - the old bar was passed by small changes.
@@ -1797,6 +1821,13 @@ class App:
         self.contents_bar = ttk.Scrollbar(self.contents_holder, orient='vertical',
                                           command=self.contents_canvas.yview)
         self.contents_bar.grid(row=1, column=1, sticky='ns')
+        # B3 (2026-10-30): the pane's pictures got CONTENTS_W and the scrollbar was drawn out of the same width, so the
+        # last column of pictures slid under it. The canvas asks for the scrollbar's own width on top, queried from the
+        # widget rather than assumed (14 px at 1x, more at 2x), so the pictures keep their column.
+        try:
+            self.contents_canvas.configure(width=CONTENTS_W + self._bar_px(self.contents_bar))
+        except Exception:
+            pass
         # the pane must stretch with the row, not sit at the canvas's requested 7 cm height (the folder list did, and
         # the pictures were clipped to a two-row band under a much taller column)
         self.contents_holder.rowconfigure(1, weight=1)
@@ -1843,17 +1874,22 @@ class App:
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
         self.contents_sel_label.grid(row=2, column=0, columnspan=3, sticky='we', pady=(2, 0))
-        self._contents_cols_seen = None
+        self._contents_geom = None       # (columns, tile) the pane's cells were last laid out for
+        self._contents_job = None        # the debounced reflow, so a mid-layout width cannot rebuild the pane
         self.contents = ttk.Frame(self.contents_canvas)
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
         self.contents.bind('<Configure>', self._on_contents_resize)
         self.contents_canvas.bind('<Configure>', self._on_contents_resize)
-        self.contents_holder.grid_remove()
+        # the pane starts hidden, *and* its column gives its weight back: an empty weighted column still ate a
+        # third of the strip's width (B3, 2026-10-30)
+        self._show_pane(False)
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
-        # width the canvas to the grid, or tk's default width clips the last column
+        # width the canvas to the grid, or tk's default width clips the last column. Three columns at the 96 px floor is
+        # all this asks for: a *request* is a hard minimum, and the strip's column is grown by `_fit_gallery_column`
+        # (B1) rather than by asking for the twelve here, which left the picture column unusable at a 1200 px window.
         self.gal_canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0, background=plate,
-                                    width=RECENT_COLS * (RECENT_PX + 8))
+                                    width=GAL_ASK_W)
         self.gal_canvas.grid(row=0, column=0, sticky='nsew')
         self.gal_bar = ttk.Scrollbar(holder, orient='vertical', command=self.gal_canvas.yview)
         self.gal_bar.grid(row=0, column=1, sticky='ns')
@@ -2364,6 +2400,10 @@ class App:
 
         if not self._sidebar:
             self.set_sidebar(False)
+        # B1: the strip's column takes a share of the window, so it has to be re-asked on every resize - the widgets
+        # alone cannot ask for it (their requests are constants, and the column is what has to grow).
+        root.bind('<Configure>', self._fit_gallery_column, add='+')
+        self._idle(self._fit_gallery_column)
         self._later(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
@@ -3540,6 +3580,12 @@ class App:
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
+        # B2: the finish screen lays twelve tiles out at once, so the thumbnails it will want are built now, on the
+        # background thread - a review lasts longer than the first completion does.
+        try:
+            self._prefetch_paths(list(state.get('paths') or [])[:48])
+        except Exception:
+            pass
         if self._review_mode.get() == 'gallery':
             self._review_relabel()          # one picture, the badge, Prev/Next - not the pair layout
         else:
@@ -3855,40 +3901,33 @@ class App:
                  if rank_mode else '%d pairs decided · %d deleted' % (decided, deletes),
                  font=('Segoe UI', 13), background=frame['background'], foreground=self.theme.muted
                  ).grid(row=1, column=0, columnspan=6, pady=(0, 10))
-        # Sized from the window, and always larger than the strip's tiles: these eight are the result, and at 148 px on a
-        # zoomed 1920 window they read as thumbnails rather than as the answer.
-        cols = 4
+        # B2 (2026-10-30): the result is the strip's 4x3 geometry, larger, and scrollable. It used to show eight tiles
+        # and end with "... and N more", which threw away the tail of a ranking - the order *is* the answer, so every
+        # place in it has to be reachable. `_finish_layout` sizes the tiles from the pane this frame was given.
+        cols = REVIEW_FINISH_COLS
         for c in range(cols):
             frame.columnconfigure(c, weight=1, uniform='tile')
-        try:
-            room = max(1, win.winfo_width()) - 140
-        except Exception:
-            room = 1200
-        size = max(STRIP_TILE_MIN * 2, min(360, int(room / cols)))
-        r['finish_size'] = size          # kept so the size can be checked rather than eyeballed
-        shown = ordered[:cols * 2]
-        for i, path in enumerate(shown):
-            cell = tk.Frame(frame, background=frame['background'])
-            cell.grid(row=2 + i // cols, column=i % cols, padx=5, pady=5, sticky='n')
-            photo = None
-            try:
-                # build the thumbnail here: the finished screen is not the paint path, and a filename is no help
-                photo = self._photo_of(self._thumb_of(path, build=True), size, key=path)
-            except Exception:
-                photo = None
-            lab = tk.Label(cell, image=photo, text='' if photo else Path(path).name[:12],
-                           background=_mix('#000000', self.theme.window, 0.35), foreground='#ddd',
-                           width=size // 8, height=size // 16)
-            lab.image = photo
-            lab.pack()
-            tk.Label(cell, text='%d' % (i + 1), font=('Segoe UI', 12, 'bold'),
-                     background=frame['background'], foreground=self.theme.accent).pack(pady=(2, 0))
-        if len(ordered) > len(shown):
-            tk.Label(frame, text='... and %d more' % (len(ordered) - len(shown)), font=('Segoe UI', 12),
-                     background=frame['background'], foreground=self.theme.muted
-                     ).grid(row=6, column=0, columnspan=cols, pady=(6, 0))
+        frame.rowconfigure(2, weight=1)
+        body = tk.Frame(frame, background=frame['background'])
+        body.grid(row=2, column=0, columnspan=cols, sticky='nsew')
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(body, background=frame['background'], highlightthickness=0, borderwidth=0)
+        bar = ttk.Scrollbar(body, orient='vertical', command=canvas.yview)
+        canvas.grid(row=0, column=0, sticky='nsew')
+        bar.grid(row=0, column=1, sticky='ns')
+        canvas.configure(yscrollcommand=bar.set)
+        grid_frame = tk.Frame(canvas, background=frame['background'])
+        finish_item = canvas.create_window((0, 0), window=grid_frame, anchor='nw')
+        grid_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        r.update({'finish_canvas': canvas, 'finish_grid': grid_frame, 'finish_item': finish_item, 'finish_cols': cols,
+                  'finish_ordered': [str(p) for p in ordered], 'finish_geom': None, 'finish_job': None,
+                  'finish_tiles': [], 'finish_fill': [], 'finish_size': REVIEW_TILE_MIN})
+        canvas.bind('<Configure>', lambda e: self._finish_soon(r))
+        self._finish_layout(r)
+        self._idle(lambda: self._finish_layout(r))     # the pane has no width until it has been laid out once
         actions = tk.Frame(frame, background=frame['background'])
-        actions.grid(row=7, column=0, columnspan=cols, pady=(14, 6))
+        actions.grid(row=3, column=0, columnspan=cols, pady=(14, 6))
         big = ('Segoe UI', 16, 'bold')
         tk.Button(actions, text='Reset and start over', font=big, command=self._review_restart,
                   background=_mix(self.theme.window, '#000000', 0.25), foreground=self.theme.text,
@@ -3902,6 +3941,112 @@ class App:
         tk.Button(actions, text='Keep and close', font=big, command=self.review_stop,
                   background=self.theme.accent, foreground=self.theme.on_accent, activebackground=self.theme.accent,
                   padx=22, pady=10).pack(side='left', padx=10)
+
+    def _finish_soon(self, r):
+        """Debounce a finish-screen resize: the grid is re-laid out 50 ms after the last <Configure>."""
+        job = r.get('finish_job')
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            self._timers.discard(job)
+        r['finish_job'] = self._later(50, self._finish_layout, r)
+
+    def _finish_layout(self, r):
+        """(columns, tile) for the finish grid: the size at which four across and three down fit this pane.
+
+        Clamped to `REVIEW_TILE_MIN`-`REVIEW_TILE_MAX`, so the answer is always larger than a strip tile and never a
+        billboard. Every ranked picture gets a cell: the pane scrolls, it does not truncate (B2, 2026-10-30).
+        """
+        r['finish_job'] = None
+        canvas, grid_frame = r.get('finish_canvas'), r.get('finish_grid')
+        if canvas is None or grid_frame is None or getattr(self, '_closing', False):
+            return
+        try:
+            if not canvas.winfo_exists():
+                return
+            w, h = canvas.winfo_width(), canvas.winfo_height()
+        except Exception:
+            return
+        if w <= 1 or h <= 1:
+            return                      # not laid out yet: <Configure> asks again once it is
+        cols = r.get('finish_cols') or REVIEW_FINISH_COLS
+        ordered = r.get('finish_ordered') or []
+        pad = 5
+        size = min((w - pad * (cols + 1)) // cols,
+                   (h - pad * (REVIEW_FINISH_ROWS + 1)) // REVIEW_FINISH_ROWS)
+        size = max(REVIEW_TILE_MIN, min(REVIEW_TILE_MAX, size))
+        if (cols, size) == r.get('finish_geom') and len(r.get('finish_tiles') or []) == len(ordered):
+            return
+        r['finish_geom'] = (cols, size)
+        r['finish_size'] = size          # kept so the size can be checked rather than eyeballed
+        for wdg in grid_frame.winfo_children():
+            wdg.destroy()
+        page = cols * REVIEW_FINISH_ROWS
+        tiles, fill, waiting = [], [], 0
+        for i, path in enumerate(ordered):
+            cell = tk.Frame(grid_frame, background=grid_frame['background'])
+            cell.grid(row=i // cols, column=i % cols, padx=pad, pady=pad, sticky='n')
+            # The first page is decoded now - review start prefetched its thumbnails, so this is a cache read. Below
+            # the page, a thumbnail that is already on disk is filled from an idle slot, and one that is not gets a
+            # placeholder and its picture when the background build lands.
+            photo = self._photo_of(self._thumb_of(path), size, key=path) if i < page else None
+            if photo is not None:
+                lab = tk.Label(cell, image=photo, background=_mix('#000000', self.theme.window, 0.35), bd=0)
+                lab.image = photo
+            else:
+                lab = tk.Label(cell, text=Path(path).name[:12], background=_mix('#000000', self.theme.window, 0.35),
+                               foreground='#ddd', width=max(4, size // 8), height=max(2, size // 16))
+                lab.thumb_px = size
+                if i < page or self._thumb_of(path):
+                    fill.append((lab, path))
+                else:
+                    waiting += 1
+                    self._pending_tiles.setdefault(str(path), []).append(lab)
+            lab.pack()
+            tk.Label(cell, text='%d' % (i + 1), font=('Segoe UI', 12, 'bold'),
+                     background=grid_frame['background'], foreground=self.theme.accent).pack(pady=(2, 0))
+            tiles.append(lab)
+        # the tiles are as wide as the canvas allows but the answers are only `size` px: centre the whole grid rather
+        # than leaving it piled against the left edge of a wide screen
+        try:
+            grid_frame.update_idletasks()
+            r['finish_canvas'].coords(r['finish_item'],
+                                     max(0, (w - grid_frame.winfo_reqwidth()) // 2), 0)
+        except Exception:
+            pass
+        r['finish_tiles'] = tiles
+        r['finish_fill'] = fill
+        if fill:
+            self._later(1, self._finish_fill, r)
+        if waiting:
+            self._prefetch_paths(ordered)
+
+    def _finish_fill(self, r):
+        """Give the tiles a few per slot their pictures from the thumbnail cache: the grid and its scroll region are
+        right from the first frame, and the screen does not stall on a folder's worth of decodes."""
+        if getattr(self, '_closing', False):
+            return
+        batch = r.get('finish_fill') or []
+        size = r.get('finish_size') or REVIEW_TILE_MIN
+        for _ in range(8):
+            if not batch:
+                break
+            lab, path = batch.pop(0)
+            photo = self._photo_of(self._thumb_of(path), size, key=path)
+            if photo is None:
+                continue
+            try:
+                if lab.winfo_exists():
+                    # width/height were only a placeholder for the missing picture; left on, they would cap the
+                    # label and draw the picture small inside a wide cell
+                    lab.configure(image=photo, text='', width=0, height=0)
+                    lab.image = photo
+            except Exception:
+                continue
+        if batch:
+            self._later(20, self._finish_fill, r)
 
     def _review_restart(self):
         """Clear this folder's record and run the comparison again, from the finished screen."""
@@ -3919,6 +4064,18 @@ class App:
         frame = r.pop('finish', None)
         if frame is not None:
             frame.destroy()
+        # the finish screen's own widgets and the jobs that fill it: a restart destroys the frame, and a stale
+        # `_finish_fill` must not come back to paint into it
+        for key in ('finish_canvas', 'finish_grid', 'finish_ordered', 'finish_tiles', 'finish_fill',
+                    'finish_geom', 'finish_size'):
+            r.pop(key, None)
+        job = r.pop('finish_job', None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            self._timers.discard(job)
         for key in ('left_lbl', 'right_lbl'):
             w = r.get(key)
             if w is not None:
@@ -4172,7 +4329,13 @@ class App:
             self._render_contents()
 
     def _visible_files(self):
-        """The gallery as filtered: the whole folder, then search, then stars, favourites first."""
+        """The gallery as filtered *and ordered*: search, then stars, then the sort the picker names.
+
+        The sort mode was never consulted here - the list always came back favourites-first by mtime - so `Wins` and
+        `Sequence` were options that could not change anything, and the review's rank never reached the lists
+        (reported 2026-10-30). Stars are now the last tie-break rather than the first, so a favourite cannot outrank a
+        picture that won.
+        """
         rows = self._scan()
         files = [p for p, _m in rows]
         if self._plan and self._active_folder is not None:
@@ -4184,16 +4347,35 @@ class App:
             files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
+        if self._sort_wins():
+            def key(f):
+                rec = self._record_of(f)
+                try:
+                    stamp = f.stat().st_mtime
+                except OSError:
+                    stamp = 0.0
+                return (-rec['wins'], rec['losses'], -stamp, f.name, f.name not in self._favorites)
+            return sorted(files, key=key)
+        if self._sort_sequence():
+            return [Path(p) for p in self._sequence_order(files)]
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
         return files
 
     def _folders_view_active(self):
-        """The strip lists folders when grouping is on, nothing is selected and nothing is filtered."""
-        # The `_grouping` term is deliberately gone: during a re-group (1.2 s after every render) it made the strip paint
-        # the 18 recent pictures and flip back to folders - the "content that vanishes" flash removed at startup,
-        # reintroduced per render. While a plan exists, keep drawing folders; the placeholder covers "no plan yet".
+        """The strip lists folders when grouping is on, nothing is selected and nothing is filtered.
+
+        The `_grouping` term is deliberately gone: during a re-group (1.2 s after every render) it made the strip paint
+        the 18 recent pictures and flip back to folders - the "content that vanishes" flash removed at startup,
+        reintroduced per render. While a plan exists, keep drawing folders; the placeholder covers "no plan yet".
+
+        A run in flight is the exception (reported 2026-10-30): the newest pictures live outside every folder by
+        design (`plan()` keeps the newest 18 in `recent`), so with folders on a tile that had just been written had
+        nowhere to appear - "show the images in the list as each one is generated". While `busy`, the strip lists the
+        pictures; the folders come back when the run ends and the plan is recomputed.
+        """
         return (bool(self._plan)
-                and not self.search_var.get().strip() and not self.starred_only.get())
+                and not self.search_var.get().strip() and not self.starred_only.get()
+                and not getattr(self, 'busy', False))
 
     def _signature(self, path):
         """What makes two pictures different on a tile: the shape of their gradients *and* their colours.
@@ -4243,25 +4425,37 @@ class App:
         colour_delta = max(max(abs(x - y) for x, y in zip(qa, qb)) for qa, qb in zip(a[1], b[1]))
         return grey_bits >= FOLDER_DISTINCT or colour_delta >= FOLDER_COLOUR
 
-    def _wins_of(self, path):
-        """Wins for one picture, memoised by mtime - the sheet walk may touch FOLDER_SCAN pictures per folder."""
+    def _record_of(self, path):
+        """This picture's standing - wins, losses, ties, bouts - memoised by mtime.
+
+        `_wins_of` was the only memoised reader, but the list's rank order needs losses as well, and a sidecar read
+        per picture on every refresh is exactly what the memo exists for. Same cache, same stamp: a rewritten sidecar
+        changes the mtime, so the entry is dropped.
+        """
         cache = getattr(self, '_wins_cache', None)
         if cache is None:
             cache = self._wins_cache = {}
         try:
-            stamp = Path(path).stat().st_mtime
+            # the standing lives in the sidecar, not in the picture: a bout rewrites the .json without touching the
+            # PNG, so the stamp has to cover both or a win would be memoised away until the picture itself changed
+            stamp = (Path(path).stat().st_mtime,
+                     Path(path).with_suffix('.json').stat().st_mtime)
         except OSError:
-            return 0
+            stamp = None
         hit = cache.get(path)
         if hit is not None and hit[0] == stamp:
             return hit[1]
         try:
             import pair_rank
-            wins = pair_rank.record_of(path)['wins']
+            rec = pair_rank.record_of(path)
         except Exception:
-            wins = 0
-        cache[path] = (stamp, wins)
-        return wins
+            rec = {'wins': 0, 'losses': 0, 'ties': 0, 'bouts': 0}
+        cache[path] = (stamp, rec)
+        return rec
+
+    def _wins_of(self, path):
+        """Wins for one picture, memoised by mtime - the sheet walk may touch FOLDER_SCAN pictures per folder."""
+        return self._record_of(path)['wins']
 
     def _sheet_paths(self, group):
         """The four pictures a folder's tile shows: the newest four that are visibly different from each other.
@@ -4303,12 +4497,35 @@ class App:
         self._heads[cache_key] = kept
         return kept
 
+    @staticmethod
+    def _sheet_cells(size, n):
+        """(x, y, w, h) for each of `n` pictures in a square sheet of `size` px.
+
+        Four used to be the only shape: a folder with one picture drew it into a quarter of the tile and left three
+        empty quarters, which read as a broken tile rather than as a small folder (reported 2026-10-30). The sheet now
+        fills what the folder holds - one is the whole tile, two side by side, three as two on top and a wide one
+        below, four the 2x2 the tile was designed around.
+        """
+        n = max(1, int(n))
+        size = max(1, int(size))
+        if n == 1:
+            return [(0, 0, size, size)]
+        half = size // 2
+        if n == 2:
+            return [(0, 0, half, size), (half, 0, size - half, size)]
+        if n == 3:
+            return [(0, 0, half, half), (half, 0, size - half, half), (0, half, size, size - half)]
+        side = 2 if FOLDER_CELLS == 4 else 3
+        cell = size // side
+        return [((i % side) * cell, (i // side) * cell, cell, cell) for i in range(side * side)]
+
     def _folder_sheet(self, group, size, gutter=None):
-        """A 2x2 contact sheet of a folder's newest four distinct pictures, built from the thumbnail cache.
+        """A contact sheet of a folder's newest four distinct pictures, built from the thumbnail cache.
 
         Four rather than nine because the tile has to sit two-up in the first column: a nine-up sheet demanded ~270 px
         and left room for one folder per row. One PhotoImage per folder instead of four keeps a 60-folder view cheap,
-        and the sheet is memoised so scrolling or a redraw does not re-compose it.
+        and the sheet is memoised so scrolling or a redraw does not re-compose it. A folder with fewer pictures gets a
+        sheet laid out for however many it has (`_sheet_cells`).
         """
         from PIL import Image as _I
         head = tuple(self._sheet_paths(group))
@@ -4316,22 +4533,21 @@ class App:
         hit = self._sheets.get(key)
         if hit is not None:
             return hit
-        side = 2 if FOLDER_CELLS == 4 else 3
-        cell = size // side
-        # the gutter is what draws the 1 px line between the four pictures when the tile is selected
+        # the gutter is what draws the 1 px line between the pictures when the tile is selected
         sheet = _I.new('RGB', (size, size), gutter or self.theme.sheet_bg)
         paths = list(head)
+        boxes = self._sheet_cells(size, len(paths))
         thumbs = thumbs_for(paths, cache_root=self._thumb_root())
         for i, path in enumerate(paths):
             tp = thumbs.get(path)
-            if not tp:
+            if not tp or i >= len(boxes):
                 continue
+            x0, y0, bw, bh = boxes[i]
             try:
                 with _I.open(tp) as im:
                     im = im.convert('RGB')
-                    im.thumbnail((cell - 2, cell - 2), _I.LANCZOS)
-                    sheet.paste(im, ((i % side) * cell + (cell - im.width) // 2,
-                                     (i // side) * cell + (cell - im.height) // 2))
+                    im.thumbnail((max(1, bw - 2), max(1, bh - 2)), _I.LANCZOS)
+                    sheet.paste(im, (x0 + (bw - im.width) // 2, y0 + (bh - im.height) // 2))
             except Exception:
                 continue
         self._sheets[key] = sheet
@@ -4344,7 +4560,7 @@ class App:
         from PIL import ImageTk
         if self._active_folder is None or not self._plan or self._active_folder >= len(self._plan['groups']):
             self._active_folder = None
-            self.contents_holder.grid_remove()
+            self._show_pane(False)
             return
         group = self._plan['groups'][self._active_folder]
         pane_pos = self._scroll_pos(self.contents_canvas)
@@ -4353,16 +4569,23 @@ class App:
         except Exception:
             had_focus = False
         self._rebuilding = True
-        self.contents_holder.grid()
+        self._show_pane(True)
         for w in self.contents.winfo_children():
             w.destroy()
         self._content_widgets = {}
+        # Lay the pane out for the width it *will* have, not the one it still reports: a folder opened right after a
+        # window change read a stale canvas width (314 for a pane that was about to be 205), and the settled reflow
+        # then rebuilt the very tiles the click had just landed on (B3, 2026-10-30).
+        try:
+            self.contents_canvas.update_idletasks()
+        except Exception:
+            pass
         width = self.contents_canvas.winfo_width()
         if width <= 1:
             width = CONTENTS_W
-        # three per row is the floor the screen asks for; wider pane, more columns, bigger tiles either way
-        cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
-        tile_px = max(48, (width - 8) // cols - 6)
+        # three per row is the floor the screen asks for; wider pane, more columns, bigger tiles either way. The same
+        # function runs in `_on_contents_resize`, so a resize reflows instead of laying columns out past the edge.
+        cols, tile_px = self._contents_metrics(width)
         items = list(group['items'])
         # Live view: the newest pictures are outside every folder by design, so a render made while this folder is open
         # would otherwise never appear in it. `live_append` answers "what else would this folder accept?" from the same
@@ -4445,6 +4668,7 @@ class App:
             self._content_widgets[Path(row['path'])] = lab
         self._content_order = order
         self._content_cols = cols
+        self._contents_geom = (cols, tile_px)     # what the cells were laid out for; the resize handler compares
         self._rebuilding = False
         if had_focus:
             # a re-render must not hand the keyboard to the strip: the reader was working in this pane
@@ -4460,26 +4684,71 @@ class App:
         self.gal_canvas.yview(*args)
         self._maybe_more('strip')
 
+    def _show_pane(self, show):
+        """Show or hide the open-folder pane, and hand its column back to the strip when it goes.
+
+        The pane's column keeps `weight=1` even when nothing is in it, so a hidden pane still took a third of the
+        gallery column: with the folder list closed the strip had 497 px of a 682 px column (measured 2026-10-30).
+        """
+        try:
+            self.gal.columnconfigure(2, weight=1 if show else 0)
+            if show:
+                self.contents_holder.grid()
+            else:
+                self.contents_holder.grid_remove()
+        except Exception:
+            pass
+
     def _on_contents_resize(self, event=None):
         if getattr(self, '_rebuilding', False) or not self._alive():
             return
         width = self.contents_canvas.winfo_width()
-        cols = max(3, int((max(width, 1) - 8) // (STRIP_TILE_MIN + 6)))
-        if cols != getattr(self, '_contents_cols_seen', None):
-            self._contents_cols_seen = cols
+        cols, tile = self._contents_metrics(width)
+        seen = getattr(self, '_contents_geom', None)
+        if seen is None:
+            self._contents_geom = (cols, tile)
+        elif cols != seen[0]:
             if getattr(self, '_content_widgets', None):
-                self._render_contents()      # the pane is three-up at this width; reflow to fill it
+                self._render_contents()
                 return
+        else:
+            # B3: the column count held, but the width it was laid out for may not - a pane narrowed by the
+            # scrollbar appearing left its last column past the edge. Reflow once the width has *settled*: a window
+            # mid-layout reports 314, 123, 205 for the same pane, and rebuilding on each of those both flickered and
+            # threw away the tile a click had just landed on.
+            self._contents_settle()
         box = self.contents_canvas.bbox('all')
         if box:
             self.contents_canvas.configure(scrollregion=box)
         self.contents_canvas.itemconfigure(self._contents_item, width=self.contents_canvas.winfo_width())
         box = self.contents_canvas.bbox('all')
         need = bool(box) and (box[3] - box[1]) > self.contents_canvas.winfo_height() + 1
-        if need:
-            self.contents_bar.grid()
-        else:
-            self.contents_bar.grid_remove()
+        # the same rule as the strip (B6): the bar keeps its cell so the pane's width, and the tiles it was laid
+        # out for, do not change every time a row fits or does not
+        self._set_bar(self.contents_bar, need)
+
+    def _contents_settle(self):
+        """Ask for a pane reflow once its width has stopped moving (B3, 2026-10-30)."""
+        if getattr(self, '_contents_job', None) is not None:
+            try:
+                self.root.after_cancel(self._contents_job)
+            except Exception:
+                pass
+            self._timers.discard(self._contents_job)
+            self._contents_job = None
+        self._contents_job = self._later(60, self._apply_contents_reflow)
+
+    def _apply_contents_reflow(self):
+        """Re-lay the pane out if the width it settled at no longer matches the one its cells were built for."""
+        self._contents_job = None
+        if getattr(self, '_rebuilding', False) or not self._alive():
+            return
+        if not getattr(self, '_content_widgets', None):
+            return
+        cols, tile = self._contents_metrics(self.contents_canvas.winfo_width())
+        seen = getattr(self, '_contents_geom', None)
+        if seen is None or cols != seen[0] or abs(tile - seen[1]) > 2:
+            self._render_contents()
 
     def _grid_taller_than_view(self, which):
         """Is the laid-out list already at least as tall as its viewport?"""
@@ -4529,15 +4798,10 @@ class App:
                 break
         self._prefetch(which)
 
-    def _prefetch(self, which='strip', ahead=2):
-        """Build the thumbnails the view will need next, off the UI thread. Returns how many were queued."""
+    def _prefetch_paths(self, paths):
+        """Build these thumbnails off the UI thread; the labels waiting in `_pending_tiles` fill in when it lands."""
         import threading
-        if which == 'strip':
-            pool = [] if self._folders_view_active() else list(self._files[:self._shown + ahead * BATCH_TILES])
-        else:
-            pool = [r.get('path') for r in (getattr(self, '_content_items', None) or [])
-                    [:self._content_shown + ahead * BATCH_CONTENTS]]
-        want = [str(p) for p in pool
+        want = [str(p) for p in paths
                 if p and str(p) not in self._thumb_cache and str(p) not in self._thumbs_inflight]
         if not want:
             return 0
@@ -4553,6 +4817,15 @@ class App:
 
         threading.Thread(target=work, daemon=True).start()
         return len(want)
+
+    def _prefetch(self, which='strip', ahead=2):
+        """Build the thumbnails the view will need next, off the UI thread. Returns how many were queued."""
+        if which == 'strip':
+            pool = [] if self._folders_view_active() else list(self._files[:self._shown + ahead * BATCH_TILES])
+        else:
+            pool = [r.get('path') for r in (getattr(self, '_content_items', None) or [])
+                    [:self._content_shown + ahead * BATCH_CONTENTS]]
+        return self._prefetch_paths(pool)
 
     def _maybe_more(self, which):
         """Infinite scrolling: at the bottom of a list, append the next batch."""
@@ -4655,25 +4928,125 @@ class App:
             pass
 
     def _strip_metrics(self):
-        """Columns and tile size for the strip, from the width it actually has.
+        """(columns, tile) for the strip, from the size of the canvas it has to fill (B1, 2026-10-30).
 
-        The strip used to paint fixed 92 px tiles and take as many columns as fitted, which wasted the leftover width
-        on a wide column. Now the column count follows the width and the tile *grows* into what is left, so the list
-        uses the whole column instead of leaving a gutter.
+        The tile used to follow the *width* alone, and the width used to come from a constant, so a maximised window
+        posted three columns of 101 px thumbnails while the picture column took the rest. It is now the size at which
+        four pictures across and three down fit the canvas - twelve before it scrolls - taken from whichever dimension
+        is tighter, floored at the 160 px fit size and capped at 320 so an ultra-wide does not post billboards.
+
+        A canvas too narrow to hold the twelve at the fit size keeps four columns and drops towards the 96 px
+        never-shrink floor; one too narrow even for that gives up a column rather than clipping its last one. The
+        debounce and the preserved pixel offset in `_apply_strip_resize` (commit 5c02ad1) sit on top of this and are
+        untouched.
         """
         try:
-            w = self.gal_canvas.winfo_width()
+            canvas = self.gal_canvas
+            w, h = canvas.winfo_width(), canvas.winfo_height()
         except Exception:
-            w = 0
+            w = h = 0
         if w <= 1:
-            w = RECENT_COLS * (RECENT_PX + 8)
-        pad = 4
-        cols = max(1, int((w - pad) // (STRIP_TILE_MIN + pad)))
-        tile = max(STRIP_TILE_MIN, (w - pad) // cols - pad)
+            w = STRIP_FIT_COLS * (STRIP_TILE_FIT + TILE_CHROME)     # not laid out yet: the twelve at the fit size
+        roomy = max(1, int(w // (STRIP_TILE_MIN + TILE_CHROME)))
+        cols = max(1, min(STRIP_FIT_COLS, roomy))
+        tile = w // cols - TILE_CHROME
+        if h > 1:
+            tile = min(tile, h // STRIP_FIT_ROWS - TILE_CHROME)
+        tile = max(STRIP_TILE_MIN, min(STRIP_TILE_MAX, tile))
+        while cols > 1 and cols * (tile + TILE_CHROME) > w:
+            cols -= 1           # a tile raised off the floor needs the width back, or the last column hangs off
         return cols, tile
 
     def _strip_cols(self):
         return self._strip_metrics()[0]
+
+    @staticmethod
+    def _bar_px(bar, fallback=16):
+        """How wide this host's scrollbar is - queried from the widget, never guessed (14 px here at 1x DPI)."""
+        try:
+            w = int(bar.winfo_reqwidth())
+        except Exception:
+            w = 0
+        return w if w > 1 else fallback
+
+    @staticmethod
+    def _set_bar(bar, needed):
+        """Keep a scrollbar in its grid cell, enabled only when there is something to scroll (B6, 2026-10-30).
+
+        A bar that is added and removed changes the width of the canvas beside it, and both columns size their tiles
+        from that width: a strip showing or hiding its bar re-laid itself, the rightmost column growing and collapsing
+        once per refresh. The width is constant now; a list that fits gets a disabled bar instead of a disappearing
+        one, which also cannot move the view.
+        """
+        try:
+            flags = bar.state()
+            if needed and 'disabled' in flags:
+                bar.state(['!disabled'])
+            elif not needed and 'disabled' not in flags:
+                bar.state(['disabled'])
+            if not bar.winfo_manager():
+                bar.grid()
+        except Exception:
+            pass
+
+    def _contents_metrics(self, width=None):
+        """(columns, tile) for the open-folder pane, from the width it actually has (B3, 2026-10-30).
+
+        Same arithmetic as the strip's: three across is the floor the screen asks for and the tile grows into the
+        width. It is recomputed on every resize, so a pane narrowed by the scrollbar appearing reflows instead of
+        laying its last column out past its own edge.
+        """
+        if width is None:
+            try:
+                width = self.contents_canvas.winfo_width()
+            except Exception:
+                width = CONTENTS_W
+        width = max(1, int(width))
+        cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
+        tile = max(48, width // cols - TILE_CHROME)
+        return cols, tile
+
+    def _gallery_width(self):
+        """The width the strip's column asks for (B1, 2026-10-30).
+
+        The gallery column used to be as wide as its children happened to request - the canvas asked for 300 px - so
+        on a 1707 px window it stayed 335 px wide and the picture column took everything else. Four tiles across at
+        the 160 px fit size need 680 (each tile carries 10 px of border, focus ring and padding); the column now asks
+        for a share of the window (0.42), floored at those 680 and capped at four tiles of 320, and it gives that up
+        whenever the prompt and picture columns would be squeezed below what they need.
+        """
+        try:
+            w = self.root.winfo_width()
+        except Exception:
+            w = 0
+        want = int(w * GALLERY_SHARE) if w > 1 else GAL_FIT_W
+        want = max(GAL_FIT_W, min(GAL_MAX_W, want))
+        if w > 1:
+            try:
+                prompt = max(420, self.text.master.winfo_reqwidth())
+            except Exception:
+                prompt = 420
+            want = max(210, min(want, w - prompt - PICTURE_KEEP))
+        return want
+
+    def _fit_gallery_column(self, event=None):
+        """Apply `_gallery_width` to the grid's first column: the canvas alone cannot ask for it, because the column
+        is what has to grow (B1). A folded-away sidebar keeps the rail's own width."""
+        if getattr(self, '_closing', False) or not getattr(self, '_sidebar', True):
+            return
+        try:
+            if event is not None and event.widget is not self.root:
+                return
+        except Exception:
+            pass
+        want = self._gallery_width()
+        if want == getattr(self, '_gallery_w', None):
+            return
+        self._gallery_w = want
+        try:
+            self.root.columnconfigure(0, minsize=max(210, want))
+        except Exception:
+            pass
 
     def refresh_gallery(self, select=None):
         if getattr(self, '_closing', False) or not self._alive():
@@ -4692,6 +5065,9 @@ class App:
             self._idle(lambda i=pending: self._scroll_folder_into_view(i))
         else:
             self._restore_scroll(self.gal_canvas, strip_pos)
+        # B6: the scrollbar's state (enabled or not) is decided in `_apply_strip_resize` from the laid-out height, so
+        # a rebuild has to ask for it - otherwise a bar left disabled over a list that now overflows cannot be dragged.
+        self._on_strip_resize()
 
     def _refresh_gallery(self, select=None):
         self._scene_cache = {}
@@ -4813,13 +5189,12 @@ class App:
         canvas.itemconfigure(self._gal_item, width=canvas.winfo_width())
         content_h = (box[3] - box[1]) if box else 0
         need = content_h > canvas.winfo_height() + 1
-        if need:
-            self.gal_bar.grid()
-        else:
-            # Hide the bar, but never move the view: a <Configure> arrives mid-rebuild while the tile container is
-            # momentarily a few pixels tall, and treating that as "everything fits" snapped the list back to the top
-            # (reported 2026-10-27). Tk clamps the view anyway when the content really is shorter than the viewport.
-            self.gal_bar.grid_remove()
+        # B6 (2026-10-30): the bar stays in its grid cell and is only *disabled* when everything fits. Showing and
+        # hiding it changed the canvas width, the tile is computed from that width, and so every refresh that crossed
+        # the threshold re-laid the strip - the rightmost column grew and collapsed again, one flicker per generated
+        # tile. Hiding it also risked moving the view (a <Configure> mid-rebuild looked like "everything fits",
+        # reported 2026-10-27); a disabled bar cannot move anything.
+        self._set_bar(self.gal_bar, need)
         # A region that is still short (a rebuild in flight) must not take the reader's place with it. `top < content_h`
         # is the sanity check: if the place we want is past the end of the region we just installed, the region is the
         # thing that is wrong, and jumping to a clamp of our own would be a second lie rather than a restoration.
@@ -5100,10 +5475,12 @@ class App:
     def set_sidebar(self, show):
         """Fold the gallery away so the picture can use the width."""
         self._sidebar = bool(show)
+        self._gallery_w = None
         if self._sidebar:
             self.rail.grid_remove()
             self.gal.grid()
-            self.root.columnconfigure(0, minsize=210)
+            self.root.columnconfigure(0, minsize=max(210, self._gallery_width()))
+            self._idle(self._fit_gallery_column)      # the window may have widened while the gallery was folded
         else:
             self.gal.grid_remove()
             self.rail.grid()
@@ -7803,7 +8180,7 @@ class App:
                                     continue
                                 photo = self._photo_of(thumb, getattr(lab, 'thumb_px', 64))
                                 if photo is not None:
-                                    lab.configure(image=photo)
+                                    lab.configure(image=photo, width=0, height=0)
                                     lab.image = photo
                             except Exception:
                                 continue
