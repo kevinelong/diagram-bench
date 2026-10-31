@@ -1810,6 +1810,14 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### A session belongs to one folder (2026-10-30)
+
+The review session key hashes the pictures' *names* (`state_key`), so two folders whose pictures share names share a
+session file. `build()` used to trust the stored `paths`, which meant opening the second folder drew the **first** folder's
+pictures - found while porting the reviewer into the native prototype, where it was unmistakable on screen. `build()` now
+resets the session when the stored paths name a different folder, and `test_review_modes.py` covers it: same key, own
+paths, no inherited decisions.
+
 ### Recent is a folder too (2026-10-30)
 
 `plan()` holds the newest `RECENT_POLICY` pictures (24) out of every family, so they were drawn nowhere: the folders view

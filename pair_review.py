@@ -14,6 +14,7 @@ Nothing here reads a prompt and nothing reads the model: this is a *visual* pair
 prompt grouping in group_prompts.py.
 """
 import hashlib
+import os
 import json
 import time
 from pathlib import Path
@@ -248,8 +249,22 @@ def save_state(state, state_dir=None):
     return path
 
 
+def _norm_paths(paths):
+    return {os.path.normcase(os.path.abspath(str(p))) for p in paths}
+
+
 def build(paths, state, hash_store=None):
-    """Fill state['pairs'] from a picture list, honouring decisions already recorded. Idempotent."""
+    """Fill state['pairs'] from a picture list, honouring decisions already recorded. Idempotent.
+
+    The key is built from the pictures' *names*, so two folders whose pictures share those names map to the same session
+    file. The stored paths decide which folder the session belongs to: if they name a different folder, this is a new
+    session and the old pairs and decisions must not be inherited (measured: a review opened on a second folder drew the
+    first folder's pictures).
+    """
+    stored = state.get('paths')
+    if stored and _norm_paths(stored) != _norm_paths(paths):
+        state.clear()
+        state.update({'created': time.strftime('%Y-%m-%dT%H:%M:%S'), 'decisions': {}, 'pairs': None})
     if state.get('pairs') is not None:
         return state
     state.setdefault('paths', [str(p) for p in paths])

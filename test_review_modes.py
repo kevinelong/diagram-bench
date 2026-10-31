@@ -23,6 +23,7 @@ os.environ.setdefault('ZIMAGE_SETTINGS_DIR', tempfile.mkdtemp(prefix='modes-set-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pair_rank  # noqa: E402
 import pair_review  # noqa: E402
+import pair_review as _pr
 import zimage_ui as zui  # noqa: E402
 
 # The review saves its decisions under pair_review.STATE_DIR keyed by the member names, so a second run of this test would
@@ -148,6 +149,25 @@ def main():
     del_done = _ui.review_tally(False, 24, 24, 11)
     check('delete mode still reports its count', _re.search(r'11 deleted', del_done) is not None, del_done)
     check('and never says nothing was deleted', 'nothing deleted' not in del_done, del_done)
+
+    print('\n-- a second folder whose pictures share the names does not inherit the session')
+    import tempfile as _tf, pathlib as _pl
+    root = _pl.Path(_tf.mkdtemp(prefix='rv-clash-'))
+    for folder in ('one', 'two'):
+        d = root / folder
+        d.mkdir()
+        for name in 'abcd':
+            (d / ('%s.png' % name)).write_bytes(b'\x89PNG\r\n\x1a\n')
+    one = [str(root / 'one' / ('%s.png' % n)) for n in 'abcd']
+    two = [str(root / 'two' / ('%s.png' % n)) for n in 'abcd']
+    check('the two folders really do collide on one key', _pr.state_key(one) == _pr.state_key(two), _pr.state_key(one))
+    clash = _pr.load_state(_pr.state_key(one), root)
+    _pr.build(one, clash, root)
+    clash['decisions']['pair-1'] = {'choice': 'tie'}
+    _pr.build(two, clash, root)
+    check('the second folder gets its own paths', clash.get('paths') == two, str(clash.get('paths'))[:90])
+    check('and none of the first folder\'s decisions', not clash.get('decisions'), str(clash.get('decisions'))[:90])
+    check('and its own pairs', bool(clash.get('pairs')), type(clash.get('pairs')).__name__)
 
     print('\nFAILURES:', FAILS if FAILS else 'none')
     return 1 if FAILS else 0
