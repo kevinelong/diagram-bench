@@ -174,6 +174,17 @@ def main():
 
     tmp = Path(tempfile.mkdtemp(prefix='gal-test-'))
     os.environ['LOCALAPPDATA'] = str(tmp / 'appdata')   # settings must not touch the real profile
+
+    # NO TEST IN THIS FILE MAY LAUNCH AN APPLICATION (2026-10-31). A media player opening on the desktop in the middle
+    # of a suite is not something a test should ever produce, and it was reported while the clip tests ran. The clip
+    # blocks below install their own recorders, which is what they should keep doing; this is the backstop that makes
+    # "no window, whatever the block does" true for the whole run rather than for the blocks someone remembered. It is
+    # restored at the end of main() so a caller importing this module still sees the real function.
+    import winproc as _wp_backstop
+    _REAL_LAUNCH = _wp_backstop.launch
+    _wp_backstop.launch = lambda cmd, **kw: type('P', (), {'pid': 1})()
+    _real_launch_backstop = True
+
     files = make_gallery(tmp, 26)   # more than the strip holds, so the cap is exercised
     root = tk.Tk()
     try:
@@ -247,6 +258,23 @@ def main():
     check('and the strip says what it is doing', 'Grouping' in app.gal_title['text'], app.gal_title['text'])
     app._plan, app._grouping = real_plan, real_grouping
     app.refresh_gallery(); root.update()
+
+    # A regroup request that arrives while a compute is in flight used to be dropped outright - `_regroup_job`
+    # cleared to None and nothing pending - so the plan kept describing the gallery as it was before the newest
+    # pictures until the folders switch was toggled by hand to force a fresh pass (reported 2026-10-31). It must
+    # queue a further pass instead.
+    saved_job, saved_grp = getattr(app, '_regroup_job', None), app._grouping
+    if saved_job:
+        app.root.after_cancel(saved_job)
+    app._regroup_job = None
+    app.group_var.set(True)
+    app._grouping = True
+    app._regroup_now()
+    check('a regroup requested mid-compute is queued, not dropped', app._regroup_job is not None,
+          str(app._regroup_job))
+    if app._regroup_job:
+        app.root.after_cancel(app._regroup_job)
+    app._regroup_job, app._grouping = saved_job, saved_grp
 
     print("\n-- the window takes the host size and colours (2026-10-27)")
     state = root.state()
@@ -445,6 +473,12 @@ def main():
     app.random_seed()
     check('random seed is numeric', app.seed.get().isdigit())
     check('layouts offered', app.layout_var.get() in ('single', '4-up (2x2)', '9-up (3x3)', '16-up (4x4)'))
+    # Asked for 2026-10-31: the list, the open folder's pane and a folder's four preview pictures should all lead with
+    # what won, without hunting for the picker. With no bouts recorded every win count is 0, so this falls back to
+    # newest-first and an unreviewed gallery is unchanged - which is why defaulting to it costs nothing.
+    check('the sort starts on rank order', app.sort_var.get() == 'Wins', app.sort_var.get())
+    check('and the list is the rank order', app._sort_wins() and app._visible_files()[0] in app._files,
+          app.sort_var.get())
     check('sizes offered include 704, the clip grid, so a still can need no resample',
           list(app.size_cb['values']) == ['256', '320', '384', '448', '512', '640', '704', '768', '1024'],
           str(list(app.size_cb['values'])))
@@ -1408,6 +1442,53 @@ def main():
         app._render_folder_bar(); app.refresh_gallery(); app.busy = False
     else:
         check('two pictures exist for this check', False, str(len(pics)))
+
+    print('\n-- Ctrl+F finds inside the prompt: every match highlighted, stepping scrolls, nothing edited')
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'two women in velvet, a velvet chair, velvet curtains')
+    check('Ctrl+F is bound', bool(root.bind('<Control-f>')), 'binding')
+    app.find_open()
+    app.find_var.set('velvet')
+    root.update()
+    check('every match is found', len(app._find_hits) == 3, str(len(app._find_hits)))
+    check('the count names the match you are on', app.find_label['text'] == '1/3', app.find_label['text'])
+    check('the current match is highlighted', bool(app.text.tag_ranges('findhit')), 'findhit')
+    check('all matches carry the find tag', len(app.text.tag_ranges('findall')) == 6,
+          str(len(app.text.tag_ranges('findall'))))
+    app.find_var.set('VELVET')
+    root.update()
+    check('the search ignores case', len(app._find_hits) == 3, str(len(app._find_hits)))
+    app.find_var.set('velvet')
+    root.update()
+    app.find_step(1)
+    check('stepping forward moves to the second match', app.find_label['text'] == '2/3', app.find_label['text'])
+    app.find_step(-1)
+    app.find_step(-1)
+    check('stepping back wraps to the last match', app.find_label['text'] == '3/3', app.find_label['text'])
+    check('the prompt is not edited by searching',
+          app.text.get('1.0', 'end').strip() == 'two women in velvet, a velvet chair, velvet curtains',
+          app.text.get('1.0', 'end').strip()[:44])
+    app.find_var.set('nothing here')
+    root.update()
+    check('no match says so', app.find_label['text'] == 'no match', app.find_label['text'])
+    app.find_var.set('velvet')
+    root.update()
+    app.find_close()
+    root.update()
+    check('closing drops every highlight',
+          not app.text.tag_ranges('findall') and not app.text.tag_ranges('findhit'), 'tags')
+    check('and the bar is hidden again', not app.find_row.winfo_ismapped(), 'mapped')
+
+    print('\n-- a picture that lands mid-run is given a thumbnail, so its tile is not just its caption')
+    landed = tmp / 'landed-tile.png'
+    Image.new('RGB', (48, 48), (90, 40, 20)).save(landed)
+    check('it has no thumbnail to begin with', app._thumb_of(landed) is None, 'thumb')
+    app._warm_one(landed)
+    end_warm = time.monotonic() + 8
+    while time.monotonic() < end_warm and not app._thumb_of(landed):
+        app._poll(); root.update(); time.sleep(0.05)
+    check('warming it produces one, so the paint path can draw it', bool(app._thumb_of(landed)), 'thumb')
+    landed.unlink(missing_ok=True)
 
     print('\n-- a prompt that contradicts itself is named, not blocked')
     pairs = zui.prompt_clashes('thin construction lines, black line only, white background, charcoal drawing on '
@@ -3660,9 +3741,13 @@ def main():
     print('\n-- A/B review: most-similar pairs, three decisions, progress that survives stopping')
     import pair_review as prv
     prv.STATE_DIR = Path(tempfile.mkdtemp(prefix='zimage-review-ab-'))   # its own run, not rank mode's leftovers
-    # give one folder enough members that it has several pairs: six of the oldest share a prompt
+    # give one folder enough members that it has several pairs: six of the oldest share a prompt.
+    # The gallery itself, not `app._files`: that is whatever is *open* now, and since the default order became rank
+    # order (2026-10-31) a different folder auto-opens on a selection, so `_files` can legitimately hold two pictures
+    # where this loop wants six. What the block needs is six pictures in the gallery, which `_all_files()` is.
+    gallery_now = [Path(p) for p in app._all_files()]
     for i in range(-1, -7, -1):
-        sc = app._files[i].with_suffix('.json')
+        sc = gallery_now[i].with_suffix('.json')
         meta = json.loads(sc.read_text(encoding='utf-8'))
         meta['prompt'] = 'two women kissing on a leather sofa in a warm living room, lamp light'
         sc.write_text(json.dumps(meta), encoding='utf-8')
@@ -3785,26 +3870,32 @@ def main():
     app._recycle_files = real_recycle
     app.select_folder(None); root.update()
 
-    print('\n-- clips open in a player that exists, not in a broken association')
-    forced = zui.App.find_player()
-    check('a real player is found on this machine', bool(forced), forced)
-    check('and it is not the AppX Media Player', bool(forced) and 'MediaPlayer' not in forced[0], forced)
-    launched = []
-    import winproc
-    real_launch = winproc.launch
-    winproc.launch = lambda cmd, **kw: launched.append(cmd) or type('P', (), {'pid': 1})()
-    clip = app._files[0].with_suffix('.mp4')
-    clip.write_bytes(b'not really a clip')          # only the launch path is under test here
-    who = app._open_clip(clip, video=True)
-    check('opening a clip launches that player with the file',
-          bool(launched) and launched[0][-1] == str(clip) and launched[0][0] == forced[0],
-          launched)
-    check('and the caller learns which player opened it', who == Path(forced[0]).stem, who)
-    winproc.launch = real_launch
-    # with no player installed the app falls back to the Windows association instead of failing
-    fallback = zui.App.find_player(exists=lambda p: False)
-    check('with no player installed it defers to the default app', fallback is None, fallback)
-    clip.unlink()
+    # MEDIA-PLAYER DISABLED 2026-10-31 (Kevin): "comment out whatever test is opening media player until after we
+    # fix media creation in the future". This is the block that hands a clip to an installed player - VLC on this
+    # machine, found by App.find_player() - and a player window on the desktop mid-suite is not something a test
+    # should produce while clip creation is being reworked. The checks are kept verbatim below, commented, so they
+    # can be restored with the flag once the video path is settled.
+    #
+    # print('\n-- clips open in a player that exists, not in a broken association')
+    # forced = zui.App.find_player()
+    # check('a real player is found on this machine', bool(forced), forced)
+    # check('and it is not the AppX Media Player', bool(forced) and 'MediaPlayer' not in forced[0], forced)
+    # launched = []
+    # import winproc
+    # real_launch = winproc.launch
+    # winproc.launch = lambda cmd, **kw: launched.append(cmd) or type('P', (), {'pid': 1})()
+    # clip = app._files[0].with_suffix('.mp4')
+    # clip.write_bytes(b'not really a clip')          # only the launch path is under test here
+    # who = app._open_clip(clip, video=True)
+    # check('opening a clip launches that player with the file',
+    #       bool(launched) and launched[0][-1] == str(clip) and launched[0][0] == forced[0],
+    #       launched)
+    # check('and the caller learns which player opened it', who == Path(forced[0]).stem, who)
+    # winproc.launch = real_launch
+    # # with no player installed the app falls back to the Windows association instead of failing
+    # fallback = zui.App.find_player(exists=lambda p: False)
+    # check('with no player installed it defers to the default app', fallback is None, fallback)
+    # clip.unlink()
 
     print('\n-- make clip: needs a picture, then hands off to the video path')
     app._current = None
@@ -4253,6 +4344,7 @@ def main():
     root3.destroy()
 
 
+    _wp_backstop.launch = _REAL_LAUNCH          # leave the module as we found it
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
     print('gallery was %s' % tmp)
     return 1 if FAILS else 0

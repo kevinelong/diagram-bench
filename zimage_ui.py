@@ -2295,8 +2295,11 @@ class App:
         selrow = ttk.Frame(btns)
         selrow.pack(fill='x', pady=(3, 0))
         ttk.Label(selrow, text='sort by', foreground=self.theme.muted, font=('Segoe UI', 10)).pack(side='left')
-        # wins travel with the picture, so "Wins" is a stable order across folders and restarts
-        self.sort_var = tk.StringVar(value='Recent')
+        # Rank is the default, not an option you have to find: the list, the open folder's pane and a folder's four
+        # preview pictures should all lead with what won. Asked for directly on 2026-10-31. `Recent` stays one step
+        # away in the picker, and with no bouts recorded every win count is 0, so the order falls back to newest-first
+        # and a gallery nobody has reviewed looks exactly as it did before.
+        self.sort_var = tk.StringVar(value='Wins')
         # Sequence reads a storyboard in film order (the scene numbers a multi-scene prompt records in its sidecars);
         # it falls back to recency for pictures that have none, so an ordinary gallery is unchanged
         self.sort_cb = ttk.Combobox(selrow, state='readonly', width=8, values=['Recent', 'Wins', 'Sequence'],
@@ -2344,6 +2347,10 @@ class App:
         self.text.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         # the medium words the style guard lights up: a muted amber, so it reads as "look here", not as an error
         self.text.tag_configure('conflict', background='#6b4a12', foreground='#ffffff')
+        # find-in-prompt: every match in need, the one you are standing on in the accent, so "where am I" is
+        # answerable at a glance in a seven-line box
+        self.text.tag_configure('findall', background='#5a4a1e', foreground='#ffffff')
+        self.text.tag_configure('findhit', background=self.theme.accent, foreground=self.theme.on_accent)
         self.text.bind('<Return>', self._on_return)
         self.text.bind('<Shift-Return>', self._on_shift_return)
         # Ctrl+arrow, not plain arrows: in a multi-line prompt box Up/Down have to move the caret, which is what
@@ -2351,6 +2358,33 @@ class App:
         self.text.bind('<Control-Up>', self._on_hist_up)
         self.text.bind('<Control-Down>', self._on_hist_down)
         self.text.focus_set()
+
+        # -- find in the prompt (Ctrl+F). Hidden until asked for, so the box keeps its height.
+        self.find_row = ttk.Frame(left)
+        # Placed, not gridded. The prompt column already uses rows 0-13 (base_row at 8, clip_row at 13), so inserting a
+        # row means shifting a dozen widgets - which is how a layout gets broken, and did. A placed bar overlays the top
+        # of the action row only while it is open, and place_forget removes every trace of it.
+        self._find_hidden = True
+        ttk.Label(self.find_row, text='find').pack(side='left')
+        self.find_var = tk.StringVar()
+        self.find_entry = ttk.Entry(self.find_row, textvariable=self.find_var, width=24)
+        self.find_entry.pack(side='left', padx=(6, 6))
+        # "3/17" rather than "17 matches": the number you are on is the one that tells you how much is left
+        self.find_label = ttk.Label(self.find_row, text='', foreground=self.theme.muted, width=7)
+        self.find_label.pack(side='left')
+        self.find_prev_btn = ttk.Button(self.find_row, text='\u2039', width=3,
+                                        command=lambda: self.find_step(-1))
+        self.find_prev_btn.pack(side='left')
+        self.find_next_btn = ttk.Button(self.find_row, text='\u203a', width=3,
+                                        command=lambda: self.find_step(1))
+        self.find_next_btn.pack(side='left', padx=(2, 4))
+        self.find_close_btn = ttk.Button(self.find_row, text='\u00d7', width=3, command=self.find_close)
+        self.find_close_btn.pack(side='left')
+        self._find_hits, self._find_i = [], -1
+        self.find_var.trace_add('write', lambda *_: self._find_refresh())
+        self.find_entry.bind('<Return>', lambda e: (self.find_step(1), 'break')[1])
+        self.find_entry.bind('<Shift-Return>', lambda e: (self.find_step(-1), 'break')[1])
+        self.find_entry.bind('<Escape>', lambda e: (self.find_close(), 'break')[1])
 
         row = ttk.Frame(left)
         row.grid(row=2, column=0, sticky='ew')
@@ -2739,6 +2773,9 @@ class App:
         self._see_pending = None         # a folder waiting to be scrolled into view after the next rebuild
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
+        # Ctrl+F finds inside the prompt from anywhere in the window - it is the one find a prompt box needs, and
+        # Alt+F is already the folders switch. Nothing else in the app claims Control-f.
+        root.bind('<Control-f>', lambda e: (self.find_open(), 'break')[1])
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
         # the pan is appended after the three modes that already own a press on this canvas - compare, mask and crop -
         # and refuses to move unless the picture overflows the canvas and none of them is armed. A wheel notch or an
@@ -2812,6 +2849,39 @@ class App:
         if got:
             self._thumb_cache[key] = got
         return got
+
+    def _warm_one(self, path):
+        """Build one just-written picture's thumbnail off the paint path, then repaint its tile.
+
+        The paint path never decodes - `_thumb_of(build=False)` - and that is right: a folder of un-thumbnailed
+        pictures would block ~20 ms each and the column would fill late. Measured 2026-10-31, the same choice meant a
+        picture written mid-run drew as its caption and nothing else ("not creating thumbnails ... just some words"),
+        because nothing had put a thumbnail on disk for it yet. Building that one thumbnail in the background, then
+        asking for one repaint, keeps the paint path's rule and still shows the picture as it lands.
+        """
+        def work():
+            try:
+                got = thumb_for(Path(path), cache_root=self._thumb_root())
+            except Exception:
+                return
+            if not got:
+                return
+            self._thumb_cache[str(path)] = got
+            self.ui_events.put(('thumb_ready', str(path)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _thumb_repaint_soon(self):
+        """One repaint per burst: a 16-up delivers sixteen arrivals, and sixteen repaints is sixteen times the work."""
+        if getattr(self, '_thumb_job', None):
+            return
+        self._thumb_job = self.root.after(120, self._thumb_repaint)
+
+    def _thumb_repaint(self):
+        self._thumb_job = None
+        try:
+            self.refresh_gallery()
+        except Exception:
+            pass
 
     def _photo_of(self, thumb_path, size, key=None):
         """A PhotoImage from a thumbnail file, cached by (key, size). Never decodes the original.
@@ -3408,7 +3478,15 @@ class App:
 
     def _regroup_now(self):
         self._regroup_job = None
-        if not self.group_var.get() or getattr(self, '_grouping', False):
+        if not self.group_var.get():
+            return
+        if getattr(self, '_grouping', False):
+            # A compute is already in flight. Dropping the request - which is what this did - leaves the plan
+            # describing the gallery as it was before whatever triggered the regroup: on a 1342-picture gallery
+            # grouping takes ~2.4 s and a 16-up run delivers its events inside that window, so the newest
+            # pictures were routinely absent from the folders until the switch was toggled by hand to force a
+            # fresh pass (reported 2026-10-31). Queue one more pass instead; the debounce keeps it to one.
+            self._regroup_job = self.root.after(600, self._regroup_now)
             return
         self._grouping = True
         threading.Thread(target=self._compute_groups, daemon=True).start()
@@ -4683,14 +4761,17 @@ class App:
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
         if self._sort_wins():
-            def key(f):
-                rec = self._record_of(f)
-                try:
-                    stamp = f.stat().st_mtime
-                except OSError:
-                    stamp = 0.0
-                return (-rec['wins'], rec['losses'], -stamp, f.name, f.name not in self._favorites)
-            return sorted(files, key=key)
+            try:
+                def key(f):
+                    rec = self._record_of(f)
+                    try:
+                        stamp = f.stat().st_mtime
+                    except OSError:
+                        stamp = 0.0
+                    return (-rec['wins'], rec['losses'], -stamp, f.name, f.name not in self._favorites)
+                return sorted(files, key=key)
+            except Exception as exc:
+                log_error('rank order in the picture list', exc)      # fall through to newest-first
         if self._sort_sequence():
             return [Path(p) for p in self._sequence_order(files)]
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
@@ -4807,8 +4888,12 @@ class App:
         # rule exactly, because the sort falls back to newest-first when every win count is 0.
         # wins first, and among equal wins the plan's own order newest-first - the tile has always trusted the list
         # rather than the filesystem's mtimes, which are coarse and lie after a copy
-        ranked = [row for _pos, row in sorted(enumerate(window),
-                                              key=lambda t: (-self._wins_of(t[1]['path']), -t[0]))]
+        try:
+            ranked = [row for _pos, row in sorted(enumerate(window),
+                                                  key=lambda t: (-self._wins_of(t[1]['path']), -t[0]))]
+        except Exception as exc:
+            log_error('rank order in a folder tile', exc)             # newest-first, as if nobody had won
+            ranked = list(window)
         wins_stamp = sum(self._wins_of(r['path']) for r in window)
         cache_key = (group['label'], len(items), items[-1]['path'] if items else '', wins_stamp)
         cached = self._heads.get(cache_key)
@@ -5026,11 +5111,18 @@ class App:
             caption += ', %d new' % len(fresh_rows)
         self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
         if self._sort_wins():
-            import pair_rank
-            # fitted strength, not raw wins: a win over a strong picture outweighs one over a picture that always loses
-            order = pair_rank.sort_by_strength([r['path'] for r in items])
-            pos = {p: i for i, p in enumerate(order)}
-            items.sort(key=lambda r: pos.get(r['path'], len(items)))
+            try:
+                import pair_rank
+                # fitted strength, not raw wins: a win over a strong picture outweighs one over a picture that always loses
+                order = pair_rank.sort_by_strength([r['path'] for r in items])
+                pos = {p: i for i, p in enumerate(order)}
+                items.sort(key=lambda r: pos.get(r['path'], len(items)))
+            except Exception as exc:
+                # A rank that cannot be computed must not empty the pane. Reported 2026-10-31 as a pass where the folder
+                # list worked and the pictures did not; this is the one path that could produce exactly that, so it now
+                # says what went wrong and falls back to newest-first instead of raising out of the paint.
+                log_error('rank order in the contents pane', exc)
+                items.sort(key=lambda r: r.get('created') or '', reverse=True)
         order = []                                  # the pane's own display order, for its keyboard
         for i, row in enumerate(items[:self._content_shown]):
             tp = self._thumb_of(row['path'])        # cached or nothing: a decode here would empty the column
@@ -8272,6 +8364,94 @@ class App:
         self.text.insert('insert', '\n')
         return 'break'
 
+    # -- find in the prompt ------------------------------------------------
+    # Asked for 2026-10-31: "prompt text search feature for highlighting and scrolling through matching text in a
+    # prompt". Highlights only - nothing here edits the prompt, and every index is re-derived from the text on
+    # each refresh, so an edit while the bar is open cannot leave a tag on the wrong characters.
+
+    def find_open(self):
+        """Show the find bar, seeded from the selection when there is one."""
+        try:
+            sel = self.text.get('sel.first', 'sel.last')
+        except Exception:
+            sel = ''
+        if sel and '\n' not in sel and len(sel) < 200:
+            self.find_var.set(sel)
+        self.find_row.place(in_=self.text, relx=0.0, rely=1.0, y=4, relwidth=1.0)
+        self._find_hidden = False
+        self.find_entry.focus_set()
+        self.find_entry.selection_range(0, 'end')
+        self._find_refresh()
+
+    def find_close(self):
+        """Hide the bar, drop the highlights, and put the caret back in the prompt."""
+        self.find_row.place_forget()
+        self._find_hidden = True
+        self._find_clear()
+        self.text.focus_set()
+
+    def _find_clear(self):
+        for tag in ('findall', 'findhit'):
+            try:
+                self.text.tag_remove(tag, '1.0', 'end')
+            except Exception:
+                pass
+        self._find_hits, self._find_i = [], -1
+        try:
+            self.find_label.configure(text='')
+        except Exception:
+            pass
+
+    def _find_refresh(self):
+        """Find every match, case-insensitively, highlight them all, and stand on the first."""
+        if not hasattr(self, 'find_row'):
+            return
+        self._find_clear()
+        needle = self.find_var.get()
+        if not needle.strip() and not needle:
+            return
+        hits, start = [], '1.0'
+        while True:
+            pos = self.text.search(needle, start, stopindex='end', nocase=True)
+            if not pos:
+                break
+            end = self.text.index('%s+%dc' % (pos, len(needle)))
+            hits.append((pos, end))
+            if len(hits) >= 500:            # a guard, not a limit anyone will meet in a prompt
+                break
+            start = end
+        self._find_hits = hits
+        for a, b in hits:
+            self.text.tag_add('findall', a, b)
+        if hits:
+            self.text.tag_raise('findall')
+            self._find_focus(0)
+        else:
+            self.find_label.configure(text='no match')
+
+    def _find_focus(self, i):
+        """Make hit `i` current: accent highlight, scrolled into view, and the count shown as 'n/of'."""
+        if not self._find_hits:
+            return
+        self._find_i = i % len(self._find_hits)
+        for a, b in self._find_hits:
+            self.text.tag_remove('findhit', a, b)
+        a, b = self._find_hits[self._find_i]
+        self.text.tag_add('findhit', a, b)
+        self.text.tag_raise('findhit')
+        # see() on both ends: a match taller than the box would otherwise be scrolled to its top only, and the
+        # reason to search is the words at the end of a long prompt
+        self.text.see(a)
+        self.text.see(b)
+        self.find_label.configure(text='%d/%d' % (self._find_i + 1, len(self._find_hits)))
+
+    def find_step(self, delta):
+        """Next (+1) or previous (-1), wrapping at both ends."""
+        if not self._find_hits:
+            self._find_refresh()
+            return
+        self._find_focus(self._find_i + delta)
+
     def stop(self):
         if not self.busy:
             return
@@ -8929,6 +9109,9 @@ class App:
                 elif kind == 'review_error':
                     self.hint.configure(text='A/B review failed: %s' % payload)
                     self.status.configure(text='ready')
+                elif kind == 'thumb_ready':
+                    # a picture that was only a caption now has its thumbnail: repaint, once per burst
+                    self._thumb_repaint_soon()
                 elif kind == 'groups_error':
                     self._grouping = False
                     self.hint.configure(text='grouping failed: %s' % payload)
@@ -9004,6 +9187,9 @@ class App:
                     self._show_tile_progress(idx, total)
                     # each tile is already on disk: show it in the strip now, not when the whole sheet finishes
                     self.refresh_gallery()
+                    # and give it a thumbnail on disk, or its tile can only draw its caption until something else
+                    # happens to build one
+                    self._warm_one(path)
                 elif kind == 'image':
                     raw, path = payload
                     if self._preview:
@@ -9022,6 +9208,7 @@ class App:
                     # measured, the file appeared at 9.2 s, its thumbnail and PhotoImage were cached, and no tile widget
                     # existed for it. The refresh is the same debounced path the per-tile event uses.
                     self._idle(self.refresh_gallery)
+                    self._warm_one(path)          # so its tile is a picture, not a caption, on the first paint
                     self._regroup_soon()          # a new picture changes the folders: re-group off the event loop
                     meta = read_meta(path)
                     if meta and meta.get('tiles'):
