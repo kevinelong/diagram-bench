@@ -205,6 +205,10 @@ def main():
             break
         app._poll(); root.update(); time.sleep(0.05)
     real_groups2 = list(app._plan['groups']) if app._plan else []
+    # Reported 2026-10-31: turning folders on eventually showed folders but opened none of them, so the pane said
+    # "No folder open" and the reader had to guess a tile. The first plan opens one by itself, once.
+    check('a folder is already open on the first plan, so the pane is not empty',
+          app._active_folder is not None, str(app._active_folder))
     if real_groups2:
         if getattr(app, '_regroup_job', None):
             app.root.after_cancel(app._regroup_job)
@@ -1252,6 +1256,15 @@ def main():
     app.sort_var.set('Wins'); app._render_contents(); root.update()
     check('Wins puts the winner first in the pane', Path(app._content_order[0]) == victim,
           str(app._content_order[0].name))
+    # Reported 2026-10-31: "initial order seems almost random not date or alpha or ranked". Fitted strength had no
+    # tie-break for pictures that never faced a bout, so a fresh folder's order was whatever the fitting returned.
+    # Wins is now one key everywhere: wins, losses, then created, then name. This fixture's rows carry no `created`,
+    # so the tie-break lands on the name - the point is that it is a rule and not an accident, so the expectation is
+    # computed the same way rather than guessed.
+    expect = [victim] + sorted((p for p in made if p != victim), key=lambda p: p.name)
+    check('and equal ranks are broken by a stated rule, not by the fitting',
+          [Path(p) for p in app._content_order] == expect,
+          str([Path(p).name for p in app._content_order]))
 
     # finishing a review switches the order on, and drops the cached ranks
     import pair_review

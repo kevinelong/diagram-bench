@@ -3489,6 +3489,14 @@ class App:
             self._regroup_job = self.root.after(600, self._regroup_now)
             return
         self._grouping = True
+        # Say it now. Grouping 1427 pictures takes 5.1 s measured (p90 prompt is 911 words), and until this line the
+        # column went on saying "No folder open" for the whole of it - which reads as a broken start rather than a busy
+        # one (reported 2026-10-31, with a screenshot of exactly that state).
+        try:
+            self._loading_show()
+            self._render_folder_bar()
+        except Exception:
+            pass
         threading.Thread(target=self._compute_groups, daemon=True).start()
 
     def _folders_clicked(self):
@@ -3565,10 +3573,24 @@ class App:
             # belongs to, and scroll to it. The picture itself if it is a member, otherwise the folder its prompt would
             # join - the same rule as the pre-render prediction.
             target = Path(self.selected[-1]) if self.selected else (self._current or None)
-            index = self._folder_holding(target, plan)
+            # No target means nothing to look for. `_folder_holding(None)` answered 0, which is the synthetic
+            # Recent tile once `_compute_groups` has prepended it - so a cold start opened the bucket of new
+            # arrivals instead of a family, and the pane's order inside it looked arbitrary (reported 2026-10-31).
+            index = self._folder_holding(target, plan) if target is not None else None
             if index is not None:
                 self._active_folder = index
                 self._see_folder(index)
+        # Open something on the first plan. A folders view whose pane says "No folder open" is a view with nothing in
+        # it, and the reader has to guess which of 53 tiles to click (reported 2026-10-31: "no default initial open
+        # folder"). The first real family is the one worth opening - the Recent bucket is a synthetic tile of pictures
+        # that belong to no family yet, so it is only the fallback. Once only: after this, an empty pane means the
+        # reader closed it, and a re-group must not open a folder behind their back.
+        if (self._active_folder is None and plan.get('groups')
+                and not getattr(self, '_opened_default_folder', False)):
+            self._opened_default_folder = True
+            pick = next((i for i, g in enumerate(plan['groups']) if not g.get('synthetic')), 0)
+            self._active_folder = pick
+            self._see_folder(pick)
         self._render_folder_bar()
         self.refresh_gallery()
         # The plan just changed underneath an open folder, and the pane is drawn by `_render_contents`, which only
@@ -3693,7 +3715,9 @@ class App:
             w.destroy()
         if self._grouping:
             self._loading_show()
-            ttk.Label(self.folder_bar, text='grouping prompts\u2026', foreground=self.theme.muted).pack(side='left')
+            ttk.Label(self.folder_bar, text='grouping %d picture%s\u2026' % (len(self._files),
+                      '' if len(self._files) == 1 else 's'),
+                      foreground=self.theme.muted).pack(side='left')
             return
         self._loading_hide()
         if not self._plan:
@@ -5075,6 +5099,15 @@ class App:
         # three per row is the floor the screen asks for; wider pane, more columns, bigger tiles either way. The same
         # function runs in `_on_contents_resize`, so a resize reflows instead of laying columns out past the edge.
         cols, tile_px = self._contents_metrics(width)
+        # A page that fills the pane, before anything is scrolled. `_maybe_more` only fires at the bottom of the list
+        # and the fill loop stops as soon as the grid is as tall as the view, so a 305-picture folder opened with one
+        # batch in the corner and a screenful of blank space under it - "shows just a handful even though it has room
+        # for many" (reported 2026-10-31). max() so a later render never shrinks what is already on screen.
+        try:
+            rows_fit = int(self.contents_canvas.winfo_height() // max(1, tile_px)) + 1
+            self._content_shown = max(self._content_shown, cols * rows_fit)
+        except Exception:
+            pass
         items = list(group['items'])
         # Live view: the newest pictures are outside every folder by design, so a render made while this folder is open
         # would otherwise never appear in it. `live_append` answers "what else would this folder accept?" from the same
@@ -5112,11 +5145,15 @@ class App:
         self.contents_title.configure(text=caption, wraplength=max(200, width - 6))
         if self._sort_wins():
             try:
-                import pair_rank
-                # fitted strength, not raw wins: a win over a strong picture outweighs one over a picture that always loses
-                order = pair_rank.sort_by_strength([r['path'] for r in items])
-                pos = {p: i for i, p in enumerate(order)}
-                items.sort(key=lambda r: pos.get(r['path'], len(items)))
+                # Wins desc, losses asc, then newest, then name - the same key the flat list uses. This used to be
+                # pair_rank's fitted strength, which is the better order when bouts exist but has no tie-break at
+                # all for pictures that never faced one, so the first order of a fresh folder read as random
+                # (reported 2026-10-31). One ordering everywhere is also the reason a tile's best matches the pane's
+                # first picture.
+                def win_key(r):
+                    rec = self._record_of(Path(r['path']))
+                    return (-rec['wins'], rec['losses'], r.get('created') or '', r['path'])
+                items.sort(key=win_key)
             except Exception as exc:
                 # A rank that cannot be computed must not empty the pane. Reported 2026-10-31 as a pass where the folder
                 # list worked and the pictures did not; this is the one path that could produce exactly that, so it now
@@ -5589,6 +5626,13 @@ class App:
         """Is the laid-out list already at least as tall as its viewport?"""
         try:
             canvas = self.gal_canvas if which == 'strip' else self.contents_canvas
+            if which != 'strip':
+                # the pane's tiles, not the canvas window item: bbox('all') is the frame the tiles are gridded in, and
+                # its height is the frame's, so the guard could call a half-empty pane "already full"
+                kids = [w for w in self.contents.winfo_children() if w.winfo_ismapped()]
+                if not kids:
+                    return False
+                return max(w.winfo_y() + w.winfo_height() for w in kids) >= canvas.winfo_height() - 4
             box = canvas.bbox('all')
             if not box:
                 return False
