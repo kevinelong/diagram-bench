@@ -278,9 +278,11 @@ def main():
     check('turning folders off shows the pictures again', not app._folders_view_active())
 
     print('\n-- gallery contents')
-    check('gallery shows 18 of 26 files', len(app._tile_widgets) == 18, str(len(app._tile_widgets)))
+    check('gallery shows %d of 26 files' % zui.RECENT_N, len(app._tile_widgets) == zui.RECENT_N,
+          str(len(app._tile_widgets)))
     check('all 26 known to the app', len(app._files) == 26, str(len(app._files)))
-    check('title reports the cap', app.gal_title['text'] == 'Recent (18 of 26)', app.gal_title['text'])
+    check('title reports the cap', app.gal_title['text'] == 'Recent (%d of 26)' % zui.RECENT_N,
+          app.gal_title['text'])
     check('strip scrolls when it overflows', app.gal_canvas.bbox('all')[3] > 0,
           str(app.gal_canvas.bbox('all')))
     newest = app._files[0]
@@ -339,7 +341,8 @@ def main():
 
     print('\n-- select all toggles, Esc clears')
     app.select_all()
-    check('select all takes the whole strip (18)', len(app.selected) == 18, str(len(app.selected)))
+    check('select all takes the whole strip (%d)' % zui.RECENT_N, len(app.selected) == zui.RECENT_N,
+          str(len(app.selected)))
     shot(root, '05-select-all')
     app.select_all()
     check('pressing it again clears', app.selected == [])
@@ -680,7 +683,8 @@ def main():
     app._set_base(long_png); root.update(); root.update_idletasks()
     check('a long base name does not shrink the picture', app.canvas.winfo_width() >= wide - 4,
           '%d -> %d px' % (wide, app.canvas.winfo_width()))
-    check('the banner width is capped', app.banner.winfo_reqwidth() <= 460, str(app.banner.winfo_reqwidth()))
+    check('the banner width is capped by the column it is in', app.banner.winfo_reqwidth() <= app._prompt_w,
+          '%d vs %d' % (app.banner.winfo_reqwidth(), app._prompt_w))
     check('the banner elides the name', '\u2026' in app.banner['text'], app.banner['text'])
     app.clear_base()
     long_png.unlink(); long_png.with_suffix('.json').unlink(missing_ok=True)
@@ -2560,7 +2564,9 @@ def main():
         check('the extra ones are the live view, not members',
               len(shown - members) <= app._content_shown, (len(members), len(shown)))
         app.select_folder(None); root.update()
-        check('choosing no folder hides the pane', app.contents_holder.winfo_manager() == '')
+        check('choosing no folder leaves the pane open and empty (2026-10-30: it is a column, not a view)',
+              app.contents_holder.winfo_manager() == 'grid' and app._pane_empty,
+              (app.contents_holder.winfo_manager(), app._pane_empty))
         check('the folder list is still there', len(app.recent.winfo_children()) == before)
 
     print('\n-- the open-folder pane is three pictures wide and fills what it is given')
@@ -3240,7 +3246,9 @@ def main():
         check('and says how many pictures are in it', str(len(grp['items'])) in caption, caption)
         check('it is not a blank or empty label', len(caption) > 10, repr(caption))
         app.select_folder(None); root.update()
-        check('no folder open means no header', not app.contents_holder.winfo_ismapped())
+        check('no folder open says so in the pane header, and the pane stays on screen',
+              app.contents_holder.winfo_ismapped() and app.contents_title.cget('text') == 'folder',
+              (app.contents_holder.winfo_ismapped(), app.contents_title.cget('text')))
 
     print("\n-- a folder is read newest-first (2026-10-28)")
     if app._plan and app._plan['groups']:

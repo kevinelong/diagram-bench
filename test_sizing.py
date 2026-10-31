@@ -1,14 +1,17 @@
 #!/usr/bin/env python
-"""test_sizing.py - the four defects of 2026-10-30, measured rather than eyeballed.
+"""test_sizing.py - the sizing and layout work of 2026-10-30, measured rather than eyeballed.
 
     python test_sizing.py
 
-Covers `docs/BUGS-20261030-tile-size.md`:
+Covers `docs/BUGS-20261030-tile-size.md` and the two follow-ups of the same day:
 
-* B1 - the strip's tile is the size at which four across and three down fit its canvas, twelve visible;
+* B1 - the strip's tile is the size at which three across and three down fit its canvas, nine visible;
 * B2 - the finish screen is the same 4x3 grid, larger than a strip tile, and scrolls rather than truncating;
 * B3 - the open-folder pane reserves its scrollbar and reflows instead of drawing past its edge;
-* B4 - `Wins` and `Sequence` actually order the lists.
+* B4 - `Wins` and `Sequence` actually order the lists;
+* the layout - four adjacent columns with a sash between every pair, an even first split, each boundary dragged
+  independently, remembered and re-clamped, and the folder pane never collapsed (so a redraw cannot re-lay anything);
+* the folder grid - three tiles per row rather than two, and every tile size derived from the column it is in.
 
 It builds its own window and its own gallery under `tempfile.mkdtemp`, so nothing touches a real gallery or profile.
 """
@@ -110,8 +113,28 @@ def bottom_edge(widgets):
 
 
 def strip_rows(widgets):
-    """The first `REVIEW_FINISH_ROWS` rows of the strip: the twelve it promises before it scrolls."""
+    """The first `STRIP_FIT_ROWS` rows of the strip: the nine it promises before it scrolls."""
     return [w for w in widgets if int(w.grid_info()['row']) < zui.STRIP_FIT_ROWS]
+
+
+def drag(app, sash, dx, steps=8):
+    """Drag a boundary through its own handlers: the press, the motion, the release, in that order.
+
+    Tk's synthetic pointer events are fine for one drag but not for a second one on another sash in the same run - the
+    motions are dropped once a grab has been handed between windows (measured: only the press arrived) - so the tests
+    that assert arithmetic drive the handlers the bindings are wired to, and one event-driven drag below proves the
+    bindings are wired at all.
+    """
+    x = sash.winfo_rootx() + sash.winfo_width() // 2
+    sash._press(NS(x_root=x, state=0))
+    for i in range(steps):
+        sash._motion(NS(x_root=x + int(dx * (i + 1) / steps), state=0))
+    sash._release(NS(x_root=x + dx, state=0))
+
+
+def column_widths(app):
+    """(strip, pane, prompt, picture) as the app has them, in content pixels."""
+    return (app._strip_w, app._contents_w, app._prompt_w, app._layout_widths()[zui.COL_PICTURE])
 
 
 def main():
@@ -128,15 +151,256 @@ def main():
     app.toggle_groups(False)          # the picture strip, not the folder list
     pump(root, app, 0.6)
 
+    # ---- the layout: N columns, a sash between each pair, an even first split, the pane never collapsed
+    print('\n-- layout: four adjacent columns with a sash between every pair')
+    # Enumerated from the grid rather than assumed: the strip and the open-folder pane share the gallery column, and the
+    # gallery, prompt and picture columns are the root's 0/2/4. The folded sidebar's rail replaces the gallery column,
+    # it is not a fifth one.
+    check('the layout has four columns', zui.COLUMNS == ('strip', 'pane', 'prompt', 'picture'), zui.COLUMNS)
+    managers = [(app.contents_sash, 'grid'), (app.gallery_sash, 'grid'), (app.prompt_sash, 'grid')]
+    check('and a sash at every boundary between them', all(s.winfo_manager() == m for s, m in managers),
+          [(s.name, s.winfo_manager()) for s, _ in managers])
+    check('each sash sits between the two columns it separates', (
+        app.gal_canvas.winfo_rootx() + app.gal_canvas.winfo_width() <= app.contents_sash.winfo_rootx()
+        and app.contents_sash.winfo_rootx() + app.contents_sash.winfo_width() <= app.contents_canvas.winfo_rootx()
+        and app.gal.winfo_rootx() + app.gal.winfo_width() <= app.gallery_sash.winfo_rootx()
+        and app.gallery_sash.winfo_rootx() + app.gallery_sash.winfo_width() <= app.text.master.winfo_rootx()
+        and app.text.master.winfo_rootx() + app.text.master.winfo_width() <= app.prompt_sash.winfo_rootx()
+        and app.prompt_sash.winfo_rootx() + app.prompt_sash.winfo_width() <= app.canvas.master.winfo_rootx()),
+        [(s.name, s.winfo_rootx(), s.winfo_width()) for s in app.sashes])
+    for s in app.sashes:
+        check('%s: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip' % s.name,
+              6 <= s.winfo_width() <= 8 and s.cget('cursor') == 'sb_h_double_arrow' and bool(s.cget('takefocus'))
+              and int(s.cget('highlightthickness')) > 0
+              and str(s.cget('highlightcolor')) == app.theme.accent
+              and s.grip.winfo_width() == 2 and str(s.grip.cget('background')) == app.theme.border,
+              (s.winfo_width(), s.cget('cursor'), s.cget('takefocus'), s.grip.winfo_width()))
+
+    # the split is even, subject to each column's own floor, and the leftover pixels go to the left on purpose
+    content = app._content_w()
+    floors = [app._column_floors()[c] for c in zui.COLUMNS]
+    check('split_evenly divides evenly where no floor binds',
+          zui.split_evenly(2400, floors) == [600, 600, 600, 600], zui.split_evenly(2400, floors))
+    check('and gives the odd pixels to the leftmost column, deterministically',
+          zui.split_evenly(2402, floors) == [601, 601, 600, 600]
+          and zui.split_evenly(2402, floors) == zui.split_evenly(2402, floors),
+          zui.split_evenly(2402, floors))
+    check('a column whose floor the share would breach takes the floor instead',
+          zui.split_evenly(1600, [524, 180, 526, 240]) == [524, 275, 526, 275],
+          zui.split_evenly(1600, [524, 180, 526, 240]))
+    live = column_widths(app)
+    check('the live split is the even split, floor by floor', live == tuple(app._even_widths()[c] for c in zui.COLUMNS),
+          (live, app._even_widths(), content))
+    check('no column is below its stated minimum',
+          all(live[i] >= floors[i] for i in range(4)), (live, floors))
+    check('and the four columns plus their chrome are exactly the window',
+          sum(live) + app._layout_chrome() == root.winfo_width(),
+          (sum(live), app._layout_chrome(), root.winfo_width()))
+    check('the root grid carries the same numbers as the columns plus their padding',
+          [int(root.grid_columnconfigure(i)['minsize']) for i in (0, 2, 4)]
+          == [app._gallery_col_w(), app._prompt_w + zui.PROMPT_PAD, live[3] + zui.PICTURE_PAD],
+          [int(root.grid_columnconfigure(i)['minsize']) for i in (0, 2, 4)])
+    check('every column has a floor that is stated and fits the window',
+          app._layout_min_w() <= root.winfo_width(), (app._layout_min_w(), root.winfo_width()))
+    check('the window refuses to be narrower than that minimum',
+          root.minsize()[0] >= min(app._layout_min_w(), root.winfo_screenwidth() - 80),
+          (root.minsize(), app._layout_min_w()))
+
+    # at a known window width: shares that no floor or cap binds are equal, and the odd pixel is on the left
+    real_root_w = app._root_w
+    app._root_w = lambda width=None: 2560
+    try:
+        even_2560 = app._even_widths()
+        wide = app._layout_widths(2560)
+    finally:
+        app._root_w = real_root_w
+    free_w = [v for c, v in even_2560.items() if c != zui.COL_PANE]
+    check('at a 2560 px window the columns that are not at a cap are equal to within one pixel',
+          max(free_w) - min(free_w) <= 1, even_2560)
+    check('and the pane is the one at its own cap, which is stated rather than accidental',
+          even_2560[zui.COL_PANE] == zui.CONTENTS_W_MAX, (even_2560, zui.CONTENTS_W_MAX))
+    check('the four columns are the content width in four, with the leftover on the left',
+          sum(even_2560.values()) == 2560 - app._layout_chrome(), (even_2560, app._layout_chrome()))
+    tile_2560 = (wide[zui.COL_STRIP] - app._bar_px(app.gal_bar)) // zui.STRIP_FIT_COLS - zui.TILE_CHROME
+    check('and the strip is then wide enough for a 152 px tile', wide[zui.COL_STRIP] == even_2560[zui.COL_STRIP]
+          and tile_2560 == 152, (wide[zui.COL_STRIP], tile_2560))
+
+    # each boundary drags independently: 1:1, its own pair only, remembered on release
+    print('\n-- layout: each boundary drags 1:1 and moves only its own pair')
+    start = column_widths(app)
+    drag(app, app.contents_sash, 40)
+    pump(root, app, 0.6)
+    moved = column_widths(app)
+    check('the strip|pane sash widens the strip by the drag and narrows the pane by it',
+          moved[0] == start[0] + 40 and moved[1] == start[1] - 40, (start, moved))
+    check('and leaves the prompt and the picture exactly where they were', moved[2:] == start[2:], (start, moved))
+    drag(app, app.gallery_sash, -50)
+    pump(root, app, 0.6)
+    gallery = column_widths(app)
+    check('the gallery|prompt sash grows the prompt by the drag', gallery[2] == moved[2] + 50, (moved, gallery))
+    check('and takes it from the gallery column, pane first', gallery[0] + gallery[1] == moved[0] + moved[1] - 50,
+          (moved, gallery))
+    check('while the picture column does not move', gallery[3] == moved[3], (moved, gallery))
+    drag(app, app.prompt_sash, 30)
+    pump(root, app, 0.6)
+    prompt = column_widths(app)
+    check('the prompt|picture sash grows the prompt by the drag and shrinks the picture by it',
+          prompt[2] == gallery[2] + 30 and prompt[3] == gallery[3] - 30, (gallery, prompt))
+    check('and the two on its left do not move', prompt[:2] == gallery[:2], (gallery, prompt))
+
+    # clamps at both ends, keys and defaults
+    print('\n-- layout: every boundary clamps at both ends, and Home/End/keys/double-click obey')
+    drag(app, app.contents_sash, 10 ** 4)
+    pump(root, app, 0.5)
+    check('strip|pane stops with the pane at its stated minimum',
+          app._contents_w == zui.CONTENTS_W_MIN, (app._contents_w, zui.CONTENTS_W_MIN))
+    check('and the strip is exactly the rest of the gallery column',
+          app._strip_w + app._contents_w == app._gallery_col_w() - (zui.SASH_W + zui.PANE_PAD + zui.GAL_PAD
+                                                                    + app._bar_px(app.contents_bar)),
+          (app._strip_w, app._contents_w, app._gallery_col_w()))
+    drag(app, app.contents_sash, -10 ** 4)
+    pump(root, app, 0.5)
+    check('the other end is the pane\'s widest, which never takes the strip below its floor',
+          app._contents_w == app._contents_w_limit() and app._strip_w >= zui.GAL_FLOOR_W,
+          (app._contents_w, app._contents_w_limit(), app._strip_w))
+    app._sash_jump('strip', 'max')                  # End: the pane to its narrowest, so the keys have room to move
+    pump(root, app, 0.3)
+    was = app._contents_w
+    app._sash_step('strip', 1, False)               # Left: the strip shrinks, the pane grows 16
+    pump(root, app, 0.3)
+    left = app._contents_w
+    app._sash_step('strip', -1, False)              # Right: 16 back
+    pump(root, app, 0.3)
+    check('Left/Right move the strip|pane boundary 16 px each way', (was, left, app._contents_w)
+          == (zui.CONTENTS_W_MIN, zui.CONTENTS_W_MIN + 16, zui.CONTENTS_W_MIN), (was, left, app._contents_w))
+    check('and a key press persists at once, with no release to wait for',
+          zui.load_settings().get('contents_w') == app._contents_w,
+          (zui.load_settings().get('contents_w'), app._contents_w))
+    app._sash_step('strip', 1, True)                # Shift+Left: 64
+    pump(root, app, 0.3)
+    check('Shift moves it 64, or to the end of its range when that is nearer',
+          app._contents_w == min(app._contents_w_limit(), zui.CONTENTS_W_MIN + 64),
+          (app._contents_w, min(app._contents_w_limit(), zui.CONTENTS_W_MIN + 64)))
+    drag(app, app.gallery_sash, 10 ** 4)
+    pump(root, app, 0.5)
+    check('gallery|prompt stops at the prompt\'s own measured floor',
+          app._prompt_w == app._prompt_floor(), (app._prompt_w, app._prompt_floor()))
+    check('which is what its control rows need, so nothing in it is clipped',
+          app.text.master.winfo_width() >= app._prompt_floor(), (app.text.master.winfo_width(), app._prompt_floor()))
+    drag(app, app.gallery_sash, -10 ** 4)
+    pump(root, app, 0.5)
+    strip_floor = app._column_floors()[zui.COL_STRIP]
+    check('and at the other end the gallery column is its two floors and the prompt has the rest',
+          app._contents_w == zui.CONTENTS_W_MIN and app._strip_w == strip_floor
+          and app._prompt_w > app._prompt_floor(),
+          (app._contents_w, app._strip_w, strip_floor, app._prompt_w, app._prompt_floor()))
+    drag(app, app.prompt_sash, 10 ** 4)
+    pump(root, app, 0.5)
+    check('prompt|picture stops at the picture\'s floor',
+          app._layout_widths()[zui.COL_PICTURE] >= zui.PICTURE_MIN_W, app._layout_widths())
+    app._sash_default('gallery')
+    pump(root, app, 0.5)
+    check('a double-click puts that boundary back to the window\'s even split',
+          app._strip_w == app._even_widths()[zui.COL_STRIP], (app._strip_w, app._even_widths()))
+    saved = zui.load_settings()
+    check('every boundary writes its width to the settings file',
+          all(isinstance(saved.get(k), int) for k in zui.LAYOUT_KEYS),
+          {k: saved.get(k) for k in zui.LAYOUT_KEYS})
+
+    # restoring: what a start reads out of that file, and what it does with a window that no longer fits
+    reread = zui.load_settings()
+    check('a fresh start reads the same three boundaries back',
+          tuple(zui._px_setting(reread, k) for k in zui.LAYOUT_KEYS)
+          == (app._strip_w, app._contents_w, app._prompt_w),
+          ([zui._px_setting(reread, k) for k in zui.LAYOUT_KEYS],
+           (app._strip_w, app._contents_w, app._prompt_w)))
+    check('so a window that opens on that file starts with a layout the reader set',
+          all(zui._px_setting(reread, k) for k in zui.LAYOUT_KEYS),
+          {k: zui._px_setting(reread, k) for k in zui.LAYOUT_KEYS})
+    remembered = column_widths(app)
+    clamped = app._layout_widths(1200)            # a window far narrower than the layout: re-clamped, not overflowed
+    check('and a narrower window re-clamps them instead of overflowing',
+          sum(clamped.values()) <= app._content_w(1200), (clamped, app._content_w(1200)))
+    check('taking the difference out of the strip first, which is the column that reflows',
+          clamped[zui.COL_STRIP] <= remembered[0] and clamped[zui.COL_PANE] == remembered[1]
+          and clamped[zui.COL_PROMPT] == remembered[2], (remembered, clamped))
+    # a profile that never had a boundary dragged opens on the even split instead, whatever it was left at
+    app._layout_user = False
+    app._apply_layout()
+    pump(root, app, 0.5)
+    check('an untouched profile opens on the even split, not on the last window\'s widths',
+          column_widths(app) == tuple(app._even_widths()[c] for c in zui.COLUMNS),
+          (column_widths(app), app._even_widths()))
+
+    # the pane is present with no folder open, and no redraw changes its width (idempotence, like L1)
+    print('\n-- layout: the folder pane is never collapsed, so no redraw re-lays anything')
+    app._layout_user = False
+    app._apply_layout()
+    pump(root, app, 0.6)
+    at_start = column_widths(app)
+    check('with no folder open the pane is still gridded', app.contents_holder.winfo_manager() == 'grid',
+          app.contents_holder.winfo_manager())
+    check('and holds its empty state rather than nothing', app._pane_empty
+          and len(app.contents.winfo_children()) == 1,
+          (app._pane_empty, len(app.contents.winfo_children())))
+    for _ in range(3):
+        app.refresh_gallery()
+        pump(root, app, 0.5)
+        app._regroup_soon()
+        pump(root, app, 2.2)
+        for _ in range(40):
+            app._poll()
+            root.update()
+            time.sleep(0.03)
+        check('a refresh and a re-group leave the four columns exactly where they were',
+              column_widths(app) == at_start, (at_start, column_widths(app)))
+        check('and the pane is the same width it was', app.contents_canvas.winfo_width() == at_start[1],
+              (app.contents_canvas.winfo_width(), at_start[1]))
+
+    # a drag is a burst of re-layouts: count them, the way L2 counts the strip's
+    print('\n-- layout: a synthetic drag queues a bounded number of re-layouts')
+    counts = {'refresh': 0, 'tiles': 0, 'resize': 0, 'layout': 0}
+    real_refresh, real_tiles, real_resize = (zui.App.refresh_gallery, zui.App._render_folder_tiles,
+                                             zui.App._apply_strip_resize)
+    real_layout = zui.App._apply_layout
+
+    def count(name, real):
+        def wrapped(self, *a, **k):
+            counts[name] += 1
+            return real(self, *a, **k)
+        return wrapped
+
+    zui.App.refresh_gallery = count('refresh', real_refresh)
+    zui.App._render_folder_tiles = count('tiles', real_tiles)
+    zui.App._apply_strip_resize = count('resize', real_resize)
+    zui.App._apply_layout = count('layout', real_layout)
+    try:
+        drag(app, app.contents_sash, -120, steps=40)
+        pump(root, app, 1.2)
+        total = counts['refresh'] + counts['tiles']
+        check('a 40-step drag on one boundary re-lays the strip out at most twice', total <= 2, dict(counts))
+        check('and never re-renders the folder grid', counts['tiles'] <= 1, dict(counts))
+        check('the layout is applied once per motion plus once per commit - not once per pixel event',
+              counts['layout'] <= 41, dict(counts))
+    finally:
+        zui.App.refresh_gallery, zui.App._render_folder_tiles, zui.App._apply_strip_resize = (
+            real_refresh, real_tiles, real_resize)
+        zui.App._apply_layout = real_layout
+    app._layout_user = False
+    app._apply_layout()
+    pump(root, app, 0.6)
     # ---- B1: the strip is twelve pictures at four across, from the canvas it has
     print('\n-- B1: the strip fits 4 across x 3 down without clipping')
     canvas = app.gal_canvas
     cw, ch = canvas.winfo_width(), canvas.winfo_height()
     cols, tile = app._strip_metrics()
-    check('four columns', cols == zui.STRIP_FIT_COLS, (cols, cw))
+    check('four columns', cols == zui.STRIP_FIT_COLS == 4, (cols, cw))
     check('the tile is the width four of them fill', tile == cw // cols - zui.TILE_CHROME, (tile, cw))
-    check('at least the 160 px fit size', tile >= zui.STRIP_TILE_FIT, tile)
+    check('at least the 96 px never-shrink floor it is given - the even split leaves the strip exactly its floor',
+          tile >= zui.STRIP_TILE_MIN, tile)
     check('inside the 320 px cap', tile <= zui.STRIP_TILE_MAX, tile)
+    check('the height gives the three rows the same size, so neither dimension clips',
+          tile <= ch // zui.STRIP_FIT_ROWS - zui.TILE_CHROME, (tile, ch))
     shown = cells(app)
     twelve = strip_rows(shown)[:zui.STRIP_FIT_COLS * zui.STRIP_FIT_ROWS]
     check('twelve tiles are laid out', len(twelve) >= 12, (len(shown), len(twelve)))
@@ -152,7 +416,7 @@ def main():
     # a narrower canvas must give up a column rather than clip the last one
     print('\n-- B1: a narrow canvas gives up a column, not the edge of the last one')
     root.state('normal')
-    root.geometry('1100x700+20+20')     # below the 1200 px minimum, so the window clamps to it
+    root.geometry('1100x700+20+20')     # below the window's own minimum, so the window clamps to it
     pump(root, app, 0.9)
     cw2 = canvas.winfo_width()
     cols2, tile2 = app._strip_metrics()
@@ -161,8 +425,8 @@ def main():
           (cols2, tile2, cw2))
     check('and the tiles it laid out agree', right_edge(narrow) <= cw2, (right_edge(narrow), cw2))
     check('a narrow column never goes below the 96 px floor', tile2 >= zui.STRIP_TILE_MIN, tile2)
-    check('the smallest window still shows twelve pictures',
-          len([w for w in narrow if int(w.grid_info()['row']) < zui.STRIP_FIT_COLS]) >= 12,
+    check('the smallest window still shows nine pictures',
+          len([w for w in narrow if int(w.grid_info()['row']) < zui.STRIP_FIT_ROWS]) >= 9,
           (len(narrow), cw2))
     root.state('zoomed')
     pump(root, app, 0.9)
@@ -190,9 +454,11 @@ def main():
     check('the scrollbar is a real width, queried from the widget',
           zui.App._bar_px(bar) == bar.winfo_reqwidth() and zui.App._bar_px(bar) > 8,
           zui.App._bar_px(bar))
-    check('and the canvas asks for it on top of CONTENTS_W',
-          pane.winfo_reqwidth() >= zui.CONTENTS_W + zui.App._bar_px(bar),
-          (pane.winfo_reqwidth(), zui.CONTENTS_W, zui.App._bar_px(bar)))
+    check('the canvas is exactly the width the sash promised it, so the pictures keep their column',
+          pane.winfo_width() == app._contents_w, (pane.winfo_width(), app._contents_w))
+    check('and the bar has its own column beside it rather than a slice of the canvas',
+          bar.winfo_width() >= 8 and bar.winfo_rootx() >= pane.winfo_rootx() + pane.winfo_width(),
+          (bar.winfo_width(), bar.winfo_rootx(), pane.winfo_rootx() + pane.winfo_width()))
     # a pane narrowed by the window must re-lay out, not leave its last column outside the canvas
     root.geometry('1300x760+20+20')
     pump(root, app, 1.0)
@@ -200,17 +466,23 @@ def main():
     check('a resized pane reflows inside its new width',
           right_edge(pane_cells) <= app.contents_canvas.winfo_width(),
           (right_edge(pane_cells), app.contents_canvas.winfo_width()))
-    # The pane is a fixed width now (the sash sets it), so "hands its column back" is measured where it happens: the
-    # column loses its width and the strip's canvas gains it.
+    # The pane is a column of the layout now (2026-10-30), not a view that comes and goes: opening nothing must leave
+    # it gridded, at the width it had, with its empty state inside it - the collapse and re-grow was one of the redraws
+    # the report was about, because the strip re-lays itself out when its width moves.
     open_canvas = app.gal_canvas.winfo_width()
     pane_w = app.contents_canvas.winfo_width()
     app.select_folder(None)
     pump(root, app, 0.6)
-    check('a hidden pane hands its column width back to the strip',
-          int(app.gal.grid_columnconfigure(2)['weight']) == 0
-          and int(app.gal.grid_columnconfigure(2)['minsize']) == 0
-          and app.gal_canvas.winfo_width() - open_canvas >= pane_w * 0.7,
-          (app.gal.grid_columnconfigure(2), open_canvas, app.gal_canvas.winfo_width(), pane_w))
+    check('closing the folder leaves the pane gridded, not collapsed',
+          app.contents_holder.winfo_manager() == 'grid' and app._pane_shown,
+          (app.contents_holder.winfo_manager(), app._pane_shown))
+    check('with its empty state in it, not a blank column',
+          app._pane_empty and len(app.contents.winfo_children()) == 1,
+          (app._pane_empty, len(app.contents.winfo_children())))
+    check('and the strip did not gain the width back, so it has nothing to re-lay out',
+          app.gal_canvas.winfo_width() == open_canvas
+          and app.contents_canvas.winfo_width() == pane_w,
+          (open_canvas, app.gal_canvas.winfo_width(), pane_w, app.contents_canvas.winfo_width()))
     root.state('zoomed')
     pump(root, app, 0.6)
 
@@ -404,46 +676,66 @@ def main():
         time.sleep(0.05)
     check('and so does the re-group that follows a render', laid_out() == settled, (laid_out(), settled))
     # the widths move: a pane that closes, and a window that narrows, must re-lay the tiles out - the "folders doubled
-    # in size and the right column is cut off" report was tiles composed at 337 px still sitting in a 343 px canvas
+    # in size and the right column is cut off" report was tiles composed at 337 px still sitting in a 343 px canvas.
+    # The pane no longer closes (2026-10-30), so the width that moves now is the one a sash moves.
     app.select_folder(None)
     pump(root, app, 1.0)
-    check('closing the pane re-lays the folder tiles out for the wider canvas', tiles_fit(),
+    check('closing the folder re-lays nothing, because no width moved', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
     app.select_folder(0)
     pump(root, app, 1.0)
-    check('and opening it again re-lays them out for the narrower one', tiles_fit(),
+    check('and opening it again re-lays nothing either', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    closed = (app.gal_canvas.winfo_width(), sorted(w.winfo_width() for w in app._folder_tiles()))
+    app.select_folder(None)
+    pump(root, app, 0.8)
+    app.select_folder(0)
+    pump(root, app, 0.8)
+    check('so the folder grid is the same grid after a click on nothing and a click back',
+          (app.gal_canvas.winfo_width(), sorted(w.winfo_width() for w in app._folder_tiles())) == closed,
+          (closed, app.gal_canvas.winfo_width(), sorted(w.winfo_width() for w in app._folder_tiles())))
     root.state('normal')
     root.geometry('1200x700+20+20')
     pump(root, app, 1.4)
-    check('a narrower window re-lays them out too', tiles_fit(),
+    check('a narrower window re-lays them out', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
     root.state('zoomed')
     pump(root, app, 1.4)
     check('and so does a wider one', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
+    width, fcols, sheet = app._folder_geom_now()
+    tiles = app._folder_tiles()
+    check('the folder grid is two across where the column can hold them',
+          fcols == 2, (fcols, width))
+    check('and the tiles on screen are laid out in that many columns',
+          len({int(w.grid_info()['column']) for w in tiles}) == min(2, len(tiles)),
+          [int(w.grid_info()['column']) for w in tiles])
+    check('a folder tile is composed for the canvas it is in', sheet <= width, (sheet, width))
+    check('which makes it smaller than the 337 px cell the old two-up grid produced here',
+          sheet < 337, sheet)
+    # the tiles follow the column: a sash drag re-lays the grid out from the canvas it ends at
+    app._set_contents_w(zui.CONTENTS_W_MIN, persist=False)
+    pump(root, app, 1.2)
+    narrow_w, narrow_cols, narrow_sheet = app._folder_geom_now()
+    narrow_tiles = app._folder_tiles()
+    check('a pane dragged narrower re-lays the folder grid out for the canvas it ends up with',
+          narrow_w != width and right_edge(narrow_tiles) <= app.gal_canvas.winfo_width() + 2,
+          (width, narrow_w, right_edge(narrow_tiles), app.gal_canvas.winfo_width()))
+    check('and the tiles it re-laid are the size that canvas says',
+          narrow_sheet == max(zui.STRIP_TILE_MIN, (narrow_w - 8 - 6 * narrow_cols) // narrow_cols)
+          and all(w.winfo_width() <= narrow_sheet + 10 for w in narrow_tiles),
+          (narrow_sheet, narrow_cols, narrow_w, sorted({w.winfo_width() for w in narrow_tiles})))
+    app._set_contents_w(300, persist=False)
+    pump(root, app, 0.8)
 
-    # ---- L2: the splitter between the folder pane and the strip
-    print('\n-- splitter: a sash with a hit area, clamps, keys and a remembered width')
+    # ---- L2: the same boundary through its *bindings*, which is what a real pointer drives
+    print('\n-- splitter: the bindings move the boundary, and a drag never re-lays the strip out')
     app.select_folder(0)
     pump(root, app, 1.0)
+    app._layout_user = False
+    app._apply_layout()
+    pump(root, app, 0.5)
     sash = app.contents_sash
-
-    def sash_press_release():
-        x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
-        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
-        root.update()
-
-    def sash_drag(dx, steps=8):
-        x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
-        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
-        root.update()
-        for i in range(steps):
-            sash.event_generate('<B1-Motion>', x=2, y=20, rootx=x + int(dx * (i + 1) / steps), rooty=y)
-            root.update()
-        sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x + dx, rooty=y)
-        root.update()
-
     check('the sash is grid-managed between the strip canvas and the pane canvas',
           sash.winfo_manager() == 'grid'
           and app.gal_canvas.winfo_rootx() + app.gal_canvas.winfo_width() <= sash.winfo_rootx()
@@ -456,6 +748,9 @@ def main():
           bool(sash.cget('takefocus')) and int(sash.cget('highlightthickness')) > 0
           and str(sash.cget('highlightcolor')) == app.theme.accent,
           (sash.cget('takefocus'), sash.cget('highlightthickness'), sash.cget('highlightcolor')))
+    # a focused sash wears the accent by design, so "at rest" means the keyboard is somewhere else
+    app.text.focus_set()
+    root.update()
     check('the grip is a 2 px line, quiet at rest',
           app.sash_grip.winfo_width() == 2 and str(app.sash_grip.cget('background')) == app.theme.border,
           (app.sash_grip.winfo_width(), app.sash_grip.cget('background')))
@@ -467,69 +762,27 @@ def main():
     check('hovering tints it and leaving puts it back',
           hovered == app.theme.accent and str(app.sash_grip.cget('background')) == app.theme.border,
           (hovered, app.sash_grip.cget('background')))
-
-    app._set_contents_w(300)
-    pump(root, app, 0.5)
+    # one event-driven drag: the arithmetic below is driven through the handlers, so this is what proves the widget is
+    # wired to them (a second synthetic drag in the same run loses its motions to a grab handover - measured)
     pane_before = app.contents_canvas.winfo_width()
-    sash_drag(40, steps=8)                                  # to the right: the pane narrows
+    x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
+    sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
+    root.update()
+    sash.event_generate('<B1-Motion>', x=2, y=20, rootx=x + 40, rooty=y)
+    root.update()
+    check('a press and a motion through the binding move the boundary 1:1',
+          app._contents_w == app._even_widths()[zui.COL_PANE] - 40, app._contents_w)
+    sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x + 40, rooty=y)
     pump(root, app, 0.9)
-    check('a drag moves the boundary', app._contents_w == 260, app._contents_w)
-    check('the pane canvas follows the drag',
+    check('and the pane canvas follows it',
           abs(app.contents_canvas.winfo_width() - (pane_before - 40)) <= 3,
           (app.contents_canvas.winfo_width(), pane_before))
-    check('and the width is written to the settings file',
-          zui.load_settings().get('contents_w') == 260, zui.load_settings().get('contents_w'))
-    sash_drag(600, steps=12)                                # past the narrow end
-    pump(root, app, 0.9)
-    check('dragging past the narrow end stops at 180 px',
-          app._contents_w == zui.CONTENTS_W_MIN
-          and app.contents_canvas.winfo_width() >= zui.CONTENTS_W_MIN,
-          (app._contents_w, app.contents_canvas.winfo_width()))
-    sash_drag(-600, steps=12)                               # past the wide end
-    pump(root, app, 0.9)
-    limit = app._contents_w_limit()
-    cols, tile = app._strip_metrics()
-    canvas_w = app.gal_canvas.winfo_width()
-    check('dragging past the wide end stops at what this window can pay for',
-          app._contents_w == limit and zui.CONTENTS_W_MIN < limit <= zui.CONTENTS_W_MAX,
-          (app._contents_w, limit))
-    check('four strip columns survive at the 96 px never-shrink floor',
-          cols == zui.STRIP_FIT_COLS and tile >= zui.STRIP_TILE_MIN, (cols, tile, canvas_w))
-    check('and the four of them still fit the canvas the pane left',
-          cols * (tile + zui.TILE_CHROME) <= canvas_w, (cols * (tile + zui.TILE_CHROME), canvas_w))
-    x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
-    for _ in range(2):
-        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
-        root.update()
-        sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x, rooty=y)
-        root.update()
-    pump(root, app, 0.6)
-    check('a double-click restores 300 px', app._contents_w == zui.CONTENTS_W, app._contents_w)
-
-    app._set_contents_w(200, persist=True)
-    pump(root, app, 0.4)
-    sash.focus_set()
-    root.update()
-    sash.event_generate('<Left>')
-    root.update()
-    check('Left moves the boundary 16 px', app._contents_w == 216, app._contents_w)
-    sash.event_generate('<Right>')
-    root.update()
-    check('Right moves it back 16', app._contents_w == 200, app._contents_w)
-    sash.event_generate('<Shift-Left>')
-    root.update()
-    check('Shift+Left moves it 64', app._contents_w == 264, app._contents_w)
-    sash.event_generate('<Shift-Right>')
-    root.update()
-    check('Shift+Right moves it back 64', app._contents_w == 200, app._contents_w)
-    sash.event_generate('<Home>')
-    pump(root, app, 0.4)
-    check('Home goes to the narrow end', app._contents_w == zui.CONTENTS_W_MIN, app._contents_w)
-    sash.event_generate('<End>')
-    pump(root, app, 0.4)
-    check('End goes to the wide end', app._contents_w == app._contents_w_limit(), app._contents_w)
-
-    # no flicker: a drag is a burst of <Configure> events and the 50 ms debounce has to absorb it
+    check('with the width written to the settings file on the release',
+          zui.load_settings().get('contents_w') == app._contents_w,
+          (zui.load_settings().get('contents_w'), app._contents_w))
+    check('the strip keeps its full row of columns at the narrow end of the pane',
+          app._strip_metrics()[0] == zui.STRIP_FIT_COLS, app._strip_metrics())
+    # a drag is a burst of <Configure> events: count what it queues
     counts = {'refresh': 0, 'tiles': 0, 'resize': 0}
     real_refresh, real_tiles, real_resize = (zui.App.refresh_gallery, zui.App._render_folder_tiles,
                                              zui.App._apply_strip_resize)
@@ -549,10 +802,7 @@ def main():
     zui.App.refresh_gallery, zui.App._render_folder_tiles, zui.App._apply_strip_resize = (
         count_refresh, count_tiles, count_resize)
     try:
-        app._set_contents_w(300)
-        pump(root, app, 0.6)
-        counts.update(refresh=0, tiles=0, resize=0)
-        sash_drag(-40, steps=40)
+        drag(app, app.contents_sash, -40, steps=40)
         pump(root, app, 1.4)
         total = counts['refresh'] + counts['tiles']
         check('a 40-step drag queues a bounded number of rebuilds', total <= 4, dict(counts))
@@ -562,26 +812,11 @@ def main():
     finally:
         zui.App.refresh_gallery, zui.App._render_folder_tiles, zui.App._apply_strip_resize = (
             real_refresh, real_tiles, real_resize)
-
-    app._set_contents_w(250, persist=True)
+    app.select_folder(None)
+    pump(root, app, 0.6)
+    app._layout_user = False
+    app._apply_layout()
     pump(root, app, 0.5)
-    check('the width survives a full persist',
-          zui.load_settings().get('contents_w') == 250, zui.load_settings().get('contents_w'))
-    root10 = tk.Tk()
-    app10 = zui.App(root10, Stub(), args)
-    # only this window's geometry is under test: a second root must not paint (Tkinter's default root is the *first*
-    # one, so a folder sheet built here would be an image the second interpreter cannot resolve)
-    app10._closing = True
-    root10.update()
-    check('a new window opens at the width the last one was left at',
-          app10._contents_w == 250, app10._contents_w)
-    check('and its pane asks for it on top of its scrollbar',
-          app10.contents_canvas.winfo_reqwidth()
-          == 250 + zui.App._bar_px(app10.contents_bar),
-          (app10.contents_canvas.winfo_reqwidth(), zui.App._bar_px(app10.contents_bar)))
-    root10.destroy()
-    app._set_contents_w(zui.CONTENTS_W, persist=True)
-    pump(root, app, 0.4)
 
     # ---- zoom: 100 % is the picture's own pixels, and a bigger picture pans inside its own bounds
     print('\n-- zoom: 100 % draws the picture at its own pixels')

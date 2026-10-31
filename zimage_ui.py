@@ -601,7 +601,7 @@ def copy_png_to_clipboard(path):
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
-                 'zoom', 'contents_w')
+                 'zoom', 'contents_w', 'strip_w', 'prompt_w')
 
 # An image prompt describes a still; an image-to-video model obeys motion language. Sending the still's description
 # with a clip asks for motion while describing stillness, which is exactly what "unusable" looked like.
@@ -712,6 +712,19 @@ def save_settings(data):
         return False
 
 
+def _px_setting(settings, key):
+    """One remembered width in pixels, or None when the profile has never seen it.
+
+    `None` is meaningfully different from a number here: it is what makes a fresh profile get the even split, while a
+    profile that has remembered a boundary keeps it.
+    """
+    try:
+        value = int(settings.get(key))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 THUMB_DIR = '.thumbs'
 SCAN_CAP = 5000      # pictures per scan; a recursive walk of a tree stops here and says so rather than crawling forever
 THUMB_PX = 336     # doubled from 168 (2026-10-30): the strip and the pane show them larger than the old size
@@ -731,23 +744,70 @@ STRIP_TILE_MAX = 320
 # each side (2). Measured from the live window - a tile of 96 px is a 104 px cell - and the reason a 4-across column
 # needs 680 px of canvas for four 160 px pictures.
 TILE_CHROME = 10
-GALLERY_SHARE = 0.42  # the strip's column takes this share of the window, which is what pays for the twelve
-GAL_FIT_W = STRIP_FIT_COLS * (STRIP_TILE_FIT + TILE_CHROME)    # 680: the twelve at the fit size
+# The columns' widths are set by the sashes now, so the strip is no longer given a share of the window: it starts at
+# the width four 96 px columns need and grows only when a sash is dragged (2026-10-30).
 GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 1320: four columns at the cap
 # The canvas *asks* for three columns at the floor, not for the twelve: a request is a hard minimum, and asking for
-# 680 would leave the picture column 220 px at the 1200 px minimum window (measured: its action bar needs 283).
+# 680 would leave the picture column 220 px at a 1200 px window (measured: its action bar needs 283).
 GAL_ASK_W = 3 * (STRIP_TILE_MIN + TILE_CHROME)                 # 318
-PICTURE_KEEP = 360    # the width the picture column keeps before the strip's column stops asking for more
-# The boundary between the folder pane and the strip is draggable (2026-10-30). The pane has a width instead of a share:
-# 180 is the narrowest the pictures stay readable in, 480 the widest before they stop growing and the strip starves, and
-# 300 - the width the pane was fixed at before it - is what a double-click restores. `SASH_W` is the whole hit area,
-# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip's four columns need at the 96 px never-shrink floor:
-# no pane width may take the canvas below it.
+# The boundaries are draggable (2026-10-30). The pane has a width instead of a share: 180 is the narrowest the pictures
+# stay readable in, 480 the widest before they stop growing and the strip starves. `SASH_W` is the whole hit area,
+# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip's four columns need at the 96 px never-shrink
+# floor: no boundary may take a column below its own floor.
 CONTENTS_W_MIN = 180
 CONTENTS_W_MAX = 480
 SASH_W = 8
 SASH_STEP = 16        # one arrow key; Shift makes it four
 GAL_FLOOR_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)   # 424
+# The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
+# it is four: the strip and the open-folder pane share the gallery column (`gal`, boundary 1), and the gallery column,
+# the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
+# rail is not one of them - it replaces the gallery column when it is shown, it never sits beside it.
+COLUMNS = ('strip', 'pane', 'prompt', 'picture')
+COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
+PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
+PICTURE_MIN_W = 283   # the picture column's floor: the width of its action bar, measured 2026-10-30, so the row of
+                      # buttons under the picture is never clipped by the sash. Its toolbar row above asks for 501 px and
+                      # has always been packed (it clips past 449 today); a floor of 501 would leave the other three
+                      # columns nothing to trade at a 1707 px window, so that row is left as it was.
+PROMPT_PAD = 16       # the prompt frame's padding, (10, 10, 6, 10)
+PICTURE_PAD = 16      # the picture frame's padding, (6, 10, 10, 10)
+GAL_PAD = 14          # the gallery frame's padding, (10, 10, 4, 10)
+PANE_PAD = 6          # the gap in front of the open-folder pane
+STRIP_ABS_MIN = STRIP_TILE_MIN + TILE_CHROME   # 106: one column at the 96 px floor, the last thing to give way
+LAYOUT_KEYS = ('strip_w', 'contents_w', 'prompt_w')   # one width per boundary, plus the pane's
+
+
+def split_evenly(total, floors, caps=None):
+    """Divide `total` among the columns: equal shares, each raised to its floor, remainder to the leftmost.
+
+    Water-filling, done in one pass so the answer is a function of the inputs and nothing else - the same window always
+    produces the same columns in the same order, and the odd pixels of the division go to the left of the layout rather
+    than wherever the arithmetic happened to land. A column whose floor would squeeze it takes its floor and leaves the
+    loop; a column that would run past its cap (a 6000 px window, a strip that has no business posting billboards)
+    takes the cap. Whatever is left is shared equally by the columns still free.
+    """
+    n = len(floors)
+    caps = list(caps) if caps is not None else [10 ** 9] * n
+    out = [0] * n
+    free = list(range(n))
+    left = int(total)
+    while free:
+        share = left // len(free)
+        stuck = [i for i in free if floors[i] > share or caps[i] < share]
+        if not stuck:
+            break
+        for i in stuck:
+            out[i] = min(caps[i], max(floors[i], share))
+            left -= out[i]
+            free.remove(i)
+    if free:
+        share, rem = divmod(max(0, left), len(free))
+        for k, i in enumerate(free):
+            out[i] = share + (1 if k < rem else 0)
+    return out
+
+
 # B2 (2026-10-30): the finish screen is the same 4x3 grid, scaled up from the strip: the ranking is the answer, and a
 # folder that ranked more than twelve scrolls rather than dropping its tail.
 REVIEW_FINISH_COLS = 4
@@ -1704,6 +1764,103 @@ class ScrollGrid(ttk.Frame):
         self.set_shown(self.shown + self.batch)
 
 
+class Sash(tk.Frame):
+    """The draggable boundary between two adjacent columns - one piece, used at every boundary.
+
+    An 8 px hit area with the resize cursor, a 2 px grip that tints while hovered, dragged or focused, a focus ring of
+    the accent colour, 1:1 dragging, Left/Right at 16 px (64 with Shift), Home/End to the ends of its range, and a
+    double-click back to that boundary's default. What a drag *means* is the owner's: it is told the pointer's movement
+    in pixels since the press, because the thing being resized is a width only the owner knows. The grip is `place`d
+    rather than packed - a packed child decides its parent's requested width (measured: `width=8` around a 2 px child
+    still asked for 2 px), and this hit area is a size, not a side effect.
+    """
+
+    def __init__(self, master, surface, accent, border, tip='', name='', on_drag=None, on_commit=None,
+                 on_reset=None, on_step=None, on_jump=None, register=None):
+        tk.Frame.__init__(self, master, width=SASH_W, bd=0, relief='flat', background=surface, takefocus=1,
+                          cursor='sb_h_double_arrow', highlightthickness=2, highlightbackground=surface,
+                          highlightcolor=accent)
+        self.name = name
+        self._accent, self._border = accent, border
+        self._on_drag, self._on_commit = on_drag, on_commit
+        self._on_reset, self._on_step, self._on_jump = on_reset, on_step, on_jump
+        self._start = None            # where the pointer went down, while a drag is in flight
+        self._hover = False
+        self.pack_propagate(False)
+        self.grip = tk.Frame(self, width=2, bd=0, background=border)
+        self.grip.place(relx=0.5, rely=0, anchor='n', width=2, relheight=1.0)
+        if tip and register:
+            register(self, tip)
+        for seq, fn in (('<Button-1>', self._press), ('<B1-Motion>', self._motion),
+                        ('<ButtonRelease-1>', self._release), ('<Double-Button-1>', self._reset),
+                        ('<Left>', lambda e: self._step(e, 1)), ('<Right>', lambda e: self._step(e, -1)),
+                        ('<Home>', lambda e: self._jump('min')), ('<End>', lambda e: self._jump('max'))):
+            self.bind(seq, fn)
+        self.bind('<Enter>', lambda e: self.tint(True), add='+')
+        self.bind('<Leave>', lambda e: (setattr(self, '_hover', False), self.tint(self._start is not None)), add='+')
+        self.bind('<FocusIn>', lambda e: self.tint(True), add='+')
+        self.bind('<FocusOut>', lambda e: self.tint(self._hover or self._start is not None), add='+')
+
+    @property
+    def dragging(self):
+        return self._start is not None
+
+    def tint(self, on):
+        """The 2 px grip is the whole affordance: neutral at rest, the accent while hovered, dragged or focused."""
+        try:
+            self.grip.configure(background=self._accent if on else self._border)
+        except Exception:
+            pass
+
+    def _press(self, event):
+        try:
+            self.focus_set()
+            self.grab_set()
+        except Exception:
+            pass
+        self._start = event.x_root            # the press, not the last motion: a drag is 1:1 from where it began
+        self.tint(True)
+        if self._on_drag:
+            self._on_drag(0)
+        return 'break'
+
+    def _motion(self, event):
+        if self._start is None:
+            return None
+        if self._on_drag:
+            self._on_drag(event.x_root - self._start)
+        return 'break'
+
+    def _release(self, event):
+        if self._start is None:
+            return None
+        self._start = None
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        if self._on_commit:
+            self._on_commit()
+        self.tint(False)          # quiet again: a grip left tinted reads as "still dragging" (the test asserts this)
+        return 'break'
+
+    def _reset(self, event=None):
+        if self._on_reset:
+            self._on_reset()
+        return 'break'
+
+    def _step(self, event, direction):
+        """Left/Right move the boundary 16 px, four times that with Shift, and persist at once - no release to wait for."""
+        if self._on_step:
+            self._on_step(direction, bool(getattr(event, 'state', 0) & 0x0001))
+        return 'break'
+
+    def _jump(self, end):
+        if self._on_jump:
+            self._on_jump(end)
+        return 'break'
+
+
 class App:
     def __init__(self, root, engine, args):
         self.root, self.engine, self.args = root, engine, args
@@ -1739,16 +1896,20 @@ class App:
         self._pads = [0, 0, 0, 0]
         self._pinned = None          # a second picture to compare against, independent of the base
         self._sidebar = self._settings.get('sidebar', True)
-        # The splitter's width is remembered like every other setting, and clamped when it is applied rather than here:
-        # a profile written on a 2560 px screen must still open on a 1200 px one without squeezing a column away.
-        try:
-            self._contents_w = int(self._settings.get('contents_w') or CONTENTS_W)
-        except (TypeError, ValueError):
-            self._contents_w = CONTENTS_W
+        # One width per boundary, remembered like every other setting and clamped when it is *applied* rather than
+        # here: a profile written on a 2560 px screen must still open on a 1500 px one without pushing a column off the
+        # edge. `_layout_user` says whether these widths are the reader's at all - a profile that has never had a
+        # boundary dragged opens on `split_evenly` instead, which is the same four numbers for the same window.
+        self._layout_user = any(_px_setting(self._settings, k) for k in LAYOUT_KEYS)
+        self._strip_w = _px_setting(self._settings, 'strip_w')
+        self._prompt_w = _px_setting(self._settings, 'prompt_w')
+        self._contents_w = _px_setting(self._settings, 'contents_w') or CONTENTS_W
         self._contents_w = max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, self._contents_w))
-        self._contents_w_applied = self._contents_w    # what the grid was last set to; the window may narrow it
-        self._pane_shown = False
-        self._sash_drag = None
+        self._pane_shown = True          # the pane is a column of the layout: gridded whether a folder is open or not
+        self._pane_empty = False         # True while it is showing its empty state rather than pictures
+        self._sash_drag = None           # the Sash whose drag is in flight, or None
+        self._sash_from = None           # (strip, pane, prompt) at that press: a drag is measured from the press
+        self._layout_w = None            # the window width the grid was last set for
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -1778,7 +1939,7 @@ class App:
         try:
             _icon = Path(__file__).resolve().parent / 'assets' / 'platform-icons' / 'previews' / 'windows-gradient.png'
             if _icon.is_file():
-                self._icon_image = tk.PhotoImage(file=str(_icon))
+                self._icon_image = tk.PhotoImage(file=str(_icon), master=root)
                 root.iconphoto(True, self._icon_image)
         except Exception:
             pass                       # an icon is decoration: never let it stop the window opening
@@ -1791,20 +1952,39 @@ class App:
         except Exception:
             root.geometry('1180x720')
         self._later(150, self._ensure_maximized)
-        # gallery + prompt column + picture: the controls need ~1200 before the picture column can hold its buttons
+        # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
+        # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
+        # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
+        # put in by `_apply_layout` from its own width, not declared here.
         root.minsize(1200, 700)
-        root.columnconfigure(0, weight=0, minsize=210)
-        root.columnconfigure(1, weight=0, minsize=420)
-        root.columnconfigure(2, weight=1)
+        for _col in (0, 2):
+            root.columnconfigure(_col, weight=0, minsize=210)
+        for _col in (1, 3):                      # the two sashes between the three columns
+            root.columnconfigure(_col, weight=0, minsize=SASH_W)
+        root.columnconfigure(4, weight=1, minsize=PICTURE_MIN_W + PICTURE_PAD)
         root.rowconfigure(0, weight=1)
 
         # ---- left: prompt + controls
         # ---- far left: the most recent images as thumbnails
         plate = ttk.Style().lookup('TFrame', 'background') or self.theme.surface
+        self._plate = plate          # the sashes are built from it at every boundary, not just this one
         gal = ttk.Frame(root, padding=(10, 10, 4, 10))
         gal.grid(row=0, column=0, sticky='nsew')
         self.gal = gal
         gal.columnconfigure(0, weight=1)
+        # two more boundaries, at the window: gallery | prompt and prompt | picture. They are built here, before the
+        # columns they sit between, so every boundary of the layout exists in one place and is created one way.
+        self.gallery_sash = self._make_sash(
+            root, 'gallery',
+            'Drag to resize the gallery column against the prompt. Double-click: back to the even split.\n'
+            'Left/Right: 16 px, Shift: 64 px, Home/End: narrowest/widest.')
+        self.gallery_sash.grid(row=0, column=1, sticky='ns')
+        self.prompt_sash = self._make_sash(
+            root, COL_PROMPT,
+            'Drag to resize the prompt column against the picture. Double-click: back to the even split.\n'
+            'Left/Right: 16 px, Shift: 64 px, Home/End: narrowest/widest.')
+        self.prompt_sash.grid(row=0, column=3, sticky='ns')
+        self.sashes = (self.gallery_sash, self.prompt_sash)   # the pane's is added with the pane, below
         self.group_var = tk.BooleanVar(value=bool(self._settings.get('folders', True)))
         self._plan = None                 # the grouping plan, when computed
         self._active_folder = None        # index into self._plan['groups'], or None for everything
@@ -1862,29 +2042,14 @@ class App:
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
         # The boundary is draggable (2026-10-30). The pane's width used to be a constant, so the only way to give the
         # strip more room was to close the folder. The sash is the first column of the pane's own grid - at its left
-        # edge, which is the boundary itself - with an 8 px hit area, the resize cursor, a 2 px grip that tints while
-        # it is hovered or dragged, and keys: Left/Right move it 16 px (64 with Shift), Home/End to the clamp ends.
-        self.contents_sash = tk.Frame(self.contents_holder, width=SASH_W, bd=0, relief='flat',
-                                      background=plate, takefocus=1, cursor='sb_h_double_arrow',
-                                      highlightthickness=2, highlightbackground=plate,
-                                      highlightcolor=self.theme.accent)
+        # edge, which is the boundary itself. Every boundary of the layout is the same `Sash`; only what a drag means
+        # differs, and that lives here in the owner.
+        self.contents_sash = self._make_sash(self.contents_holder, COL_STRIP,
+                                             'Drag to resize the folder pane. Double-click: back to the even split.\n'
+                                             'Left/Right: 16 px, Shift: 64 px, Home/End: narrowest/widest.')
         self.contents_sash.grid(row=0, column=0, rowspan=3, sticky='ns')
-        # the grip is 2 px of the 8, placed rather than packed: a packed child decides its parent's requested width
-        # (measured: `width=8` with a 2 px child still asked for 2 px), and the hit area is a size, not a side effect
-        self.contents_sash.pack_propagate(False)
-        self.sash_grip = tk.Frame(self.contents_sash, width=2, bd=0, background=self.theme.border)
-        self.sash_grip.place(relx=0.5, rely=0, anchor='n', width=2, relheight=1.0)
-        self._tip(self.contents_sash, 'Drag to resize the folder pane. Double-click: back to %d px.\n'
-                                     'Left/Right: 16 px, Shift: 64 px, Home/End: narrowest/widest.' % CONTENTS_W)
-        for seq, fn in (('<Button-1>', self._sash_press), ('<B1-Motion>', self._sash_motion),
-                        ('<ButtonRelease-1>', self._sash_release), ('<Double-Button-1>', self._sash_reset),
-                        ('<Left>', lambda e: self._sash_key(e, 1)), ('<Right>', lambda e: self._sash_key(e, -1)),
-                        ('<Home>', lambda e: self._sash_jump('min')), ('<End>', lambda e: self._sash_jump('max'))):
-            self.contents_sash.bind(seq, fn)
-        self.contents_sash.bind('<Enter>', lambda e: self._sash_tint(True), add='+')
-        self.contents_sash.bind('<Leave>', lambda e: self._sash_tint(bool(getattr(self, '_sash_drag', None))), add='+')
-        self.contents_sash.bind('<FocusIn>', lambda e: self._sash_tint(True), add='+')
-        self.contents_sash.bind('<FocusOut>', lambda e: self._sash_tint(False), add='+')
+        self.sash_grip = self.contents_sash.grip
+        self.sashes = self.sashes + (self.contents_sash,)
         # the pane is a second column of pictures whose width the sash sets: weight 0 and a minsize, so the strip's
         # column takes every spare pixel instead of the two sharing it
         gal.columnconfigure(2, weight=0)
@@ -1909,10 +2074,11 @@ class App:
                                           command=self.contents_canvas.yview)
         self.contents_bar.grid(row=1, column=2, sticky='ns')
         # B3 (2026-10-30): the pane's pictures got CONTENTS_W and the scrollbar was drawn out of the same width, so the
-        # last column of pictures slid under it. The canvas asks for the scrollbar's own width on top, queried from the
-        # widget rather than assumed (14 px at 1x, more at 2x), so the pictures keep their column.
+        # last column of pictures slid under it. The column is now sized from the pictures *plus* the bar, which is why
+        # the canvas asks for the pictures' width alone and the bar takes its own column beside it (2026-10-30): the
+        # pane's whole width is `_contents_w + SASH_W + bar`, so the pictures get exactly the width the sash promises.
         try:
-            self.contents_canvas.configure(width=self._contents_w + self._bar_px(self.contents_bar))
+            self.contents_canvas.configure(width=self._contents_w)
         except Exception:
             pass
         # the pane must stretch with the row, not sit at the canvas's requested 7 cm height (the folder list did, and
@@ -1967,14 +2133,14 @@ class App:
         self._contents_item = self.contents_canvas.create_window((0, 0), window=self.contents, anchor='nw')
         self.contents.bind('<Configure>', self._on_contents_resize)
         self.contents_canvas.bind('<Configure>', self._on_contents_resize)
-        # the pane starts hidden, *and* its column gives its weight back: an empty weighted column still ate a
-        # third of the strip's width (B3, 2026-10-30)
-        self._show_pane(False)
+        # the pane is gridded from the start and stays gridded: it is a column of the layout, not a view that comes
+        # and goes (2026-10-30). With no folder open it opens on its empty state, so the column is never blank.
+        self._render_empty_pane()
         holder.columnconfigure(0, weight=1)
         holder.rowconfigure(0, weight=1)
         # width the canvas to the grid, or tk's default width clips the last column. Three columns at the 96 px floor is
-        # all this asks for: a *request* is a hard minimum, and the strip's column is grown by `_fit_gallery_column`
-        # (B1) rather than by asking for the twelve here, which left the picture column unusable at a 1200 px window.
+        # all this asks for: a *request* is a hard minimum, and the strip's width is set by `_apply_layout` (B1) rather
+        # than by asking for the twelve here, which left the picture column unusable at a 1200 px window.
         self.gal_canvas = tk.Canvas(holder, highlightthickness=0, borderwidth=0, background=plate,
                                     width=GAL_ASK_W)
         self.gal_canvas.grid(row=0, column=0, sticky='nsew')
@@ -2071,7 +2237,7 @@ class App:
         self.rail.grid_remove()
 
         left = ttk.Frame(root, padding=(10, 10, 6, 10))
-        left.grid(row=0, column=1, sticky='nsew')
+        left.grid(row=0, column=2, sticky='nsew')       # the sash between the gallery and it is column 1
         left.columnconfigure(0, weight=1)
         left.rowconfigure(1, weight=1)
 
@@ -2326,7 +2492,7 @@ class App:
 
         # ---- right: the picture
         right = ttk.Frame(root, padding=(6, 10, 10, 10))
-        right.grid(row=0, column=2, sticky='nsew')
+        right.grid(row=0, column=4, sticky='nsew')      # the sash between the prompt and it is column 3
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
         self.canvas = tk.Canvas(right, background=self.theme.window, highlightthickness=0)
@@ -2508,10 +2674,10 @@ class App:
 
         if not self._sidebar:
             self.set_sidebar(False)
-        # B1: the strip's column takes a share of the window, so it has to be re-asked on every resize - the widgets
-        # alone cannot ask for it (their requests are constants, and the column is what has to grow).
-        root.bind('<Configure>', self._fit_gallery_column, add='+')
-        self._idle(self._fit_gallery_column)
+        # The layout is four columns with a sash between each pair, so the grid has to be told the widths on every
+        # resize - the widgets' own requests are constants, and the columns are what has to move.
+        root.bind('<Configure>', self._on_layout_resize, add='+')
+        self._idle(self._apply_layout)
         self._later(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
@@ -2571,11 +2737,21 @@ class App:
             from PIL import ImageTk
             with Image.open(thumb_path) as im:
                 im.thumbnail((size, size), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(im)
+                photo = self._photo(im)
         except Exception:
             return None
         self._photo_cache[cache_key] = photo
         return photo
+
+    def _photo(self, image, **kw):
+        """A PhotoImage in *this* window's interpreter.
+
+        `tkinter` binds a bare `PhotoImage` to the process's first root, which is the wrong interpreter the moment a
+        second window exists - the test suite opens one to check what a fresh start restores, and a tile that landed in
+        the other interpreter failed with `image "pyimage10" doesn't exist`. Passing the master is the whole fix.
+        """
+        from PIL import ImageTk
+        return ImageTk.PhotoImage(image, master=self.root, **kw)
 
     def _placeholder_photo(self, size):
         """One grey PhotoImage per tile size, so an un-thumbnailed tile still occupies its place in the grid."""
@@ -2583,7 +2759,7 @@ class App:
         photo = self._placeholder_photos.get(size)
         if photo is None:
             from PIL import ImageTk
-            photo = ImageTk.PhotoImage(Image.new('RGB', (size, size), self.theme.surface))
+            photo = self._photo(Image.new('RGB', (size, size), self.theme.surface))
             self._placeholder_photos[size] = photo
         return photo
 
@@ -3395,7 +3571,7 @@ class App:
         body.rowconfigure(0, weight=1)
 
         def folder_tile(parent, item, size):
-            photo = ImageTk.PhotoImage(self._folder_sheet(item['group'], size))
+            photo = self._photo(self._folder_sheet(item['group'], size))
             lab = tk.Label(parent, image=photo, bd=1, relief='flat', cursor='hand2', background=self.theme.sheet_bg)
             lab.image = photo
             lab.bind('<Button-1>', lambda e, i=item['index']: pick(i))
@@ -3410,7 +3586,7 @@ class App:
             try:
                 with Image.open(tp) as im:
                     im.thumbnail((size, size), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(im)
+                    photo = self._photo(im)
             except Exception:
                 return tk.Label(parent, text='?', width=6)
             lab = self._tile_widget(parent, path, photo, browser=True)
@@ -3539,12 +3715,8 @@ class App:
 
     def select_folder(self, index):
         self._active_folder = index
-        # With a folder open the gallery column is two columns of pictures, so it is allowed to claim the empty space
-        # the picture pane leaves; with no folder open it goes back to hugging its content.
-        try:
-            self.root.columnconfigure(0, weight=1 if index is not None else 0)
-        except Exception:
-            pass
+        # The gallery column's width is the sashes' business now, not a selection's: a folder opening must not move the
+        # boundaries the reader set (`_render_contents` keeps the pane's column whatever is open).
         self._content_shown = BATCH_CONTENTS
         self._render_contents()
         try:
@@ -3716,7 +3888,7 @@ class App:
             with Image.open(path) as im:
                 im = im.convert('RGB')
                 im.thumbnail((w, h), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(im)
+                photo = self._photo(im)
             lbl.configure(image=photo, text='')
             lbl.image = photo
         except Exception as e:
@@ -4605,12 +4777,45 @@ class App:
             self._sheets.clear()
         return sheet
 
+    def _render_empty_pane(self):
+        """No folder open: the pane keeps its column, its width and its place, and says what it is for.
+
+        Idempotent on purpose - building this a second time is work for nothing, and it is called from every path that
+        used to hide the pane (`refresh_gallery`, a re-group, a click on nothing). The width comes from the layout and
+        is never touched here, which is what keeps a redraw from moving the strip.
+        """
+        self._show_pane(True)
+        if getattr(self, '_pane_empty', False) and self.contents.winfo_children():
+            return
+        self._rebuilding = True
+        try:
+            for w in self.contents.winfo_children():
+                w.destroy()
+            self._content_widgets = {}
+            self._contents_geom = None
+            self._content_order = []
+            self.contents_title.configure(text='folder')
+            ttk.Label(self.contents, text='No folder open.\nClick a folder to see its pictures here.',
+                      foreground=self.theme.muted, justify='center', anchor='center',
+                      font=('Segoe UI', 11),
+                      wraplength=max(120, self._contents_w - 12)).grid(row=0, column=0, sticky='new', pady=(28, 0))
+        except Exception:
+            pass
+        finally:
+            self._rebuilding = False
+        self._pane_empty = True
+        self._idle(self._on_contents_resize)
+
     def _render_contents(self):
-        """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click."""
+        """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click.
+
+        With nothing open it renders the pane's empty state rather than hiding the pane (2026-10-30): the column stays,
+        so a redraw cannot move the strip and a click that changed nothing cannot re-lay the layout out.
+        """
         from PIL import ImageTk
         if self._active_folder is None or not self._plan or self._active_folder >= len(self._plan['groups']):
             self._active_folder = None
-            self._show_pane(False)
+            self._render_empty_pane()
             return
         group = self._plan['groups'][self._active_folder]
         pane_pos = self._scroll_pos(self.contents_canvas)
@@ -4620,6 +4825,7 @@ class App:
             had_focus = False
         self._rebuilding = True
         self._show_pane(True)
+        self._pane_empty = False
         for w in self.contents.winfo_children():
             w.destroy()
         self._content_widgets = {}
@@ -4734,185 +4940,356 @@ class App:
         self.gal_canvas.yview(*args)
         self._maybe_more('strip')
 
-    def _pane_total_w(self):
-        """The width the pane's grid column asks for: its pictures, its scrollbar, and the sash (all clamped)."""
-        return self._contents_w_applied + self._bar_px(self.contents_bar) + SASH_W
+    def _make_sash(self, master, name, tip):
+        """One boundary, built the same way wherever it sits: the look and the keys live in `Sash`, the meaning here."""
+        return Sash(master, self._plate, self.theme.accent, self.theme.border, tip=tip, name=name,
+                    register=self._tip,
+                    on_drag=lambda dx, n=name: self._sash_move(n, dx),
+                    on_commit=lambda n=name: self._sash_commit(n),
+                    on_reset=lambda n=name: self._sash_default(n),
+                    on_step=lambda direction, big, n=name: self._sash_step(n, direction, big),
+                    on_jump=lambda end, n=name: self._sash_jump(n, end))
 
-    def _strip_pane_chrome(self):
-        """The pixels between the pane's canvas and the strip's canvas that neither of them owns.
+    # -- the layout: four adjacent columns, a sash between each pair (2026-10-30) --------------------------
+    def _layout_chrome(self):
+        """The pixels of the window that are neither a column nor its content.
 
-        The gallery's own padding, the gap in front of the pane, the sash, and the strip's scrollbar: 54 px at 1x,
-        measured here rather than assumed, because a 2x desktop doubles the bar widths but not the padding. It is a
-        property of the layout, not of any width, so it is measured once and then reused - measuring it while a drag
-        is in flight would read a half-applied layout.
+        Three sashes, the four frames' padding, and the pane's scrollbar: 90 px here at 1x. The bar is *queried* from
+        the widget rather than assumed - a 2x desktop doubles it and does not double the padding.
         """
-        cached = getattr(self, '_chrome_px', None)
-        if cached:
-            return cached
+        return (3 * SASH_W + GAL_PAD + PANE_PAD + PROMPT_PAD + PICTURE_PAD
+                + self._bar_px(self.contents_bar))
+
+    def _prompt_floor(self):
+        """The prompt column's minimum: the width of its control rows, measured.
+
+        A row of comboboxes, entries and buttons cannot reflow - each has a character width - and Tk's answer to a child
+        that wants more than its column was given is to widen the column whatever the sash was told. So the floor *is*
+        that request (526 px of content today, the size/seed/style rows) rather than the 420 the code used to assume
+        while Tk quietly ignored it; the sash stops where the content stops, and nothing in the column is clipped.
+
+        The one-line reports above and below those rows are labels, which wrap at the column's width
+        (`_apply_prompt_wrap`) - so they are deliberately *not* part of this measurement: counting them made the column
+        raise its own floor every time it was widened, which is a sash that walks away from the pointer.
+        """
         try:
-            gal, pane, strip = (self.gal.winfo_width(), self.contents_canvas.winfo_width(),
-                                self.gal_canvas.winfo_width())
-            value = gal - pane - strip
-            if gal > 1 and pane > 1 and strip > 1 and 24 <= value <= 200:
-                self._chrome_px = value
-                return value
+            rows = [w.winfo_reqwidth() for w in self.text.master.winfo_children()
+                    if isinstance(w, ttk.Frame) and w.winfo_manager()]
+            need = max(rows or [0])
         except Exception:
-            pass
-        return 54                     # the measured 1x value, until the window has been laid out once
+            need = 0
+        return max(PROMPT_MIN_W, need)
+
+    def _column_floors(self):
+        """The minimum each column may have, in content pixels - no gesture and no window may take one below this."""
+        return {COL_STRIP: GAL_FLOOR_W + self._bar_px(self.gal_bar),   # four columns at the 96 px floor, and its bar
+                COL_PANE: CONTENTS_W_MIN,             # the narrowest the pane's pictures stay readable in
+                COL_PROMPT: self._prompt_floor(),     # its own rows, measured
+                COL_PICTURE: PICTURE_MIN_W}           # the action bar under the picture
+
+    def _column_caps(self):
+        """The maximum each column may have: beyond these a window is throwing pixels at a column that stops growing."""
+        return {COL_STRIP: GAL_MAX_W, COL_PANE: CONTENTS_W_MAX, COL_PROMPT: 10 ** 6, COL_PICTURE: 10 ** 6}
+
+    def _root_w(self, width=None):
+        try:
+            return int(width or self.root.winfo_width())
+        except Exception:
+            return 0
+
+    def _content_w(self, width=None):
+        """What is left for the four columns once the chrome is paid for."""
+        return max(0, self._root_w(width) - self._layout_chrome())
+
+    def _even_widths(self, width=None):
+        """The content width divided among the four columns: equal shares, floors raised, remainder to the leftmost.
+
+        This is what a profile that has never seen the layout gets, and it is a pure function of the window and the
+        floors - `split_evenly` - so the same window always opens the same way, with the odd pixels on the left.
+        """
+        floors, caps = self._column_floors(), self._column_caps()
+        shares = split_evenly(self._content_w(width), [floors[c] for c in COLUMNS], [caps[c] for c in COLUMNS])
+        return dict(zip(COLUMNS, shares))
+
+    def _picture_w(self, widths=None):
+        """The picture column is the one that takes what is left: it has no right-hand neighbour to trade with."""
+        widths = widths or self._layout_widths()
+        return widths[COL_PICTURE]
+
+    def _layout_widths(self, width=None):
+        """The four content widths right now.
+
+        Until a boundary is dragged the answer is `_even_widths` - the content width in four equal columns, recomputed
+        for whatever window this is - so the layout opens even at the size the window actually has, and a window that
+        changes size before anybody touches it simply re-evens. Once a boundary *has* been dragged the three widths it
+        can move are the reader's: they are used as they are, clamped to their floors, and the picture column - which
+        has no right-hand neighbour to trade with - takes what is left.
+
+        A remembered layout that no longer fits - written on a 2560 px screen, opened on a 1500 px one - gives the
+        difference up from the strip first, because its cells are built for the width they are in and reflow, and only
+        then from the picture column, which scales the picture it shows. The pane and the prompt keep their width,
+        because theirs is the content that cannot reflow.
+        """
+        floors, caps = self._column_floors(), self._column_caps()
+        if not self._layout_user:
+            return self._even_widths(width)
+        widths = {COL_STRIP: self._strip_w, COL_PANE: self._contents_w, COL_PROMPT: self._prompt_w}
+        for key in (COL_STRIP, COL_PANE, COL_PROMPT):
+            widths[key] = max(floors[key], min(caps[key], int(widths[key] or floors[key])))
+        content = self._content_w(width)
+        over = widths[COL_STRIP] + widths[COL_PANE] + widths[COL_PROMPT] + floors[COL_PICTURE] - content
+        if over > 0:
+            take = min(over, max(0, widths[COL_STRIP] - STRIP_ABS_MIN))
+            widths[COL_STRIP] -= take
+        widths[COL_PICTURE] = max(0, content - widths[COL_STRIP] - widths[COL_PANE] - widths[COL_PROMPT])
+        return widths
+
+    def _pane_total_w(self):
+        """The pane's whole grid column: its sash, the gap in front of it, its pictures and its scrollbar."""
+        return SASH_W + PANE_PAD + self._contents_w + self._bar_px(self.contents_bar)
+
+    def _gallery_col_w(self):
+        """The gallery column's width: the strip, the pane, and the chrome between them inside `gal`."""
+        return GAL_PAD + self._strip_w + self._pane_total_w()
 
     def _contents_w_limit(self):
         """The widest the pane may be here without taking the strip below four columns at the 96 px floor.
 
-        Four columns of 96 px need `GAL_FLOOR_W` (424) of canvas, the gallery column can claim at most what the window
-        leaves after the prompt and the picture column, and the chrome above sits between the two canvases. On a
-        1707 x 960 screen that is 313 px, not the 480 cap - the cap is what a 2560 px screen can pay for. The bound
-        comes from the window alone, never from the pane's current width, so no gesture can chase its own tail.
+        The strip and the pane trade width between them inside the gallery column, so the pane's ceiling is whatever
+        that column leaves once the strip has its floor, capped at the width the pane stops growing at. It comes from
+        the column the two of them share, never from the pane's own width, so no gesture can chase its own tail.
         """
-        try:
-            w = self.root.winfo_width()
-            prompt = max(420, self.text.master.winfo_reqwidth())
-        except Exception:
-            return CONTENTS_W_MAX
-        if w <= 1:
-            return CONTENTS_W_MAX
-        room = ((w - prompt - PICTURE_KEEP) - self._strip_pane_chrome()
-                - self._bar_px(self.contents_bar) - GAL_FLOOR_W)
-        return max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, room))
+        total = self._strip_w + self._contents_w
+        return max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, total - self._column_floors()[COL_STRIP]))
 
-    def _clamp_contents_w(self, width):
-        try:
-            value = int(width)
-        except (TypeError, ValueError):
-            value = CONTENTS_W
-        return max(CONTENTS_W_MIN, min(self._contents_w_limit(), value))
+    def _layout_min_w(self):
+        """The narrowest window this layout can be shown in: every column at its floor, and the chrome between them."""
+        floors = self._column_floors()
+        return sum(floors[c] for c in COLUMNS) + self._layout_chrome()
 
-    def _apply_contents_w(self):
-        """Put the pane's width into the grid: the canvas asks for it plus the bar, and the column follows the ask.
+    def _apply_layout(self, width=None, persist=False):
+        """Put the four widths into the grid, and each column's interior with them.
 
-        `_contents_w` is the reader's choice and is what gets remembered; `_contents_w_applied` is that choice clamped
-        to what this window can spare right now, so shrinking the window narrows the pane instead of pushing the
-        picture column off the edge. The column keeps `weight=0` and no minsize on purpose: its width is the canvas's
-        request, which is exactly this number, and a window too small to pay for it may still squeeze it - a minsize
-        would be spent out of the picture column's width instead. Returns True when the applied width moved.
+        Only the picture column has a weight: it is the column that takes what a wider window offers, so a resize can
+        never re-open a boundary the reader closed. The gallery column's minsize is its two columns plus the chrome
+        between them, which is what makes the sash inside it and the column it lives in agree by construction rather
+        than by arithmetic happening to line up.
         """
-        wanted = self._contents_w
-        applied = min(wanted, self._contents_w_limit()) if self._pane_shown else wanted
-        moved = applied != getattr(self, '_contents_w_applied', None)
-        self._contents_w_applied = applied
-        bar = self._bar_px(self.contents_bar)
+        widths = self._layout_widths(width)
+        self._strip_w, self._contents_w, self._prompt_w = (widths[COL_STRIP], widths[COL_PANE], widths[COL_PROMPT])
         try:
-            self.contents_canvas.configure(width=applied + bar)
-            self.contents_title.configure(wraplength=max(200, applied - 6))
+            self.contents_canvas.configure(width=self._contents_w)
+            self.contents_title.configure(wraplength=max(120, self._contents_w - 6))
             self.gal.columnconfigure(2, weight=0, minsize=0)
         except Exception:
-            return False
-        return moved
-
-    def _set_contents_w(self, width, persist=False):
-        """Move the splitter: clamp, apply, and remember it when the gesture is over."""
-        value = self._clamp_contents_w(width)
-        changed = value != getattr(self, '_contents_w', None)
-        self._contents_w = value
-        moved = self._apply_contents_w()
-        if changed or moved:
-            self._gallery_w = None              # the gallery column's request depends on the pane's width
-            self._fit_gallery_column()
+            pass
+        if getattr(self, '_sidebar', True):
+            try:
+                self.root.columnconfigure(0, minsize=self._gallery_col_w())
+                self.root.columnconfigure(2, minsize=self._prompt_w + PROMPT_PAD)
+                self.root.columnconfigure(4, minsize=widths[COL_PICTURE] + PICTURE_PAD)
+            except Exception:
+                pass
+        self._apply_prompt_wrap()
+        self._apply_window_min()
+        self._layout_w = self._root_w(width)
         if persist:
-            self._save_contents_w()
-        return value
+            self._save_layout()
+        return widths
 
-    def _save_contents_w(self):
-        """Write `contents_w` beside the other settings - the same path `toggle_groups` uses for 'folders'."""
+    def _apply_window_min(self):
+        """The window may not be narrower than the four columns' floors: below that at least one would be clipped.
+
+        The prompt column's floor is *measured*, so it is only known once its rows exist - hence this runs from the
+        layout rather than from the top of `__init__`. It only ever grows (a window that has been widened must not be
+        shrunk under the reader), and it is capped at the screen's own width, because a minimum larger than the screen
+        is not a minimum, it is a window that cannot be shown.
+        """
+        try:
+            need = self._layout_min_w()
+            screen = self.root.winfo_screenwidth()
+            want = min(max(1200, need), max(1200, screen - 80))
+            if want > getattr(self, '_window_min', 0):
+                self._window_min = want
+                self.root.minsize(want, 700)
+        except Exception:
+            pass
+
+    def _apply_prompt_wrap(self):
+        """The prompt column reflows rather than clipping: its long lines wrap at the width the column actually has.
+
+        The Text widget already did (`wrap='word'`, gridded with a weight); the one-line reports under it did not, and
+        one long folder name widened the column far enough to fight the sash. They wrap now, at this column's width.
+        """
+        wrap = max(160, self._prompt_w - PROMPT_PAD - 4)
+        for attr in ('banner', 'hint', 'status', 'last_label'):
+            widget = getattr(self, attr, None)
+            if widget is None:
+                continue
+            try:
+                widget.configure(wraplength=wrap, justify='left')
+            except Exception:
+                pass
+
+    def _save_layout(self):
+        """Write the three boundaries beside the other settings - the same path `toggle_groups` uses for 'folders'.
+
+        Only ever called for a width the reader set: a profile that has never had a boundary dragged keeps no widths,
+        so it opens on `split_evenly` again - which is the same answer for the same window, and the right one for a
+        window that is not the same.
+        """
+        self._layout_user = True
         try:
             self._settings['contents_w'] = self._contents_w
+            self._settings['strip_w'] = self._strip_w
+            self._settings['prompt_w'] = self._prompt_w
             save_settings(self._settings)
         except Exception:
             pass
 
-    def _sash_tint(self, on):
-        """The 2 px grip is the whole affordance: neutral at rest, the accent while hovered, dragged or focused."""
+    def _set_contents_w(self, width, persist=False):
+        """Move the strip|pane boundary: clamp it to what the gallery column can pay, apply, and remember it."""
+        floors = self._column_floors()
+        total = self._strip_w + self._contents_w
         try:
-            self.sash_grip.configure(background=self.theme.accent if on else self.theme.border)
-        except Exception:
-            pass
+            value = int(width)
+        except (TypeError, ValueError):
+            value = CONTENTS_W
+        value = max(floors[COL_PANE], min(CONTENTS_W_MAX, value, max(floors[COL_PANE], total - floors[COL_STRIP])))
+        self._layout_user = True                 # the reader moved a boundary: these widths are theirs now
+        self._contents_w = value
+        self._apply_layout(persist=persist)
+        return self._contents_w
 
-    def _sash_press(self, event):
-        if not self._pane_shown:
-            return None
-        try:
-            self.contents_sash.focus_set()
-            self.contents_sash.grab_set()
-        except Exception:
-            pass
-        self._sash_drag = (event.x_root, self._contents_w)   # the width at the press, not the last motion
-        self._sash_tint(True)
-        return 'break'
+    @staticmethod
+    def _share_gallery(want, strip, pane, floors):
+        """Split a gallery-column interior of `want` px between the strip and the pane.
 
-    def _sash_motion(self, event):
-        drag = self._sash_drag
-        if not drag:
-            return None
-        start_x, start_w = drag
-        # the boundary is the pane's left edge: dragging it left makes the pane wider
-        self._set_contents_w(start_w - (event.x_root - start_x))
-        return 'break'
+        A growth goes to the strip first and a shrinkage comes out of the pane first: widening the gallery column is
+        widening the list of pictures, while narrowing it is spending the pane - which holds a subset of the same
+        pictures - before it spends the list. Both stop at their own floor, and whatever the two of them cannot take is
+        left for the caller to give to (or take from) the prompt.
+        """
+        grew = int(want) - (strip + pane)
+        if grew > 0:
+            add = min(grew, max(0, GAL_MAX_W - strip))
+            strip += add
+            pane += min(grew - add, max(0, CONTENTS_W_MAX - pane))
+        elif grew < 0:
+            take = min(-grew, max(0, pane - floors[COL_PANE]))
+            pane -= take
+            strip -= min(-grew - take, max(0, strip - floors[COL_STRIP]))
+        return strip, pane
 
-    def _sash_release(self, event):
-        if not self._sash_drag:
-            return None
+    def _sash_move(self, name, dx, persist=False):
+        """The pointer moved `dx` px from where it went down: the column left of the boundary grows by it, its
+        neighbour gives it up, and nothing else on the window moves - which is what dragging 1:1 has to mean.
+
+        The three boundaries trade different pairs: `strip` trades the strip with the pane inside the gallery column,
+        `gallery` trades the gallery column with the prompt (the pane paying before the strip does), and `prompt`
+        trades the prompt with the picture column.
+        """
+        if self._sash_from is None:
+            self._sash_drag = name
+            self._sash_from = (self._strip_w, self._contents_w, self._prompt_w)
+        self._layout_user = True          # a drag is the reader taking the layout over from `split_evenly`
+        strip0, pane0, prompt0 = self._sash_from
+        floors = self._column_floors()
+        if name == COL_STRIP:                     # strip | pane: they trade inside the gallery column
+            total = strip0 + pane0
+            low = max(floors[COL_STRIP], total - CONTENTS_W_MAX)
+            high = max(low, total - floors[COL_PANE])
+            strip = max(low, min(high, strip0 + dx))
+            self._strip_w, self._contents_w = strip, total - strip
+        elif name == 'gallery':                   # gallery | prompt: the gallery column against the prompt
+            gal0 = strip0 + pane0
+            total = gal0 + prompt0
+            low = min(gal0, floors[COL_STRIP] + floors[COL_PANE])
+            high = max(low, total - floors[COL_PROMPT])
+            want = max(low, min(high, gal0 + dx))
+            strip, pane = self._share_gallery(want, strip0, pane0, floors)
+            self._strip_w, self._contents_w = strip, pane
+            self._prompt_w = max(floors[COL_PROMPT], total - (strip + pane))
+        else:                                     # prompt | picture: the prompt grows, the picture gives way
+            picture0 = max(0, self._content_w() - strip0 - pane0 - prompt0)
+            total = prompt0 + picture0
+            low = floors[COL_PROMPT]
+            high = max(low, total - floors[COL_PICTURE])
+            self._prompt_w = max(low, min(high, prompt0 + dx))
+        self._apply_layout(persist=persist)
+
+    def _sash_commit(self, name):
+        """The gesture is over: remember it, and let the one reflow the drag deferred run."""
         self._sash_drag = None
-        try:
-            self.contents_sash.grab_release()
-        except Exception:
-            pass
-        self._save_contents_w()
-        self._sash_tint(False)
-        # what the drag deferred, once: the strip's tiles (or folder tiles) and the pane's own reflow
+        self._sash_from = None
+        self._save_layout()
         if getattr(self, '_strip_dirty', False):
             self._strip_dirty = False
             self._on_strip_resize()
         if getattr(self, '_contents_dirty', False):
             self._contents_dirty = False
             self._on_contents_resize()
-        return 'break'
 
-    def _sash_reset(self, event=None):
-        """Double-click: back to the 300 px the pane was born at."""
-        self._set_contents_w(CONTENTS_W, persist=True)
-        return 'break'
+    def _sash_step(self, name, direction, big):
+        """Left/Right move the boundary 16 px (64 with Shift), and persist at once - there is no release to wait for.
 
-    def _sash_key(self, event, direction):
-        """Left/Right move the boundary 16 px (Shift 64), and persist at once - there is no release to wait for."""
-        if not self._pane_shown:
-            return None
-        step = SASH_STEP * (4 if getattr(event, 'state', 0) & 0x0001 else 1)
-        self._set_contents_w(self._contents_w + direction * step, persist=True)
-        return 'break'
-
-    def _sash_jump(self, end):
-        if not self._pane_shown:
-            return None
-        self._set_contents_w(CONTENTS_W_MIN if end == 'min' else self._contents_w_limit(), persist=True)
-        return 'break'
-
-    def _show_pane(self, show):
-        """Show or hide the open-folder pane, and hand its column back to the strip when it goes.
-
-        The pane's column used to keep `weight=1` even when nothing was in it, so a hidden pane still took a third of
-        the gallery column (measured 2026-10-30). It is a fixed width now - the sash sets it - with weight 0 and a
-        minsize, and hiding it drops the minsize so the strip's column takes the whole gallery column.
+        `direction` is +1 for Left: moving the boundary towards the left shrinks the column on its left and grows the
+        one on its right, which is what the pointer doing the same thing does.
         """
-        self._pane_shown = bool(show)
+        self._sash_from = None
+        self._sash_move(name, -direction * SASH_STEP * (4 if big else 1), persist=True)
+        self._sash_drag = None
+        self._sash_from = None
+
+    def _sash_jump(self, name, end):
+        """Home/End take the boundary to the ends of its range, which are its two columns' floors.
+
+        Both ends are the clamps `_sash_move` already applies, so a jump is a drag further than either can go.
+        """
+        self._sash_from = None
+        self._sash_move(name, -10 ** 6 if end == 'min' else 10 ** 6, persist=True)
+        self._sash_drag = None
+        self._sash_from = None
+
+    def _sash_default(self, name):
+        """Double-click: that boundary back to the even split this window would have opened at."""
+        even = self._even_widths()
+        target = even[COL_PROMPT] if name == COL_PROMPT else even[COL_STRIP]
+        current = self._prompt_w if name == COL_PROMPT else self._strip_w
+        self._sash_from = None
+        self._sash_move(name, target - current, persist=True)
+        self._sash_drag = None
+        self._sash_from = None
+
+    def _on_layout_resize(self, event=None):
+        """A window resize re-clamps the four columns; it never re-opens a boundary the reader set."""
+        if getattr(self, '_closing', False):
+            return
         try:
-            if show:
-                self.contents_holder.grid()
-            else:
-                self.contents_holder.grid_remove()
+            if event is not None and event.widget is not self.root:
+                return
         except Exception:
             pass
-        self._apply_contents_w()
-        self._gallery_w = None                  # the gallery column's request depends on the pane's width
-        self._fit_gallery_column()
+        if getattr(self, '_sash_drag', None):
+            return                          # the drag owns the widths until it is released
+        if self._root_w() == getattr(self, '_layout_w', None):
+            return                          # nothing moved: a <Configure> for a child, or the same size again
+        self._apply_layout()
+
+    def _show_pane(self, show=True):
+        """Keep the pane in the grid - always, whatever `show` says.
+
+        It used to be `grid_remove`d whenever no folder was open, and its column handed back to the strip. That
+        collapse and re-grow is one of the redraws the 2026-10-30 report complains about: the strip re-lays itself
+        out, twice, for a click that changed nothing. The pane is a permanent column of the layout now; `_pane_shown`
+        is kept because callers ask whether it is on screen, and the answer is always yes.
+        """
+        self._pane_shown = True
+        try:
+            if not self.contents_holder.winfo_manager():
+                self.contents_holder.grid()
+        except Exception:
+            pass
 
     def _on_contents_resize(self, event=None):
         if getattr(self, '_rebuilding', False) or not self._alive():
@@ -5079,6 +5456,7 @@ class App:
         render, cutting off the right column" report of 2026-10-30. The `update_idletasks` is the measure-first rule
         `_render_contents` already follows: a pane that has just been gridded has not been laid out yet, and reading
         the width now would answer the old one.
+
         """
         try:
             self.gal_canvas.update_idletasks()
@@ -5119,7 +5497,7 @@ class App:
             tile.grid(row=index // cols, column=index % cols, padx=5, pady=5, sticky='n')
             body = tk.Frame(tile, background=self.theme.window, padx=3, pady=3)
             body.pack(fill='both', expand=True)
-            photo = ImageTk.PhotoImage(self._folder_sheet(group, sheet_px, gutter=plate if selected else None))
+            photo = self._photo(self._folder_sheet(group, sheet_px, gutter=plate if selected else None))
             pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
@@ -5176,7 +5554,7 @@ class App:
         A canvas too narrow to hold the twelve at the fit size keeps four columns and drops towards the 96 px
         never-shrink floor; one too narrow even for that gives up a column rather than clipping its last one. The
         debounce and the preserved pixel offset in `_apply_strip_resize` (commit 5c02ad1) sit on top of this and are
-        untouched.
+        untouched, which is also how a dragged sash re-tiles the strip: the drag defers, the release applies once.
         """
         try:
             canvas = self.gal_canvas
@@ -5243,51 +5621,6 @@ class App:
         cols = max(3, int((width - 8) // (STRIP_TILE_MIN + 6)))
         tile = max(48, width // cols - TILE_CHROME)
         return cols, tile
-
-    def _gallery_width(self):
-        """The width the strip's column asks for (B1, 2026-10-30).
-
-        The gallery column used to be as wide as its children happened to request - the canvas asked for 300 px - so
-        on a 1707 px window it stayed 335 px wide and the picture column took everything else. Four tiles across at
-        the 160 px fit size need 680 (each tile carries 10 px of border, focus ring and padding); the column now asks
-        for a share of the window (0.42), floored at those 680 and capped at four tiles of 320, and it gives that up
-        whenever the prompt and picture columns would be squeezed below what they need.
-        """
-        try:
-            w = self.root.winfo_width()
-        except Exception:
-            w = 0
-        pane = self._pane_total_w() if getattr(self, '_pane_shown', False) else 0
-        want = int(w * GALLERY_SHARE) if w > 1 else GAL_FIT_W
-        want = max(GAL_FIT_W, min(GAL_MAX_W, want)) + pane     # the pane is a column inside this width, not a share
-        if w > 1:
-            try:
-                prompt = max(420, self.text.master.winfo_reqwidth())
-            except Exception:
-                prompt = 420
-            want = max(210 + pane, min(want, w - prompt - PICTURE_KEEP))
-        return want
-
-    def _fit_gallery_column(self, event=None):
-        """Apply `_gallery_width` to the grid's first column: the canvas alone cannot ask for it, because the column
-        is what has to grow (B1). A folded-away sidebar keeps the rail's own width."""
-        if getattr(self, '_closing', False) or not getattr(self, '_sidebar', True):
-            return
-        try:
-            if event is not None and event.widget is not self.root:
-                return
-        except Exception:
-            pass
-        if getattr(self, '_pane_shown', False):
-            self._apply_contents_w()      # the clamp is a function of the window: a narrower one narrows the pane
-        want = self._gallery_width()
-        if want == getattr(self, '_gallery_w', None):
-            return
-        self._gallery_w = want
-        try:
-            self.root.columnconfigure(0, minsize=max(210, want))
-        except Exception:
-            pass
 
     def refresh_gallery(self, select=None):
         if getattr(self, '_closing', False) or not self._alive():
@@ -5730,14 +6063,14 @@ class App:
     def set_sidebar(self, show):
         """Fold the gallery away so the picture can use the width."""
         self._sidebar = bool(show)
-        self._gallery_w = None
         if self._sidebar:
             self.rail.grid_remove()
             self.gal.grid()
-            self.root.columnconfigure(0, minsize=max(210, self._gallery_width()))
-            self._idle(self._fit_gallery_column)      # the window may have widened while the gallery was folded
+            self.gallery_sash.grid()               # the boundary is back with the column that holds it
+            self._apply_layout()
         else:
             self.gal.grid_remove()
+            self.gallery_sash.grid_remove()        # nothing on its left to resize: the rail is not a column
             self.rail.grid()
             self.root.columnconfigure(0, minsize=44)
         self._persist()
@@ -7433,7 +7766,7 @@ class App:
             try:
                 with Image.open(tp) as im:
                     im.thumbnail((size, size), Image.LANCZOS)
-                    ph = ImageTk.PhotoImage(im)
+                    ph = self._photo(im)
             except Exception:
                 return tk.Label(parent, text='?', width=4)
             self._all_thumbs[path] = ph
@@ -7933,9 +8266,12 @@ class App:
                           'favorites': sorted(self._favorites),
                           'custom_styles': self._custom_styles,
                           'sidebar': self._sidebar,
-                          'contents_w': self._contents_w,
                           'zoom': (self.zoom_var.get() if hasattr(self, 'zoom_var') else ZOOM_DEFAULT),
                           'runs': self._runs[-50:]}
+        if getattr(self, '_layout_user', False):
+            # only a layout the reader set is remembered: an untouched window re-evens on its own size at every start
+            self._settings.update({'contents_w': self._contents_w, 'strip_w': self._strip_w,
+                                   'prompt_w': self._prompt_w})
         return save_settings(self._settings)
 
     def use_starter(self, prompt):
@@ -8714,7 +9050,7 @@ class App:
         part = self._slice_of(self._img, dw, dh, dx, dy, w, h)
         if part is None:
             return None
-        photo = ImageTk.PhotoImage(part)
+        photo = self._photo(part)
         if len(cache) > 8:
             cache.clear()
         cache[key] = photo
@@ -8898,7 +9234,7 @@ class App:
         if right > left:
             strip = self._slice_of(base, dw, dh, left - x0, vy - y0, right - left, vh)
             if strip is not None:
-                self._tk_cmp = ImageTk.PhotoImage(strip)
+                self._tk_cmp = self._photo(strip)
                 self.canvas.create_image(left, vy, anchor='nw', image=self._tk_cmp, tags='compare')
         if vx <= cut <= vx + vw:
             # a white/dark pair so the split stays visible on any picture
