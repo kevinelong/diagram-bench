@@ -8853,6 +8853,11 @@ class App:
                         self.status.configure(text='preview (2 steps, 256 px) - nothing saved to the gallery')
                         return
                     self._raw = raw
+                    # The new picture must reach the strip whatever the folders switch says. `_regroup_soon` returns
+                    # immediately when grouping is off, so a single-image render used to land on disk and never be drawn:
+                    # measured, the file appeared at 9.2 s, its thumbnail and PhotoImage were cached, and no tile widget
+                    # existed for it. The refresh is the same debounced path the per-tile event uses.
+                    self._idle(self.refresh_gallery)
                     self._regroup_soon()          # a new picture changes the folders: re-group off the event loop
                     meta = read_meta(path)
                     if meta and meta.get('tiles'):

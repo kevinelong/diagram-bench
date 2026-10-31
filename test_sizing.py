@@ -1086,6 +1086,33 @@ def main():
     check('and draws the first picture it shows at it', app9._draw[2:] == (4800, 3200), app9._draw)
     root9.destroy()
 
+    # A finished render must be drawn whatever the folders switch says. Measured before the fix: with folders off, the
+    # file appeared at 9.2 s, its thumbnail and PhotoImage were cached, and NO tile widget existed - `_regroup_soon`
+    # returns immediately when grouping is off, so a single-image run never refreshed the strip.
+    print('\n-- layout: a finished render is drawn with folders off')
+    render_dir = Path(tempfile.mkdtemp(prefix='render-'))
+    for i in range(3):
+        q = render_dir / ('seed%d.png' % i)
+        Image.new('RGB', (96, 96), (30 * i, 90, 180)).save(q)
+        q.with_suffix('.json').write_text(json.dumps({'prompt': 'render probe %d' % i}), encoding='utf-8')
+    root_r = tk.Tk()
+    app_r = zui.App(root_r, Stub(), NS(port=8006, size=1024, steps=4, cfg=1.0, seed=1,
+                                              out=str(render_dir), initial='', initial_file='',
+                                              auto=False, no_progress=True))
+    pump(root_r, app_r, 1.0)
+    app_r.toggle_groups(False)
+    pump(root_r, app_r, 0.6)
+    fresh = render_dir / 'finished_render.png'
+    Image.new('RGB', (96, 96), (12, 200, 90)).save(fresh)
+    fresh.with_suffix('.json').write_text(json.dumps({'prompt': 'a finished render'}), encoding='utf-8')
+    app_r.engine.events.put(('image', (b'', str(fresh))))
+    pump(root_r, app_r, 1.2)
+    check('the new picture is in the strip list', any(p.name == fresh.name for p in app_r._files),
+          [p.name for p in app_r._files[:3]])
+    check('and a tile widget was built for it', Path(fresh) in app_r._tile_widgets,
+          list(app_r._tile_widgets)[:2])
+    root_r.destroy()
+
     print('\n%d failure(s)' % len(FAILS))
     for f in FAILS:
         print('  FAILED: %s' % f)
