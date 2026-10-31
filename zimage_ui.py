@@ -5075,7 +5075,14 @@ class App:
             self._render_empty_pane()
             return
         group = self._plan['groups'][self._active_folder]
-        pane_pos = self._scroll_pos(self.contents_canvas)
+        # A scroll position belongs to a folder, not to the pane. Carrying it across a folder change left a short
+        # folder scrolled past its own tiles - the pane looked empty and you had to scroll back up to find them
+        # (reported 2026-10-31: "selecting folder with only 4 shows nothing ... scroll to the centre ... eventually
+        # they show"). Reproduced: opening a 4-picture folder after scrolling a 40-picture one kept
+        # scrollregion '0 0 284 1523' and canvasy 809.
+        same_folder = getattr(self, '_pane_folder', None) == self._active_folder
+        self._pane_folder = self._active_folder
+        pane_pos = self._scroll_pos(self.contents_canvas) if same_folder else None
         try:
             had_focus = self.root.focus_get() is self.contents_canvas
         except Exception:
@@ -5206,6 +5213,10 @@ class App:
         if had_focus:
             # a re-render must not hand the keyboard to the strip: the reader was working in this pane
             self._idle(lambda: self.contents_canvas.focus_set())
+        try:
+            self._on_contents_resize()          # recompute the region now: a shorter folder must not keep the old one
+        except Exception:
+            pass
         self._idle(self._on_contents_resize)
         self._idle(lambda: self._fill_view('contents'))
         if pane_pos:
