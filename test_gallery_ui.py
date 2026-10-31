@@ -263,6 +263,22 @@ def main():
     app._plan, app._grouping = real_plan, real_grouping
     app.refresh_gallery(); root.update()
 
+    # Folders ticked and no plan, but the worker not started yet - the window right after the app opens. The notice
+    # used to require `_grouping`, so in that window the strip painted a page of pictures and they read as the view
+    # rather than a placeholder (reported 2026-10-31: "I was not expecting images in the first column at all in the
+    # initial folders enabled state").
+    app._plan = None
+    app._grouping = False
+    app.group_var.set(True)
+    app.refresh_gallery(); root.update()
+    photos = [w for w in app.recent.winfo_children()
+              if getattr(w, 'image', None) is not None
+              or any(getattr(c, 'image', None) for c in w.winfo_children())]
+    check('folders ticked with no plan paints no pictures, even before grouping starts', not photos, len(photos))
+    check('and the strip says it is grouping', 'rouping' in app.gal_title['text'], app.gal_title['text'])
+    app._plan, app._grouping = real_plan, real_grouping
+    app.group_var.set(True)
+    app.refresh_gallery(); root.update()
     # A regroup request that arrives while a compute is in flight used to be dropped outright - `_regroup_job`
     # cleared to None and nothing pending - so the plan kept describing the gallery as it was before the newest
     # pictures until the folders switch was toggled by hand to force a fresh pass (reported 2026-10-31). It must

@@ -5985,9 +5985,13 @@ class App:
         needle = self.search_var.get().strip()
         if needle:
             label += '  \u00b7  \u201c%s\u201d' % needle
-        if getattr(self, '_grouping', False) and not self._plan and files:
+        if (self.group_var.get() if hasattr(self, 'group_var') else False) and not filtering and not self._plan and files:
             # Folders are on and the plan is not in yet: say so in place of the pictures rather than painting 18
-            # thumbnails that are about to be replaced.
+            # thumbnails that are about to be replaced. This used to require `_grouping`, which is only true once the
+            # worker has been started - so in the window between the window opening and the first regroup the strip
+            # painted a page of pictures with folders ticked, and they looked like the view rather than a placeholder
+            # ("I was not expecting images in the first column at all in the initial folders enabled state",
+            # 2026-10-31). Folders ticked means no pictures, whatever the worker is doing.
             self.gal_title.configure(text='Grouping prompts\u2026  \u00b7  %d pictures' % len(files))
             for w in self.recent.winfo_children():
                 w.destroy()
