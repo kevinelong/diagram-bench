@@ -66,7 +66,9 @@ rows. The picture therefore arrives where the control expects it: `ImageList_Add
 `LVIF_IMAGE` in `LVN_GETDISPINFOW`. Confirmed visually from a `PrintWindow` render (which needs no screen grab): real
 thumbnails, tall rows, tooltips of text beside each one.
 
-**Theme**: the OS reports dark (`AppsUseLightTheme = 0`, both values), and `zimage-native.exe --theme` prints `dark = true`.
+**Theme details that only show on a dark desktop**: the list *header* is a separate HWND and needs `DarkMode_ItemsView` of
+its own, or it stays a light band across a dark list (`LVM_GETHEADER` → `SetWindowTheme`); and `WS_BORDER` draws the classic
+light client edge, so it is dropped rather than fought. The OS reports dark (`AppsUseLightTheme = 0`, both values), and `zimage-native.exe --theme` prints `dark = true`.
 `DarkMode_Explorer` alone does **not** recolour a list view, so the lists get their colours explicitly
 (`LVM_SETBKCOLOR`/`LVM_SETTEXTCOLOR`/`LVM_SETTEXTBKCOLOR`), the window class background becomes `BLACK_BRUSH`, and `EDIT`/
 `STATIC` are coloured through `WM_CTLCOLOR*`. The title bar uses `DWMWA_USE_IMMERSIVE_DARK_MODE`. Still light: the list

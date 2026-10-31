@@ -34,7 +34,7 @@ use windows::Win32::UI::Controls::{
     SetWindowTheme, LVCOLUMNW, LVIF_TEXT, LVIS_FOCUSED, LVIS_SELECTED, LVITEMW, LVN_GETDISPINFOW, LVN_ITEMCHANGED,
     LVM_DELETEALLITEMS, LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_INSERTCOLUMNW, LVM_INSERTITEMW,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETICONSPACING, LVM_SETITEMCOUNT, LVM_SETITEMSTATE, LIST_VIEW_ITEM_STATE_FLAGS,
-    LVSICF_NOINVALIDATEALL, NM_CUSTOMDRAW, ImageList_Add, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL,
+    LVSICF_NOINVALIDATEALL, LVM_GETHEADER, NM_CUSTOMDRAW, ImageList_Add, ImageList_Create, LVM_SETIMAGELIST, LVSIL_SMALL,
     LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_LIST, LVS_OWNERDATA, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL, LVCF_TEXT, LVCF_WIDTH,
 };
@@ -585,7 +585,7 @@ unsafe fn create_controls(hwnd: HWND) {
         WINDOW_EX_STYLE(0),
         w!("SysListView32"),
         w!(""),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_CLIPSIBLINGS
             | WINDOW_STYLE((LVS_LIST | LVS_SINGLESEL | LVS_SHOWSELALWAYS) as u32),
         0, 0, 280, 400,
         Some(hwnd),
@@ -603,7 +603,7 @@ unsafe fn create_controls(hwnd: HWND) {
         WINDOW_EX_STYLE(0),
         w!("SysListView32"),
         w!(""),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_CLIPSIBLINGS
             | WINDOW_STYLE((LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS) as u32),
         0, 0, 700, 400,
         Some(hwnd),
@@ -614,6 +614,12 @@ unsafe fn create_controls(hwnd: HWND) {
     .unwrap_or_default();
     SetWindowTheme(pictures, w!("Explorer"), PCWSTR::null());
     paint_list_dark(pictures);
+    // the column header is a separate HWND: without its own theme it stays a light band across a dark list
+    let header = SendMessageW(pictures, LVM_GETHEADER, None, None);
+    let header = HWND(header.0 as *mut core::ffi::c_void);
+    if dark() && !header.is_invalid() {
+        SetWindowTheme(header, w!("DarkMode_ItemsView"), PCWSTR::null());
+    }
     SendMessageW(pictures, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
     // In report mode the row height comes from the *small* image list, so a 84 px tile needs an image list that tall:
     // the list never draws from it (we paint every row ourselves), it only sets the height of a row.
