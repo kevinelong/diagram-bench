@@ -1810,6 +1810,13 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### What is still open (2026-10-30)
+
+[PLAN-OPEN-20261030.md](PLAN-OPEN-20261030.md) is the tracked list: native parity that is started and not finished, the
+experiments planned and not run (the `--cache-none` cost floor, the recency window's size, the parked memory comparison,
+the LLM queue), the research questions this project has measured around without answering, the decisions taken *against*
+with their reasons, and the order in which the rest is worth doing.
+
 ### A session belongs to one folder (2026-10-30)
 
 The review session key hashes the pictures' *names* (`state_key`), so two folders whose pictures share names share a

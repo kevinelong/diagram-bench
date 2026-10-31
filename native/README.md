@@ -109,10 +109,17 @@ is not eaten as a mnemonic).
 
 ## Not done yet (deliberately)
 
-- the A/B overlay and finish screen, generation against ComfyUI, Describe-all
-- the grouping/naming rules of `group_prompts` (families are keyed by a raw root prefix here)
-- the A/B review overlay, the finish screen, generation against ComfyUI, Describe-all, search/filter
-- the grouping/naming rules of `group_prompts` (families are keyed by a raw root prefix here)
+The A/B review window and generation **are** done (see above); what is left is the deciding half:
+
+- the grouping and naming rules of `group_prompts` - families are keyed by a raw root prefix here, so the two viewers can
+  disagree about what a folder is;
+- Describe-all for folders that have no prompts, search/filter, a thumbnail cache on disk;
+- UI Automation for the two custom panes (stock controls give tab order, mnemonics and ISMs for free; the panes give
+  nothing to a screen reader);
+- dHash bits differ from Pillow on 1 of 4 fixtures - it orders questions and never scores them, but the divergence is a
+  decision still to take.
+
+The full list, with acceptance for each item, is [../PLAN-OPEN-20261030.md](../PLAN-OPEN-20261030.md).
 
 ## The Zig half, and why it is not built
 
