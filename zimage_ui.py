@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import hashlib
 import io
 import json
@@ -912,6 +913,26 @@ def thumb_for(png, cache_root=None, build=True):
     return out
 
 
+def timed_panel(label):
+    """Decorator: time a whole panel render, with no cost when timing is off.
+
+    Defined here rather than beside the rest of the harness because `thumbs_for` - the single
+    most important number in this file - is defined above it, and a decorator has to exist at
+    the moment the def runs. `timed` and `_TIMING` are resolved when the wrapper is called, so
+    they can be defined further down.
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*a, **k):
+            if not _TIMING:
+                return fn(*a, **k)
+            with timed(label):
+                return fn(*a, **k)
+        return wrapper
+    return deco
+
+
+@timed_panel('thumbs_for')
 def thumbs_for(paths, workers=8, cache_root=None, build=True):
     """Build any missing thumbnails in parallel. Returns {path: thumb_or_None}."""
     from concurrent.futures import ThreadPoolExecutor
@@ -985,6 +1006,64 @@ def log_error(where, exc=None):
         return ERROR_LOG
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------- timing (ZIMAGE_TIMING)
+# Off by default, free when off: one module-level boolean, read once at import. Turn it on with
+# ZIMAGE_TIMING=1 and every timed block appends one JSON line to ZIMAGE_TIMING_LOG (default
+# %LOCALAPPDATA%/zimage-ui/timings.log). Nested blocks are attributed: a child's milliseconds are
+# also recorded against its parent, so "refresh_gallery 340 ms" can say how much of it was
+# thumbs_for - which is the only reason this file exists.
+
+_TIMING = bool(os.environ.get('ZIMAGE_TIMING'))
+_TIMING_LOG = (os.environ.get('ZIMAGE_TIMING_LOG')
+               or ((os.environ.get('LOCALAPPDATA') or str(Path.home())) + '/zimage-ui/timings.log'))
+_TIMING_STACK = []
+
+
+def timing_write(rec):
+    """Append one record. Never raises: timing must not be able to break the window."""
+    try:
+        Path(_TIMING_LOG).parent.mkdir(parents=True, exist_ok=True)
+        with open(_TIMING_LOG, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(rec, separators=(',', ':')) + '\n')
+    except Exception:
+        pass
+
+
+class timed:
+    """`with timed('name', n=3):` - one JSONL record on exit; a no-op unless ZIMAGE_TIMING."""
+
+    __slots__ = ('label', 'detail', 'frame', 't0')
+
+    def __init__(self, label, **detail):
+        self.label, self.detail = label, detail
+
+    def __enter__(self):
+        if _TIMING:
+            self.t0 = time.perf_counter()
+            self.frame = {'children': {}}
+            _TIMING_STACK.append(self.frame)
+        return self
+
+    def __exit__(self, *_exc):
+        if not _TIMING:
+            return False
+        ms = (time.perf_counter() - self.t0) * 1000.0
+        _TIMING_STACK.pop()
+        rec = {'t': datetime.now().isoformat(timespec='milliseconds'),
+               'ev': self.label,
+               'ms': round(ms, 1),
+               'own': round(ms - sum(self.frame['children'].values()), 1)}
+        if self.frame['children']:
+            rec['kids'] = {k: round(v, 1) for k, v in self.frame['children'].items()}
+        if self.detail:
+            rec['d'] = self.detail
+        if _TIMING_STACK:                       # attribute this block to whichever block wraps it
+            parent = _TIMING_STACK[-1]['children']
+            parent[self.label] = parent.get(self.label, 0.0) + ms
+        timing_write(rec)
+        return False
 
 
 def lineage_for(base_path=None, described_from=None, typed=None, limit=None):
@@ -3218,7 +3297,15 @@ class App:
         if total <= 0:
             return
         canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
-        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        try:
+            if not tile.winfo_exists():
+                return
+            top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        except tk.TclError:
+            # the strip was rebuilt between the callback being queued and it running, so this
+            # tile is a dead window path. Silent, because the rebuild has already drawn the
+            # replacement and the retry pass will scroll the live one.
+            return
         view_top, view_h = canvas.canvasy(0), canvas.winfo_height()
         if top >= view_top - 1 and top + height <= view_top + view_h:
             return
@@ -3418,27 +3505,23 @@ class App:
                               % (len(plan['groups']), total, plan.get('seconds') or 0, len(plan['recent'])))
 
     def _show_new_results(self):
-        """Make a just-made picture visible when a folder is open.
+        """Keep the open folder open when a render lands.
 
-        A new picture stays *unfiled* by design - the plan keeps a recent bucket, "recent N stay ungrouped", because a
-        picture one second old has no siblings to be grouped with yet. With a folder open, its contents pane shows that
-        folder's members only, so a brand-new picture is in the gallery and invisible at the same time. Bending the
-        grouping to admit it would corrupt the counts and the label, and the folder would be lying about its contents.
-
-        So the *view* moves, not the membership: the folder closes and the strip shows the new pictures, newest first,
-        with one click back to the folder on the folder bar.
+        This used to close the folder. A new picture is filed nowhere yet - the plan keeps a recent
+        bucket, because a picture one second old has no siblings to group with - so a pane showing
+        one folder's members could never show it. The reasoning still holds, but closing the folder
+        on every render read as "the folder will not open after a render" (reported 2026-10-31):
+        the reader's place in the gallery was thrown away each time a picture finished.
+        The picture is not lost by leaving the folder open - it is on the right-hand display and it
+        has a tile in the strip's Recent folder - so the folder stays, and the hint says where it is.
         """
         if not getattr(self, '_base_from_gallery', False):
             return False          # only the case this exists for: a base chosen by clicking a picture in a folder
         if not self._folders_view_active() or self._active_folder is None:
             return False
-        try:
-            self.select_folder(None)
-        except Exception:
-            return False
-        self.hint.configure(text='new pictures are unfiled until the grouping next runs, so the folder is closed '
-                                 'to show them - the folder bar opens it again')
-        return True
+        self.hint.configure(text='this folder stays open; the new picture is unfiled until the next grouping, '
+                                 'so it is in Recent and on the right')
+        return False
 
     def toggle_recursive(self, force=None):
         """Walk into subfolders, or stop. Resets whenever the source changes."""
@@ -3519,6 +3602,7 @@ class App:
         self._loading_step = step + 1
         self._loading_job = self.root.after(240, self._loading_tick)
 
+    @timed_panel('render_folder_bar')
     def _render_folder_bar(self):
         """A folder *button*, not a dropdown: it names what is open and it opens the full-screen folder browser.
 
@@ -3724,7 +3808,15 @@ class App:
             again()
             return
         canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
-        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        try:
+            if not tile.winfo_exists():
+                return
+            top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        except tk.TclError:
+            # the strip was rebuilt between the callback being queued and it running, so this
+            # tile is a dead window path. Silent, because the rebuild has already drawn the
+            # replacement and the retry pass will scroll the live one.
+            return
         view_top, view_h = canvas.canvasy(0), canvas.winfo_height()
         if top >= view_top - 1 and top + height <= view_top + view_h:
             return                                   # already visible: never jump for nothing
@@ -4762,6 +4854,39 @@ class App:
         cell = size // side
         return [((i % side) * cell, (i // side) * cell, cell, cell) for i in range(side * side)]
 
+    def _prewarm_thumbs(self):
+        """Build the thumbnails the strip and the folder tiles are about to ask for, off the paint path.
+
+        Reported 2026-10-31, with a screenshot: on a start with 1276 pictures the strip draws twelve
+        empty frames and the folder column is bare. Two different causes, both fixed by warming the
+        cache in the background. The folder column is empty because the grouping pass is still running
+        (~2.4 s for 1800 prompts) - that cannot be hurried, but it should not also queue thumbnail
+        work behind it. The twelve blank tiles are a paint-path cost: a tile's PhotoImage is built on
+        demand, 13 ms for a cached-size thumbnail and up to 81 ms for a 6 MB 1536 px render, so the
+        first paint of a cold strip is paying for twelve image decodes it could have done already.
+        """
+        if getattr(self, '_prewarm_done', False) or not self._alive():
+            return
+        self._prewarm_done = True
+        try:
+            recent = [p for p in self._files[:RECENT_N]]
+        except Exception:
+            recent = []
+        sheets = []
+        for g in (self._plan or {}).get('groups', [])[:BATCH_FOLDERS]:
+            sheets += [Path(it['path']) for it in (g.get('items') or [])[:4]]
+
+        def work():
+            try:
+                if recent:
+                    thumbs_for(recent)
+                if sheets:
+                    thumbs_for(sheets)
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    @timed_panel('folder_sheet')
     def _folder_sheet(self, group, size, gutter=None):
         """A contact sheet of a folder's newest four distinct pictures, built from the thumbnail cache.
 
@@ -4798,6 +4923,7 @@ class App:
             self._sheets.clear()
         return sheet
 
+    @timed_panel('render_empty_pane')
     def _render_empty_pane(self):
         """No folder open: the pane keeps its column, its width and its place, and says what it is for.
 
@@ -4827,6 +4953,7 @@ class App:
         self._pane_empty = True
         self._idle(self._on_contents_resize)
 
+    @timed_panel('render_contents')
     def _render_contents(self):
         """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click.
 
@@ -5497,6 +5624,7 @@ class App:
         sheet_px = max(STRIP_TILE_MIN, (width - FOLDER_PAD * cols) // cols)
         return width, cols, sheet_px
 
+    @timed_panel('render_folder_tiles')
     def _render_folder_tiles(self):
         """Folder tiles, three per row: a 4-up (2x2) sheet, the full name wrapped, and the picture count.
 
@@ -5655,6 +5783,7 @@ class App:
         tile = max(48, width // cols - TILE_CHROME)
         return cols, tile
 
+    @timed_panel('refresh_gallery')
     def refresh_gallery(self, select=None):
         if getattr(self, '_closing', False) or not self._alive():
             return                       # the window is on its way out: painting it now is a bgerror, not a repaint
@@ -5675,6 +5804,9 @@ class App:
         # B6: the scrollbar's state (enabled or not) is decided in `_apply_strip_resize` from the laid-out height, so
         # a rebuild has to ask for it - otherwise a bar left disabled over a list that now overflows cannot be dragged.
         self._on_strip_resize()
+        # Warm the thumbnails the next paint will ask for, in the background, so a cold start does not
+        # draw twelve empty frames and fill them a second later (reported with a screenshot 2026-10-31).
+        self._prewarm_thumbs()
 
     def _refresh_gallery(self, select=None):
         self._scene_cache = {}
@@ -5772,6 +5904,7 @@ class App:
                 pass
         self._strip_job = self.root.after(50, self._apply_strip_resize)
 
+    @timed_panel('apply_strip_resize')
     def _apply_strip_resize(self):
         self._strip_job = None
         if not self._alive():
@@ -5966,7 +6099,15 @@ class App:
         if total <= 0 or view_h <= 0:
             return
         canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
-        top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        try:
+            if not tile.winfo_exists():
+                return
+            top, height = tile.winfo_y(), max(1, tile.winfo_height())
+        except tk.TclError:
+            # the strip was rebuilt between the callback being queued and it running, so this
+            # tile is a dead window path. Silent, because the rebuild has already drawn the
+            # replacement and the retry pass will scroll the live one.
+            return
         view_top = canvas.canvasy(0)
         if align == 'top':
             target = top - 8.0
@@ -8055,6 +8196,7 @@ class App:
             return 'break'
         self._click_picture(event.x, event.y)
 
+    @timed_panel('enlarge')
     def enlarge(self, tile_path):
         """Regenerate one tile on its own, at the model's native 1024 px, using the prompt and seed recorded for it."""
         if self.busy:
@@ -8645,6 +8787,17 @@ class App:
             # a base image is always run tile by tile with consecutive seeds (tile_plan), whatever the tick says, so the
             # one-batch wording would be a lie for it
             varies = self.seq_var.get() or bool(self.base_path)
+            # How far the seed box belongs to advance once this request lands. Every tile consumed a seed -
+            # tile_plan allocates seed, seed+step, seed+2*step ... - so a 16-up from seed N has used N..N+15
+            # and the next press should start at N+16. Advancing by one, which is what it did, re-rendered the
+            # previous batch minus its first tile: 15 of the next 16 images were duplicates.
+            step = 1
+            if hasattr(self, 'seed_step_var'):
+                try:
+                    step = max(1, int(self.seed_step_var.get() or 1))
+                except (TypeError, ValueError, tk.TclError):
+                    step = 1
+            self._seed_advance = batch * step if varies else step
             if not varies:
                 self.hint.configure(text='one batch shares seed %s across all %d tiles - tick "one image at a time" '
                                          'for a different seed per tile' % (seed, batch))
@@ -8918,9 +9071,13 @@ class App:
                         note = 'seed %s kept from the gallery image' % self.seed.get()
                     else:
                         before = self.seed.get()
-                        self.bump_seed(1)
-                        note = 'next seed %s (+1)' % self.seed.get() if self.seed.get() != before \
-                            else 'seed %s held at the top' % self.seed.get()
+                        advance = max(1, int(getattr(self, '_seed_advance', 1) or 1))
+                        self._seed_advance = 1      # one request consumes its span once; a save that never went
+                                                    # through generate() must not inherit the last batch's step
+                        self.bump_seed(advance)
+                        note = ('next seed %s (+%d)' % (self.seed.get(), advance)
+                                if self.seed.get() != before
+                                else 'seed %s held at the top' % self.seed.get())
                         self._update_banner()
                     self.hint.configure(text='saved; %s; %s' % (base_note, note))
                     self._current = Path(path)
@@ -8981,6 +9138,7 @@ class App:
         elif mtype == 'executing' and data.get('node') is None:
             self.status.configure(text='decoding…')
 
+    @timed_panel('show_image')
     def _show(self, raw):
         self._img = Image.open(io.BytesIO(raw))
         self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level

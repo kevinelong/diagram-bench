@@ -483,6 +483,21 @@ def main():
     feed_image(app, fresh)
     check('and again after the next one', app.seed.get() == str(int(s1) + 1), '%s -> %s' % (s1, app.seed.get()))
 
+    print('\n-- an N-up advances the seed box past the whole batch, not one tile into it')
+    app.hold_seed_var.set(False)
+    app.layout_var.set('16-up (4x4)')
+    app.text.delete('1.0', 'end')
+    app.text.insert('1.0', 'a photograph of a mug on a wooden table')
+    app.seed.set('900')
+    app.generate()
+    root.update()
+    feed_image(app, fresh)
+    check('a 16-up from seed 900 leaves the box at 916', app.seed.get() == '916', app.seed.get())
+    check('and the hint names the step it took', '+16' in app.hint['text'], app.hint['text'])
+    app.busy = False
+    app.layout_var.set('single')
+    root.update()
+
     print('\n-- hold seed leaves it exactly where it is')
     check('the hold box is off by default', app.hold_seed_var.get() is False)
     app.hold_seed_var.set(True)
@@ -1378,11 +1393,12 @@ def main():
         check('a picture with no gallery base leaves the folder alone', app._active_folder == 0, str(app._active_folder))
         app._base_from_gallery = True
         feed_image(app, fresh)
-        check('a folder base closes the folder so the result can be seen', app._active_folder is None,
-              str(app._active_folder))
-        check('and the hint says why it is unfiled', 'unfiled' in app.hint['text'], app.hint['text'])
+        check('a folder base leaves the folder open, so a render does not throw the reader out of it',
+              app._active_folder == 0, str(app._active_folder))
+        check('and the hint says where the unfiled result is',
+              'unfiled' in app.hint['text'] and 'Recent' in app.hint['text'], app.hint['text'])
         app._show_new_results()
-        check('with no folder open it changes nothing', app._active_folder is None, str(app._active_folder))
+        check('calling it again changes nothing', app._active_folder == 0, str(app._active_folder))
         fresh.unlink(missing_ok=True)
         app._base_from_gallery = False
         app.select_folder(None)
