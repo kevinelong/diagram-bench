@@ -562,7 +562,8 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
-                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion')
+                 'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
+                 'zoom', 'contents_w')
 
 # An image prompt describes a still; an image-to-video model obeys motion language. Sending the still's description
 # with a clip asks for motion while describing stillness, which is exactly what "unusable" looked like.
@@ -699,6 +700,16 @@ GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 1320: four colu
 # 680 would leave the picture column 220 px at the 1200 px minimum window (measured: its action bar needs 283).
 GAL_ASK_W = 3 * (STRIP_TILE_MIN + TILE_CHROME)                 # 318
 PICTURE_KEEP = 360    # the width the picture column keeps before the strip's column stops asking for more
+# The boundary between the folder pane and the strip is draggable (2026-10-30). The pane has a width instead of a share:
+# 180 is the narrowest the pictures stay readable in, 480 the widest before they stop growing and the strip starves, and
+# 300 - the width the pane was fixed at before it - is what a double-click restores. `SASH_W` is the whole hit area,
+# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip's four columns need at the 96 px never-shrink floor:
+# no pane width may take the canvas below it.
+CONTENTS_W_MIN = 180
+CONTENTS_W_MAX = 480
+SASH_W = 8
+SASH_STEP = 16        # one arrow key; Shift makes it four
+GAL_FLOOR_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)   # 424
 # B2 (2026-10-30): the finish screen is the same 4x3 grid, scaled up from the strip: the ranking is the answer, and a
 # folder that ranked more than twelve scrolls rather than dropping its tail.
 REVIEW_FINISH_COLS = 4
@@ -1690,6 +1701,16 @@ class App:
         self._pads = [0, 0, 0, 0]
         self._pinned = None          # a second picture to compare against, independent of the base
         self._sidebar = self._settings.get('sidebar', True)
+        # The splitter's width is remembered like every other setting, and clamped when it is applied rather than here:
+        # a profile written on a 2560 px screen must still open on a 1200 px one without squeezing a column away.
+        try:
+            self._contents_w = int(self._settings.get('contents_w') or CONTENTS_W)
+        except (TypeError, ValueError):
+            self._contents_w = CONTENTS_W
+        self._contents_w = max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, self._contents_w))
+        self._contents_w_applied = self._contents_w    # what the grid was last set to; the window may narrow it
+        self._pane_shown = False
+        self._sash_drag = None
         self._history = list(self._settings.get('history') or [])
         self._hist_pos = None
         self._run_start = None
@@ -1799,13 +1820,39 @@ class App:
         # the open folder's pictures get their own pane beside the folder list, so the list never has to disappear
         self.contents_holder = ttk.Frame(gal)
         self.contents_holder.grid(row=4, column=2, sticky='nsew', pady=(4, 6), padx=(6, 0))
-        # the pane is a second column of pictures: give it the column's spare width instead of a fixed 236 px
-        gal.columnconfigure(2, weight=1)
+        # The boundary is draggable (2026-10-30). The pane's width used to be a constant, so the only way to give the
+        # strip more room was to close the folder. The sash is the first column of the pane's own grid - at its left
+        # edge, which is the boundary itself - with an 8 px hit area, the resize cursor, a 2 px grip that tints while
+        # it is hovered or dragged, and keys: Left/Right move it 16 px (64 with Shift), Home/End to the clamp ends.
+        self.contents_sash = tk.Frame(self.contents_holder, width=SASH_W, bd=0, relief='flat',
+                                      background=plate, takefocus=1, cursor='sb_h_double_arrow',
+                                      highlightthickness=2, highlightbackground=plate,
+                                      highlightcolor=self.theme.accent)
+        self.contents_sash.grid(row=0, column=0, rowspan=3, sticky='ns')
+        # the grip is 2 px of the 8, placed rather than packed: a packed child decides its parent's requested width
+        # (measured: `width=8` with a 2 px child still asked for 2 px), and the hit area is a size, not a side effect
+        self.contents_sash.pack_propagate(False)
+        self.sash_grip = tk.Frame(self.contents_sash, width=2, bd=0, background=self.theme.border)
+        self.sash_grip.place(relx=0.5, rely=0, anchor='n', width=2, relheight=1.0)
+        self._tip(self.contents_sash, 'Drag to resize the folder pane. Double-click: back to %d px.\n'
+                                     'Left/Right: 16 px, Shift: 64 px, Home/End: narrowest/widest.' % CONTENTS_W)
+        for seq, fn in (('<Button-1>', self._sash_press), ('<B1-Motion>', self._sash_motion),
+                        ('<ButtonRelease-1>', self._sash_release), ('<Double-Button-1>', self._sash_reset),
+                        ('<Left>', lambda e: self._sash_key(e, 1)), ('<Right>', lambda e: self._sash_key(e, -1)),
+                        ('<Home>', lambda e: self._sash_jump('min')), ('<End>', lambda e: self._sash_jump('max'))):
+            self.contents_sash.bind(seq, fn)
+        self.contents_sash.bind('<Enter>', lambda e: self._sash_tint(True), add='+')
+        self.contents_sash.bind('<Leave>', lambda e: self._sash_tint(bool(getattr(self, '_sash_drag', None))), add='+')
+        self.contents_sash.bind('<FocusIn>', lambda e: self._sash_tint(True), add='+')
+        self.contents_sash.bind('<FocusOut>', lambda e: self._sash_tint(False), add='+')
+        # the pane is a second column of pictures whose width the sash sets: weight 0 and a minsize, so the strip's
+        # column takes every spare pixel instead of the two sharing it
+        gal.columnconfigure(2, weight=0)
         # The folder's own name at the top of its column. The pane had no identity at all: a folder was recognisable
         # only by the truncated label back in the first column, so nothing on screen said which folder you were in.
         self.contents_title = ttk.Label(self.contents_holder, text='', anchor='w', justify='left',
                                         wraplength=CONTENTS_W)
-        self.contents_title.grid(row=0, column=0, columnspan=2, sticky='we', pady=(0, 4))
+        self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
         base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
@@ -1817,21 +1864,21 @@ class App:
         self._loading_active = False
         self.contents_canvas = tk.Canvas(self.contents_holder, highlightthickness=0, borderwidth=0,
                                          background=plate, width=CONTENTS_W)
-        self.contents_canvas.grid(row=1, column=0, sticky='nsew')
+        self.contents_canvas.grid(row=1, column=1, sticky='nsew')
         self.contents_bar = ttk.Scrollbar(self.contents_holder, orient='vertical',
                                           command=self.contents_canvas.yview)
-        self.contents_bar.grid(row=1, column=1, sticky='ns')
+        self.contents_bar.grid(row=1, column=2, sticky='ns')
         # B3 (2026-10-30): the pane's pictures got CONTENTS_W and the scrollbar was drawn out of the same width, so the
         # last column of pictures slid under it. The canvas asks for the scrollbar's own width on top, queried from the
         # widget rather than assumed (14 px at 1x, more at 2x), so the pictures keep their column.
         try:
-            self.contents_canvas.configure(width=CONTENTS_W + self._bar_px(self.contents_bar))
+            self.contents_canvas.configure(width=self._contents_w + self._bar_px(self.contents_bar))
         except Exception:
             pass
         # the pane must stretch with the row, not sit at the canvas's requested 7 cm height (the folder list did, and
         # the pictures were clipped to a two-row band under a much taller column)
         self.contents_holder.rowconfigure(1, weight=1)
-        self.contents_holder.columnconfigure(0, weight=1)
+        self.contents_holder.columnconfigure(1, weight=1)      # column 0 is the sash: it keeps its 8 px
         self.contents_canvas.configure(yscrollcommand=self.contents_bar.set)
         self.contents_canvas.configure(takefocus=1)
         for seq, fn in (('<Left>', lambda e: self._pane_key(e, 'left')), ('<Right>', lambda e: self._pane_key(e, 'right')),
@@ -1846,7 +1893,7 @@ class App:
         # The pane had no delete of its own: the strip did (select all, Delete, Ctrl+A), and a picture removed from the
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
-        self.contents_btns.grid(row=2, column=0, columnspan=2, sticky='we', pady=(4, 0))
+        self.contents_btns.grid(row=2, column=1, columnspan=2, sticky='we', pady=(4, 0))
         for col in range(3):
             self.contents_btns.columnconfigure(col, weight=1)
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
@@ -4684,23 +4731,191 @@ class App:
         self.gal_canvas.yview(*args)
         self._maybe_more('strip')
 
+    def _pane_total_w(self):
+        """The width the pane's grid column asks for: its pictures, its scrollbar, and the sash (all clamped)."""
+        return self._contents_w_applied + self._bar_px(self.contents_bar) + SASH_W
+
+    def _strip_pane_chrome(self):
+        """The pixels between the pane's canvas and the strip's canvas that neither of them owns.
+
+        The gallery's own padding, the gap in front of the pane, the sash, and the strip's scrollbar: 54 px at 1x,
+        measured here rather than assumed, because a 2x desktop doubles the bar widths but not the padding. It is a
+        property of the layout, not of any width, so it is measured once and then reused - measuring it while a drag
+        is in flight would read a half-applied layout.
+        """
+        cached = getattr(self, '_chrome_px', None)
+        if cached:
+            return cached
+        try:
+            gal, pane, strip = (self.gal.winfo_width(), self.contents_canvas.winfo_width(),
+                                self.gal_canvas.winfo_width())
+            value = gal - pane - strip
+            if gal > 1 and pane > 1 and strip > 1 and 24 <= value <= 200:
+                self._chrome_px = value
+                return value
+        except Exception:
+            pass
+        return 54                     # the measured 1x value, until the window has been laid out once
+
+    def _contents_w_limit(self):
+        """The widest the pane may be here without taking the strip below four columns at the 96 px floor.
+
+        Four columns of 96 px need `GAL_FLOOR_W` (424) of canvas, the gallery column can claim at most what the window
+        leaves after the prompt and the picture column, and the chrome above sits between the two canvases. On a
+        1707 x 960 screen that is 313 px, not the 480 cap - the cap is what a 2560 px screen can pay for. The bound
+        comes from the window alone, never from the pane's current width, so no gesture can chase its own tail.
+        """
+        try:
+            w = self.root.winfo_width()
+            prompt = max(420, self.text.master.winfo_reqwidth())
+        except Exception:
+            return CONTENTS_W_MAX
+        if w <= 1:
+            return CONTENTS_W_MAX
+        room = ((w - prompt - PICTURE_KEEP) - self._strip_pane_chrome()
+                - self._bar_px(self.contents_bar) - GAL_FLOOR_W)
+        return max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, room))
+
+    def _clamp_contents_w(self, width):
+        try:
+            value = int(width)
+        except (TypeError, ValueError):
+            value = CONTENTS_W
+        return max(CONTENTS_W_MIN, min(self._contents_w_limit(), value))
+
+    def _apply_contents_w(self):
+        """Put the pane's width into the grid: the canvas asks for it plus the bar, and the column follows the ask.
+
+        `_contents_w` is the reader's choice and is what gets remembered; `_contents_w_applied` is that choice clamped
+        to what this window can spare right now, so shrinking the window narrows the pane instead of pushing the
+        picture column off the edge. The column keeps `weight=0` and no minsize on purpose: its width is the canvas's
+        request, which is exactly this number, and a window too small to pay for it may still squeeze it - a minsize
+        would be spent out of the picture column's width instead. Returns True when the applied width moved.
+        """
+        wanted = self._contents_w
+        applied = min(wanted, self._contents_w_limit()) if self._pane_shown else wanted
+        moved = applied != getattr(self, '_contents_w_applied', None)
+        self._contents_w_applied = applied
+        bar = self._bar_px(self.contents_bar)
+        try:
+            self.contents_canvas.configure(width=applied + bar)
+            self.contents_title.configure(wraplength=max(200, applied - 6))
+            self.gal.columnconfigure(2, weight=0, minsize=0)
+        except Exception:
+            return False
+        return moved
+
+    def _set_contents_w(self, width, persist=False):
+        """Move the splitter: clamp, apply, and remember it when the gesture is over."""
+        value = self._clamp_contents_w(width)
+        changed = value != getattr(self, '_contents_w', None)
+        self._contents_w = value
+        moved = self._apply_contents_w()
+        if changed or moved:
+            self._gallery_w = None              # the gallery column's request depends on the pane's width
+            self._fit_gallery_column()
+        if persist:
+            self._save_contents_w()
+        return value
+
+    def _save_contents_w(self):
+        """Write `contents_w` beside the other settings - the same path `toggle_groups` uses for 'folders'."""
+        try:
+            self._settings['contents_w'] = self._contents_w
+            save_settings(self._settings)
+        except Exception:
+            pass
+
+    def _sash_tint(self, on):
+        """The 2 px grip is the whole affordance: neutral at rest, the accent while hovered, dragged or focused."""
+        try:
+            self.sash_grip.configure(background=self.theme.accent if on else self.theme.border)
+        except Exception:
+            pass
+
+    def _sash_press(self, event):
+        if not self._pane_shown:
+            return None
+        try:
+            self.contents_sash.focus_set()
+            self.contents_sash.grab_set()
+        except Exception:
+            pass
+        self._sash_drag = (event.x_root, self._contents_w)   # the width at the press, not the last motion
+        self._sash_tint(True)
+        return 'break'
+
+    def _sash_motion(self, event):
+        drag = self._sash_drag
+        if not drag:
+            return None
+        start_x, start_w = drag
+        # the boundary is the pane's left edge: dragging it left makes the pane wider
+        self._set_contents_w(start_w - (event.x_root - start_x))
+        return 'break'
+
+    def _sash_release(self, event):
+        if not self._sash_drag:
+            return None
+        self._sash_drag = None
+        try:
+            self.contents_sash.grab_release()
+        except Exception:
+            pass
+        self._save_contents_w()
+        self._sash_tint(False)
+        # what the drag deferred, once: the strip's tiles (or folder tiles) and the pane's own reflow
+        if getattr(self, '_strip_dirty', False):
+            self._strip_dirty = False
+            self._on_strip_resize()
+        if getattr(self, '_contents_dirty', False):
+            self._contents_dirty = False
+            self._on_contents_resize()
+        return 'break'
+
+    def _sash_reset(self, event=None):
+        """Double-click: back to the 300 px the pane was born at."""
+        self._set_contents_w(CONTENTS_W, persist=True)
+        return 'break'
+
+    def _sash_key(self, event, direction):
+        """Left/Right move the boundary 16 px (Shift 64), and persist at once - there is no release to wait for."""
+        if not self._pane_shown:
+            return None
+        step = SASH_STEP * (4 if getattr(event, 'state', 0) & 0x0001 else 1)
+        self._set_contents_w(self._contents_w + direction * step, persist=True)
+        return 'break'
+
+    def _sash_jump(self, end):
+        if not self._pane_shown:
+            return None
+        self._set_contents_w(CONTENTS_W_MIN if end == 'min' else self._contents_w_limit(), persist=True)
+        return 'break'
+
     def _show_pane(self, show):
         """Show or hide the open-folder pane, and hand its column back to the strip when it goes.
 
-        The pane's column keeps `weight=1` even when nothing is in it, so a hidden pane still took a third of the
-        gallery column: with the folder list closed the strip had 497 px of a 682 px column (measured 2026-10-30).
+        The pane's column used to keep `weight=1` even when nothing was in it, so a hidden pane still took a third of
+        the gallery column (measured 2026-10-30). It is a fixed width now - the sash sets it - with weight 0 and a
+        minsize, and hiding it drops the minsize so the strip's column takes the whole gallery column.
         """
+        self._pane_shown = bool(show)
         try:
-            self.gal.columnconfigure(2, weight=1 if show else 0)
             if show:
                 self.contents_holder.grid()
             else:
                 self.contents_holder.grid_remove()
         except Exception:
             pass
+        self._apply_contents_w()
+        self._gallery_w = None                  # the gallery column's request depends on the pane's width
+        self._fit_gallery_column()
 
     def _on_contents_resize(self, event=None):
         if getattr(self, '_rebuilding', False) or not self._alive():
+            return
+        if getattr(self, '_sash_drag', None):
+            self._contents_dirty = True      # same rule as the strip: one reflow, at the release
             return
         width = self.contents_canvas.winfo_width()
         cols, tile = self._contents_metrics(width)
@@ -5039,14 +5254,15 @@ class App:
             w = self.root.winfo_width()
         except Exception:
             w = 0
+        pane = self._pane_total_w() if getattr(self, '_pane_shown', False) else 0
         want = int(w * GALLERY_SHARE) if w > 1 else GAL_FIT_W
-        want = max(GAL_FIT_W, min(GAL_MAX_W, want))
+        want = max(GAL_FIT_W, min(GAL_MAX_W, want)) + pane     # the pane is a column inside this width, not a share
         if w > 1:
             try:
                 prompt = max(420, self.text.master.winfo_reqwidth())
             except Exception:
                 prompt = 420
-            want = max(210, min(want, w - prompt - PICTURE_KEEP))
+            want = max(210 + pane, min(want, w - prompt - PICTURE_KEEP))
         return want
 
     def _fit_gallery_column(self, event=None):
@@ -5059,6 +5275,8 @@ class App:
                 return
         except Exception:
             pass
+        if getattr(self, '_pane_shown', False):
+            self._apply_contents_w()      # the clamp is a function of the window: a narrower one narrows the pane
         want = self._gallery_width()
         if want == getattr(self, '_gallery_w', None):
             return
@@ -5172,6 +5390,11 @@ class App:
         top - which is what lost the reader's place when a picture in the other column was selected.
         """
         if getattr(self, '_closing', False):
+            return
+        if getattr(self, '_sash_drag', None):
+            # a splitter drag emits one <Configure> per pixel; the tiles follow at the release, once (measured: 40
+            # steps queued 23 re-layouts and 11 folder re-renders before this line existed)
+            self._strip_dirty = True
             return
         if getattr(self, '_strip_job', None):
             try:
@@ -7689,6 +7912,7 @@ class App:
                           'favorites': sorted(self._favorites),
                           'custom_styles': self._custom_styles,
                           'sidebar': self._sidebar,
+                          'contents_w': self._contents_w,
                           'runs': self._runs[-50:]}
         return save_settings(self._settings)
 

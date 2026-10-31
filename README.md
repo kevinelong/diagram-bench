@@ -279,6 +279,17 @@ list**, **three across**, sized from the pane's live width and as tall as the co
 moves the folder list. All three lists - pictures, folder tiles, folder contents - use **infinite scrolling**: they
 show a first batch and append the next one when you reach the bottom.
 
+**The boundary between that pane and the strip is a splitter** (2026-10-30). The pane's width used to be the constant
+`CONTENTS_W = 300`, so the only way to give the strip more room was to close the folder. The sash is an 8 px strip at
+the pane's left edge: a 2 px grip that tints while it is hovered, dragged or focused, the `sb_h_double_arrow` cursor,
+Left/Right moving it **16 px** (**64** with Shift), Home/End to the two ends, and a double-click back to 300. The width
+is remembered as `contents_w` and restored on the next start. It clamps between **180 and 480 px**, and the upper bound
+is what the window can pay for rather than the cap: four strip columns at the 96 px never-shrink floor need 424 px of
+canvas, so on this 1707x960 desktop the honest maximum is **311 px** - dragged past it the strip's canvas measures
+exactly 424 px with four 96 px tiles, and no setting can clip a column. A drag defers the strip to the release
+(`_on_strip_resize` and `_on_contents_resize` park their work while the sash is held): **a 40-step drag queues 1
+folder re-render and 3 debounced re-layouts**, where it queued 11 and 23 before that guard.
+
 **Three details that make the panes readable at a glance** (2026-10-27):
 
 - **Folder titles are cut to ten words** (about three lines at tile width) with an ellipsis; the full sentence stays in

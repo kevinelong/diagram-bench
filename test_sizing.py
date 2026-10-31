@@ -416,6 +416,166 @@ def main():
     check('and so does a wider one', tiles_fit(),
           (right_edge(app._folder_tiles()), app.gal_canvas.winfo_width()))
 
+    # ---- L2: the splitter between the folder pane and the strip
+    print('\n-- splitter: a sash with a hit area, clamps, keys and a remembered width')
+    app.select_folder(0)
+    pump(root, app, 1.0)
+    sash = app.contents_sash
+
+    def sash_press_release():
+        x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
+        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
+        root.update()
+
+    def sash_drag(dx, steps=8):
+        x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
+        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
+        root.update()
+        for i in range(steps):
+            sash.event_generate('<B1-Motion>', x=2, y=20, rootx=x + int(dx * (i + 1) / steps), rooty=y)
+            root.update()
+        sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x + dx, rooty=y)
+        root.update()
+
+    check('the sash is grid-managed between the strip canvas and the pane canvas',
+          sash.winfo_manager() == 'grid'
+          and app.gal_canvas.winfo_rootx() + app.gal_canvas.winfo_width() <= sash.winfo_rootx()
+          and sash.winfo_rootx() + sash.winfo_width() <= app.contents_canvas.winfo_rootx(),
+          (app.gal_canvas.winfo_rootx() + app.gal_canvas.winfo_width(), sash.winfo_rootx(),
+           app.contents_canvas.winfo_rootx()))
+    check('its hit area is 6-8 px wide', 6 <= sash.winfo_width() <= 8, sash.winfo_width())
+    check('it carries the resize cursor', sash.cget('cursor') == 'sb_h_double_arrow', sash.cget('cursor'))
+    check('it is a tab stop with a visible focus ring',
+          bool(sash.cget('takefocus')) and int(sash.cget('highlightthickness')) > 0
+          and str(sash.cget('highlightcolor')) == app.theme.accent,
+          (sash.cget('takefocus'), sash.cget('highlightthickness'), sash.cget('highlightcolor')))
+    check('the grip is a 2 px line, quiet at rest',
+          app.sash_grip.winfo_width() == 2 and str(app.sash_grip.cget('background')) == app.theme.border,
+          (app.sash_grip.winfo_width(), app.sash_grip.cget('background')))
+    sash.event_generate('<Enter>')
+    root.update()
+    hovered = str(app.sash_grip.cget('background'))
+    sash.event_generate('<Leave>')
+    root.update()
+    check('hovering tints it and leaving puts it back',
+          hovered == app.theme.accent and str(app.sash_grip.cget('background')) == app.theme.border,
+          (hovered, app.sash_grip.cget('background')))
+
+    app._set_contents_w(300)
+    pump(root, app, 0.5)
+    pane_before = app.contents_canvas.winfo_width()
+    sash_drag(40, steps=8)                                  # to the right: the pane narrows
+    pump(root, app, 0.9)
+    check('a drag moves the boundary', app._contents_w == 260, app._contents_w)
+    check('the pane canvas follows the drag',
+          abs(app.contents_canvas.winfo_width() - (pane_before - 40)) <= 3,
+          (app.contents_canvas.winfo_width(), pane_before))
+    check('and the width is written to the settings file',
+          zui.load_settings().get('contents_w') == 260, zui.load_settings().get('contents_w'))
+    sash_drag(600, steps=12)                                # past the narrow end
+    pump(root, app, 0.9)
+    check('dragging past the narrow end stops at 180 px',
+          app._contents_w == zui.CONTENTS_W_MIN
+          and app.contents_canvas.winfo_width() >= zui.CONTENTS_W_MIN,
+          (app._contents_w, app.contents_canvas.winfo_width()))
+    sash_drag(-600, steps=12)                               # past the wide end
+    pump(root, app, 0.9)
+    limit = app._contents_w_limit()
+    cols, tile = app._strip_metrics()
+    canvas_w = app.gal_canvas.winfo_width()
+    check('dragging past the wide end stops at what this window can pay for',
+          app._contents_w == limit and zui.CONTENTS_W_MIN < limit <= zui.CONTENTS_W_MAX,
+          (app._contents_w, limit))
+    check('four strip columns survive at the 96 px never-shrink floor',
+          cols == zui.STRIP_FIT_COLS and tile >= zui.STRIP_TILE_MIN, (cols, tile, canvas_w))
+    check('and the four of them still fit the canvas the pane left',
+          cols * (tile + zui.TILE_CHROME) <= canvas_w, (cols * (tile + zui.TILE_CHROME), canvas_w))
+    x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
+    for _ in range(2):
+        sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
+        root.update()
+        sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x, rooty=y)
+        root.update()
+    pump(root, app, 0.6)
+    check('a double-click restores 300 px', app._contents_w == zui.CONTENTS_W, app._contents_w)
+
+    app._set_contents_w(200, persist=True)
+    pump(root, app, 0.4)
+    sash.focus_set()
+    root.update()
+    sash.event_generate('<Left>')
+    root.update()
+    check('Left moves the boundary 16 px', app._contents_w == 216, app._contents_w)
+    sash.event_generate('<Right>')
+    root.update()
+    check('Right moves it back 16', app._contents_w == 200, app._contents_w)
+    sash.event_generate('<Shift-Left>')
+    root.update()
+    check('Shift+Left moves it 64', app._contents_w == 264, app._contents_w)
+    sash.event_generate('<Shift-Right>')
+    root.update()
+    check('Shift+Right moves it back 64', app._contents_w == 200, app._contents_w)
+    sash.event_generate('<Home>')
+    pump(root, app, 0.4)
+    check('Home goes to the narrow end', app._contents_w == zui.CONTENTS_W_MIN, app._contents_w)
+    sash.event_generate('<End>')
+    pump(root, app, 0.4)
+    check('End goes to the wide end', app._contents_w == app._contents_w_limit(), app._contents_w)
+
+    # no flicker: a drag is a burst of <Configure> events and the 50 ms debounce has to absorb it
+    counts = {'refresh': 0, 'tiles': 0, 'resize': 0}
+    real_refresh, real_tiles, real_resize = (zui.App.refresh_gallery, zui.App._render_folder_tiles,
+                                             zui.App._apply_strip_resize)
+
+    def count_refresh(self, *a, **k):
+        counts['refresh'] += 1
+        return real_refresh(self, *a, **k)
+
+    def count_tiles(self, *a, **k):
+        counts['tiles'] += 1
+        return real_tiles(self, *a, **k)
+
+    def count_resize(self, *a, **k):
+        counts['resize'] += 1
+        return real_resize(self, *a, **k)
+
+    zui.App.refresh_gallery, zui.App._render_folder_tiles, zui.App._apply_strip_resize = (
+        count_refresh, count_tiles, count_resize)
+    try:
+        app._set_contents_w(300)
+        pump(root, app, 0.6)
+        counts.update(refresh=0, tiles=0, resize=0)
+        sash_drag(-40, steps=40)
+        pump(root, app, 1.4)
+        total = counts['refresh'] + counts['tiles']
+        check('a 40-step drag queues a bounded number of rebuilds', total <= 4, dict(counts))
+        check('and no burst of them while the pointer is down', counts['resize'] <= 4, dict(counts))
+        check('the strip bar keeps its grid cell through the drag',
+              app.gal_bar.winfo_manager() == 'grid', app.gal_bar.winfo_manager())
+    finally:
+        zui.App.refresh_gallery, zui.App._render_folder_tiles, zui.App._apply_strip_resize = (
+            real_refresh, real_tiles, real_resize)
+
+    app._set_contents_w(250, persist=True)
+    pump(root, app, 0.5)
+    check('the width survives a full persist',
+          zui.load_settings().get('contents_w') == 250, zui.load_settings().get('contents_w'))
+    root10 = tk.Tk()
+    app10 = zui.App(root10, Stub(), args)
+    # only this window's geometry is under test: a second root must not paint (Tkinter's default root is the *first*
+    # one, so a folder sheet built here would be an image the second interpreter cannot resolve)
+    app10._closing = True
+    root10.update()
+    check('a new window opens at the width the last one was left at',
+          app10._contents_w == 250, app10._contents_w)
+    check('and its pane asks for it on top of its scrollbar',
+          app10.contents_canvas.winfo_reqwidth()
+          == 250 + zui.App._bar_px(app10.contents_bar),
+          (app10.contents_canvas.winfo_reqwidth(), zui.App._bar_px(app10.contents_bar)))
+    root10.destroy()
+    app._set_contents_w(zui.CONTENTS_W, persist=True)
+    pump(root, app, 0.4)
+
     root.destroy()
 
     print('\n%d failure(s)' % len(FAILS))
