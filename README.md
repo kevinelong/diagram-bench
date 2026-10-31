@@ -1765,6 +1765,17 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### Enter means the default action (2026-10-30)
+
+`ttk::button` in Tk 8.6.12 has **no `-default` option and no `<Return>` binding** - only `<space>`, via
+`ttk::button::activate`. So Space pressed a focused button (Windows behaviour) while Enter, after tabbing to a button, did
+nothing at all. The window answers Enter itself now (`_on_default_enter`, bound on the root for Return and keypad Enter) and
+runs Generate, leaving Enter alone where a widget already gives it a meaning: the prompt box (it generates), the strip and
+the panes (they load the picture or open the folder), and any text/entry/list canvas.
+
+`test_enter.py` asserts all four cases plus the binding. The visible *default-button ring* cannot be drawn by ttk in this Tk
+version, so it is documented rather than faked - it is one more thing the native port gets for free.
+
 ### Tab, F6 and Alt+letter (2026-10-30)
 
 An audit against Microsoft's Windows keyboard guidance

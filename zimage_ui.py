@@ -2358,6 +2358,9 @@ class App:
         root.bind('<F6>', lambda e: self._cycle_focus(1, e))
         root.bind('<Shift-F6>', lambda e: self._cycle_focus(-1, e))
         self._install_access_keys()
+        # Enter, the Windows way: the window's default action, unless the focused widget gives Enter its own meaning
+        for seq in ('<Return>', '<KP_Enter>'):
+            self.root.bind(seq, self._on_default_enter, add='+')
 
         if not self._sidebar:
             self.set_sidebar(False)
@@ -6437,6 +6440,27 @@ class App:
         except Exception:
             pass
         return None
+
+    # Widgets that already give Enter its own meaning; the window-level default must not fire on them.
+    _ENTER_HANDLES = ('TEntry', 'TCombobox', 'TSpinbox', 'TSpinbox', 'Text', 'Listbox', 'Canvas', 'Treeview',
+                      'Entry', 'Spinbox')
+
+    def _on_default_enter(self, event=None):
+        """Enter runs the window's default action - Generate - unless the focused widget has its own Enter.
+
+        Windows apps have a default button; `ttk::button` in Tk 8.6.12 has neither a `-default` option nor a <Return>
+        binding (only <space>, via `ttk::button::activate`), so pressing Enter after tabbing to a button did nothing.
+        Fixed here rather than in a newer Tk because the window is what people tab through.
+        """
+        widget = event.widget if event is not None else self.root.focus_get()
+        try:
+            if widget is not None and str(widget.winfo_class()) in self._ENTER_HANDLES:
+                return None
+        except Exception:
+            pass
+        # generate() already knows what to do about a render in flight; second-guessing it here silently ate the key
+        self.generate()
+        return 'break'
 
     def _apply_focus_ring(self):
         """Re-draw the focus ring after a repaint, since `_paint` has just reset every tile's highlight."""
