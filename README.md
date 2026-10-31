@@ -1072,6 +1072,28 @@ The facts first, then where they came from (model, date, and the scene number wh
 At the bottom of the same column sit **Make clip** and **Open clip** - in that order, which is the order the work happens
 in, next to the picture they act on rather than in the prompt column.
 
+**Zoom is on the picture, and 100 % means the picture's own pixels** (2026-10-30). The `zoom` button at the left of the
+picture's toolbar (Alt+Z) offers **Fit / 50 / 75 / 100 / 125 / 150 / 200 / 400 %**, and the window opens at **100 %**.
+A percentage draws `round(source_px * pct)` - a 2400x1600 picture measures exactly 2400x1600 on the canvas at 100 %, so
+one canvas pixel is one source pixel and the render path skips resampling entirely at that level; `test_sizing.py`
+asserts the drawn size against `im.size` rather than looking at it. **Fit** is the behaviour the column always had - the
+picture scaled down to the canvas, integer box reduction then one bilinear step, never enlarged - and it is the level
+that still refits on every resize. The level is a view setting: it is saved as `zoom` and survives selecting another
+picture, while the pan does not (a new picture starts at the pinned corner).
+
+When the drawn picture is bigger than the canvas it can be panned: drag it (the pointer turns into the four-way `fleur`
+arrow, and the drag is clamped to the picture's own bounds, so at either extreme an edge of the picture is flush with the
+canvas and no blank strip can appear), scroll the **wheel** vertically and **Shift+wheel** sideways, or pan with the
+**arrow keys** while the canvas has the keyboard. Only the part of the picture the canvas can show is ever rendered - at
+400 % a 2400 px picture would otherwise need a 9600 px Tk photo to display 430 px of it - and a viewport-sized slice
+measures **7 ms** in PIL on this box, so a drag stays live without a cache of full-size images. No scrollbars were added:
+they would have to be laid out against a canvas whose size is what the zoom is computed from.
+
+The pan shares this canvas with three drags that already owned the press - the **compare** divider, **mask** painting and
+the **crop** rectangle - so it engages only when the picture overflows **and** none of those modes is armed, and a press
+that never moves is still a click (a contact-sheet tile still enlarges). `test_sizing.py` drives each of the three
+through the real bindings, not only through the handlers, at 400 %.
+
 ## What a "vary" strength actually does
 
 `vary_curve.py` measures it two ways, and the two disagree in an instructive way. The **population** curve - every

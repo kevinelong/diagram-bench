@@ -138,7 +138,45 @@ ACCESS_COMMANDS = (
     ('l', 'contents_gal_btn', 2, 'Walk the open folder one picture at a time'),
     ('s', 'sel_all_btn', 0, 'Select every picture in the strip (press again to clear)'),
     ('d', 'del_btn', 0, 'Send the selected pictures to the Recycle Bin (asks first)'),
+    ('z', 'zoom_btn', 0, 'Change how large the shown picture is, or fit it to the window'),
 )
+
+
+# --- zoom on the shown picture -------------------------------------------------
+# 100 % is the picture's own pixels - one canvas pixel per source pixel - which is the only level at which a detail
+# survives the trip to the screen unchanged, so it is the level the window opens at. Fit is what the canvas has always
+# done: the picture scaled down to the canvas and never up, and still the level that follows a window resize.
+ZOOM_STEPS = ('Fit', '50%', '75%', '100%', '125%', '150%', '200%', '400%')
+ZOOM_DEFAULT = '100%'
+ZOOM_MARGIN = 6        # the gap between the picture and the canvas edge; the top-right pin has always used it
+ZOOM_STEP = 48         # canvas pixels per wheel notch and per arrow press
+ZOOM_SLOP = 4          # a press that moves less than this is a click, not a pan
+
+
+def zoom_pct(label):
+    """The percentage a zoom label asks for, or None for Fit.
+
+    A settings file can hold anything, so a value that cannot be read falls back to the default rather than to a size
+    nobody chose. `'100%'` is what the toolbar shows and what is saved back - not 1.0, not `'100'`.
+    """
+    text = str(label or '').strip().lower()
+    if text.startswith('fit'):
+        return None
+    try:
+        pct = int(round(float(text.rstrip('% '))))
+    except (TypeError, ValueError):
+        pct = int(round(float(ZOOM_DEFAULT.rstrip('%'))))
+    return pct if pct > 0 else int(round(float(ZOOM_DEFAULT.rstrip('%'))))
+
+
+def zoom_label(pct):
+    """The label for a percentage, spelled the way the control lists it."""
+    if pct is None:
+        return ZOOM_STEPS[0]
+    for label in ZOOM_STEPS[1:]:
+        if int(label.rstrip('%')) == int(pct):
+            return label
+    return '%d%%' % int(pct)
 
 
 def grid_move(index, count, cols, move, rows=1):
@@ -1731,6 +1769,8 @@ class App:
         self._scan_capped = False
         self._sheet = None            # {'cols','rows','tiles'} while a contact sheet is on screen
         self._draw = None             # (x0, y0, w, h) of the drawn image on the canvas
+        self._pan_xy = None           # where a zoomed picture's top-left sits, or None for the pinned corner
+        self._pan_grab = None         # (x, y, x0, y0, w, h) while a pan drag is in flight
 
         root.title('Z-Image — prompt and picture')
         # the platform icon masters are vendored in assets/platform-icons (see its USAGE.md): use the Windows master's
@@ -2303,8 +2343,19 @@ class App:
         self.res_label.grid(row=1, column=0, sticky='e', pady=(2, 0))
         tools = ttk.Frame(right)
         tools.grid(row=2, column=0, sticky='ew', pady=(6, 0))
+        # zoom: how much of the picture's own pixels the canvas shows. A view setting, so it outlives the picture, and
+        # Alt+Z opens its list the way every other toolbar command is reached.
+        self.zoom_var = tk.StringVar(value=zoom_label(zoom_pct(self._settings.get('zoom') or ZOOM_DEFAULT)))
+        self.zoom_btn = ttk.Menubutton(tools, text='zoom %s' % self.zoom_var.get())
+        self.zoom_btn.pack(side='left')
+        self.zoom_menu = tk.Menu(self.zoom_btn, tearoff=False)
+        for _label in ZOOM_STEPS:
+            self.zoom_menu.add_radiobutton(label=_label, variable=self.zoom_var, value=_label,
+                                           command=lambda l=_label: self._set_zoom(l))
+        self.zoom_btn.configure(menu=self.zoom_menu)
+        self.zoom_btn._access_invoke = self._open_zoom_list   # a menubutton has no invoke() of its own
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
-        self.copy_btn.pack(side='left')
+        self.copy_btn.pack(side='left', padx=(6, 0))
         self.info_btn = ttk.Button(tools, text='\u24d8 metadata\u2026', command=self.show_metadata, state='disabled')
         self.info_btn.pack(side='left', padx=(6, 0))
         self.graph_btn = ttk.Button(tools, text='graph\u2026', command=self.show_graph)
@@ -2431,6 +2482,16 @@ class App:
         self.refresh_gallery()
         root.bind('<Control-v>', lambda e: None if self._typing() else self.paste_base())
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
+        # the pan is appended after the three modes that already own a press on this canvas - compare, mask and crop -
+        # and refuses to move unless the picture overflows the canvas and none of them is armed. A wheel notch or an
+        # arrow key pans the same distance, so the canvas needs the keyboard as well (`takefocus`).
+        self.canvas.bind('<B1-Motion>', self._on_pan_drag, add='+')
+        self.canvas.bind('<ButtonRelease-1>', self._on_pan_release, add='+')
+        self.canvas.bind('<MouseWheel>', self._on_canvas_wheel)
+        self.canvas.bind('<Shift-MouseWheel>', self._on_canvas_wheel)
+        self.canvas.configure(takefocus=1)
+        for _seq in ('<Left>', '<Right>', '<Up>', '<Down>'):
+            self.canvas.bind(_seq, self._on_pan_key)
         self.style_var.trace_add('write', lambda *a: self._on_style_change())
         self.model_var.trace_add('write', lambda *a: self._update_banner())
         for seq, fn in (('<Delete>', self._on_delete_key), ('<Control-a>', self._on_ctrl_a),
@@ -6467,7 +6528,7 @@ class App:
         self.mask_var.set(self._mask_painting)
         if self._mask_painting and self._current is not None and self._mask is None:
             self._mask = Image.new('L', Image.open(self._current).size, 0)
-        self.canvas.configure(cursor='pencil' if self._mask_painting else '')
+        self._pan_cursor()
         self._refresh_generate_label()
 
     def _read_brush(self):
@@ -7300,11 +7361,15 @@ class App:
                     return 'break'
             except Exception:
                 pass
-        try:
-            widget.invoke()
-        except Exception:
-            pass
-        return 'break'
+        # press it if it can be pressed, otherwise open it if it can be opened - the zoom list is a menubutton, which
+        # has no invoke() of its own
+        run = getattr(widget, 'invoke', None) or getattr(widget, '_access_invoke', None)
+        if callable(run):
+            try:
+                run()
+            except Exception:
+                pass
+        return 'break' if callable(run) else None
 
     def select_file(self, path):
         """One entry point for a click in the recent strip or the full browser: look at it, restore its prompt.
@@ -7524,6 +7589,8 @@ class App:
             b.state(['!disabled' if self._current else 'disabled'])
         self.copy_status.configure(text='')
         self._img = Image.open(io.BytesIO(raw))
+        self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
+        self._pan_grab = None
         self.canvas.delete('placeholder')
         self._idle(self._redraw)
         self._idle(self._show_resolution)
@@ -7543,6 +7610,8 @@ class App:
         except Exception as e:
             self.hint.configure(text='cannot open %s: %s' % (Path(path).name, type(e).__name__))
             return
+        self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
+        self._pan_grab = None
         self.canvas.delete('placeholder')
         self._idle(self._redraw)
         self._idle(self._show_resolution)
@@ -7583,7 +7652,7 @@ class App:
         if want and getattr(self, 'mask_var', None) is not None and self.mask_var.get():
             self.mask_var.set(False)
             self.toggle_mask_mode(False)
-        self.canvas.configure(cursor='crosshair' if want else '')
+        self._pan_cursor()
         self._crop_start = None
         if self._crop_item is not None:
             self.canvas.delete(self._crop_item)
@@ -7657,16 +7726,26 @@ class App:
             return None
         return left, top, right, bottom
 
+    def _click_picture(self, x, y):
+        """The click half of a canvas press: a tile of a contact sheet enlarges, a single picture does nothing."""
+        tile = self._tile_at(x, y)
+        if tile:
+            self.enlarge(tile)
+
     def _on_canvas_click(self, event):
         if self.crop_var.get() and self._current is not None and self._mask_painting is False:
             self._crop_start = (event.x, event.y)
             return 'break'
         if self._mask_painting:
             return self._paint_mask(event)
-        tile = self._tile_at(event.x, event.y)
-        if not tile:
-            return
-        self.enlarge(tile)
+        if self._pan_active():
+            # A picture bigger than the canvas is dragged, not clicked: the press belongs to the pan, and the release
+            # turns it back into a click when the pointer never moved. The canvas takes the keyboard here, which is
+            # what makes the arrow keys pan - at 100 % it does not, so a click on the picture still leaves the prompt.
+            self.canvas.focus_set()
+            self._pan_grab = (event.x, event.y) + tuple(self._draw)
+            return 'break'
+        self._click_picture(event.x, event.y)
 
     def enlarge(self, tile_path):
         """Regenerate one tile on its own, at the model's native 1024 px, using the prompt and seed recorded for it."""
@@ -7913,6 +7992,7 @@ class App:
                           'custom_styles': self._custom_styles,
                           'sidebar': self._sidebar,
                           'contents_w': self._contents_w,
+                          'zoom': (self.zoom_var.get() if hasattr(self, 'zoom_var') else ZOOM_DEFAULT),
                           'runs': self._runs[-50:]}
         return save_settings(self._settings)
 
@@ -8587,53 +8667,254 @@ class App:
 
     def _show(self, raw):
         self._img = Image.open(io.BytesIO(raw))
+        self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
+        self._pan_grab = None
         self.canvas.delete('placeholder')
         self.root.update_idletasks()      # let the maximised window settle before measuring the canvas
         self._idle(self._redraw)
 
-    def _redraw(self):
-        self.canvas.delete('img')
-        if self._img is None:
-            return
+    def _zoom_pct(self):
+        """The level the toolbar asks for: None for Fit, otherwise the percentage."""
+        var = getattr(self, 'zoom_var', None)
+        return zoom_pct(ZOOM_DEFAULT) if var is None else zoom_pct(var.get())
+
+    def _drawn_size(self):
+        """The size the whole picture occupies on the canvas at the current level.
+
+        At a percentage it is `round(source_px * pct / 100)`, so 100 % is the source's own size and 400 % is four times
+        it - `test_sizing.py` asserts equality rather than looking at it. Fit keeps the pipeline the canvas has always
+        used, integer box reduction then one bilinear step, and returns the size that pipeline produces.
+        """
+        iw, ih = self._img.size
+        pct = self._zoom_pct()
+        if pct is not None:
+            return max(1, int(round(iw * pct / 100.0))), max(1, int(round(ih * pct / 100.0)))
         w = max(self.canvas.winfo_width() - 12, 64)
         h = max(self.canvas.winfo_height() - 12, 64)
-        # Decoding is unavoidable; scaling is not, and LANCZOS on a 1024 px picture measured **391 ms** from click to
-        # painted. An integer box reduction (exact, cheap) followed by one small bilinear step gives the same picture for
-        # a fraction of that, and the result is cached per (picture, canvas size) so re-clicking is instant.
+        box = max(iw / float(w), ih / float(h))
+        if box >= 2:
+            k = int(box)
+            iw, ih = iw // k, ih // k
+        ratio = min(w / float(iw), h / float(ih), 1.0)      # 1.0: Fit shrinks a big picture and never enlarges a small one
+        return max(1, int(iw * ratio)), max(1, int(ih * ratio))
+
+    def _origin(self, dw, dh):
+        """The top-left corner of the drawn picture: the pinned corner, or where a pan left it, clamped."""
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        x0, y0 = self._pan_xy if self._pan_xy is not None else (cw - ZOOM_MARGIN - dw, ZOOM_MARGIN)
+        return self._clamp_rect(x0, y0, dw, dh, cw, ch)
+
+    @staticmethod
+    def _clamp_rect(x0, y0, dw, dh, cw, ch):
+        """Where the picture may sit on a `cw x ch` canvas.
+
+        A picture that fits is pinned to the top right, so it keeps still while the metadata under it changes. One that
+        is bigger than the canvas may be dragged anywhere its own bounds allow and no further: at either extreme its
+        edge is flush with the canvas, which is the last position from which the whole of it can still be reached and
+        the only one that never leaves a blank strip beside it.
+        """
+        if dw <= cw:
+            x0 = cw - ZOOM_MARGIN - dw
+        else:
+            x0 = min(0, max(cw - dw, x0))
+        if dh <= ch:
+            y0 = ZOOM_MARGIN
+        else:
+            y0 = min(0, max(ch - dh, y0))
+        return int(x0), int(y0)
+
+    def _visible(self, x0, y0, dw, dh):
+        """The part of the drawn picture the canvas can show, in canvas coordinates.
+
+        Only this part is ever rendered. At 400 % a 1024 px picture occupies 4096 px - 67 MB of Tk photo - to show the
+        1200 px of it a window has room for, and panning would rebuild that image on every motion event.
+        """
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        vx = max(0, min(int(x0), cw))
+        vy = max(0, min(int(y0), ch))
+        return vx, vy, max(1, min(int(x0) + dw, cw) - vx), max(1, min(int(y0) + dh, ch) - vy)
+
+    @staticmethod
+    def _slice_of(im, dw, dh, dx, dy, w, h):
+        """The `w x h` part of `im` as drawn inside a `dw x dh` rect, starting at drawn offset (`dx`, `dy`).
+
+        `dw x dh` and the source's own size are the two ends of one mapping: the canvas, the crop rectangle, the mask
+        brush and the contact sheet all convert between them with it. Scaling is one integer box reduction (exact for
+        an integer factor, and cheap) followed by a single small bilinear step - the pipeline measured at 391 ms of
+        LANCZOS against a fraction of that. At 100 % the crop is already `w x h`, so nothing is resampled and the
+        pixels on screen are the picture's own.
+        """
+        iw, ih = im.size
+        sx, sy = iw / float(dw), ih / float(dh)
+        box = (max(0, int(math.floor(dx * sx))), max(0, int(math.floor(dy * sy))),
+               min(iw, int(math.ceil((dx + w) * sx))), min(ih, int(math.ceil((dy + h) * sy))))
+        if box[2] <= box[0] or box[3] <= box[1]:
+            return None
+        part = im.crop(box)
+        target = (max(1, int(w)), max(1, int(h)))
+        factor = int(min(part.width / float(target[0]), part.height / float(target[1])))
+        if factor >= 2:
+            part = part.reduce(factor)
+        if part.size != target:
+            part = part.resize(target, Image.BILINEAR)
+        return part
+
+    def _photo_for(self, dx, dy, w, h):
+        """The visible part of the shown picture, rendered and cached, so a pan does not re-decode anything."""
         cache = getattr(self, '_preview_cache', None)
         if cache is None:
             cache = self._preview_cache = {}
-        key = (str(self._current), w, h)
-        self._tk = cache.get(key)
-        im = None
-        if self._tk is None:
-            im = self._img
-            box = max(im.width / w, im.height / h)
-            if box >= 2:
-                im = im.reduce(int(box))          # box filter: exact for an integer factor, and fast
-            ratio = min(w / im.width, h / im.height, 1.0)
-            if ratio < 1:
-                im = im.resize((max(1, int(im.width * ratio)), max(1, int(im.height * ratio))), Image.BILINEAR)
-            self._tk = ImageTk.PhotoImage(im)
-            if len(cache) > 8:
-                cache.clear()
-            cache[key] = self._tk
-        else:
-            im = self._img
-            box = max(im.width / w, im.height / h)
-            if box >= 2:
-                im = im.reduce(int(box))
-            ratio = min(w / im.width, h / im.height, 1.0)
-            if ratio < 1:
-                im = im.resize((max(1, int(im.width * ratio)), max(1, int(im.height * ratio))), Image.BILINEAR)
-        # pinned to the top right: the picture keeps still while the metadata block under it changes, and the eye always
-        # starts in the same place instead of hunting a centred image of a different size
-        margin = 6
-        cx, cy = self.canvas.winfo_width() - margin, margin
-        self._draw = (cx - self._tk.width(), cy, self._tk.width(), self._tk.height())
-        self.canvas.create_image(cx, cy, anchor='ne', image=self._tk, tags='img')
+        _, _, dw, dh = self._draw
+        key = (str(self._current), dw, dh, int(dx), int(dy), int(w), int(h))
+        photo = cache.get(key)
+        if photo is not None:
+            return photo
+        part = self._slice_of(self._img, dw, dh, dx, dy, w, h)
+        if part is None:
+            return None
+        photo = ImageTk.PhotoImage(part)
+        if len(cache) > 8:
+            cache.clear()
+        cache[key] = photo
+        return photo
+
+    def _redraw(self):
+        self.canvas.delete('img')
+        if self._img is None:
+            self._draw = None
+            return
+        dw, dh = self._drawn_size()
+        x0, y0 = self._origin(dw, dh)
+        self._draw = (x0, y0, dw, dh)
+        vx, vy, vw, vh = self._visible(x0, y0, dw, dh)
+        photo = self._photo_for(vx - x0, vy - y0, vw, vh)
+        if photo is None:
+            return
+        self._tk = photo
+        self.canvas.create_image(vx, vy, anchor='nw', image=photo, tags='img')
         self.canvas.tag_raise('paint')       # a repaint must not bury the mask strokes under the picture
-        self._draw_compare(im)
+        self._pan_cursor()
+        self._draw_compare()
+
+    def _pan_cursor(self):
+        """One cursor for a canvas with four gestures on it, in the order the gestures own the press.
+
+        Crop draws a crosshair, painting a mask a pencil, and a picture that is bigger than the canvas a four-way drag
+        arrow. A picture that fits keeps the plain pointer it has always had.
+        """
+        if getattr(self, 'crop_var', None) is not None and self.crop_var.get():
+            want = 'crosshair'
+        elif getattr(self, '_mask_painting', False):
+            want = 'pencil'
+        elif self._pan_active():
+            want = 'fleur'
+        else:
+            want = ''
+        try:
+            if str(self.canvas.cget('cursor')) != want:
+                self.canvas.configure(cursor=want)
+        except Exception:
+            pass
+
+    # -- zoom: the control, the pan, and the four drags that share this canvas -----------------------------
+    def _set_zoom(self, label):
+        """Change the level of the shown picture. It is a view setting, so it survives selecting another picture."""
+        label = zoom_label(zoom_pct(label))
+        if getattr(self, 'zoom_var', None) is not None:
+            self.zoom_var.set(label)
+        if getattr(self, 'zoom_btn', None) is not None:
+            self.zoom_btn.configure(text='zoom %s' % label)     # the button says what the picture is drawn at
+        self._pan_xy = None                  # a new level starts from the pinned corner again
+        self._pan_grab = None
+        self._settings['zoom'] = label
+        save_settings(self._settings)
+        if self._img is not None:
+            self._redraw()
+
+    def _on_zoom_pick(self, event=None):
+        self._set_zoom(self.zoom_var.get())
+        return 'break'
+
+    def _open_zoom_list(self):
+        """Alt+Z: open the list of levels, the way clicking the button does."""
+        try:
+            self.root.tk.call('ttk::menubutton::Popdown', str(self.zoom_btn))
+        except Exception:
+            try:
+                self.zoom_btn.event_generate('<space>')      # the class binding that posts it
+            except Exception:
+                pass
+
+    def _pan_active(self):
+        """May this canvas be panned right now?
+
+        Only when the picture is bigger than the canvas **and** none of the three modes that already own a press here
+        is armed: the compare divider, mask painting and the crop rectangle all start with the same button, so the pan
+        has to know it is not wanted before it moves anything.
+        """
+        if self._img is None or not self._draw:
+            return False
+        if self._mask_painting:
+            return False
+        if getattr(self, 'crop_var', None) is not None and self.crop_var.get():
+            return False
+        if getattr(self, 'compare_var', None) is not None and self.compare_var.get():
+            return False
+        return (self._draw[2] > self.canvas.winfo_width()
+                or self._draw[3] > self.canvas.winfo_height())
+
+    def _pan_to(self, x0, y0, dw, dh):
+        """Put the picture's top-left at (`x0`, `y0`) if the bounds allow it. Returns True if the canvas changed."""
+        nx, ny = self._clamp_rect(x0, y0, dw, dh, self.canvas.winfo_width(), self.canvas.winfo_height())
+        if self._draw and (nx, ny) == (self._draw[0], self._draw[1]):
+            return False
+        self._pan_xy = (nx, ny)
+        self._redraw()
+        return True
+
+    def _on_pan_drag(self, event):
+        """Drag a picture that is bigger than the canvas - after compare, mask and crop have passed on the press."""
+        if self._pan_grab is None or not self._pan_active():
+            return None
+        gx, gy, x0, y0, dw, dh = self._pan_grab
+        self._pan_to(x0 + event.x - gx, y0 + event.y - gy, dw, dh)
+        return 'break'
+
+    def _on_pan_release(self, event):
+        """A press that never moved is still a click: at a zoom the pan owns the press until the pointer moves."""
+        grab, self._pan_grab = self._pan_grab, None
+        if grab is None:
+            return None
+        if max(abs(event.x - grab[0]), abs(event.y - grab[1])) <= ZOOM_SLOP:
+            self._click_picture(event.x, event.y)
+        return None
+
+    def _on_canvas_wheel(self, event):
+        """Wheel scrolls the picture vertically; Shift turns the same wheel horizontal."""
+        if not self._pan_active():
+            return None
+        delta = int(getattr(event, 'delta', 0) or 0)
+        if not delta:
+            return None
+        notches = int(delta / 120) or (1 if delta > 0 else -1)
+        step = notches * ZOOM_STEP
+        if getattr(event, 'state', 0) & 0x0001:          # Shift
+            self._pan_to(self._draw[0] + step, self._draw[1], self._draw[2], self._draw[3])
+        else:
+            self._pan_to(self._draw[0], self._draw[1] + step, self._draw[2], self._draw[3])
+        return 'break'
+
+    def _on_pan_key(self, event):
+        """Arrow keys pan when the canvas has the keyboard, by the same step as one wheel notch."""
+        if not self._pan_active():
+            return None
+        step = ZOOM_STEP * (3 if getattr(event, 'state', 0) & 0x0001 else 1)     # Shift: three notches at once
+        dx, dy = {'Left': (step, 0), 'Right': (-step, 0), 'Up': (0, step), 'Down': (0, -step)}.get(
+            getattr(event, 'keysym', ''), (0, 0))
+        if not (dx or dy):
+            return None
+        self._pan_to(self._draw[0] + dx, self._draw[1] + dy, self._draw[2], self._draw[3])
+        return 'break'
 
     def pin_current(self):
         """Pin the displayed picture so any later result can be compared against it, not just the base."""
@@ -8651,37 +8932,44 @@ class App:
         """The left-hand picture: the pinned one if there is one, otherwise the base."""
         return self._pinned or self.base_path
 
-    def _draw_compare(self, result):
-        """Draw the base image to the left of a movable split, so strength stops being a blind dial."""
+    def _draw_compare(self):
+        """Draw the base image to the left of a movable split, so strength stops being a blind dial.
+
+        Both halves are cut out of their sources at the drawn scale and only the part the canvas shows is rendered, so
+        the divider still lines up with the picture when it is zoomed past the window.
+        """
         self.canvas.delete('compare')
         ref = self._compare_reference() if hasattr(self, '_pinned') else self.base_path
-        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not ref:
+        if not (hasattr(self, 'compare_var') and self.compare_var.get()) or not ref or not self._draw:
             return
         try:
             if self._base_img is None or getattr(self, '_base_for', None) != str(ref):
                 self._base_img = Image.open(ref).convert('RGB')
                 self._base_for = str(ref)
-            base = self._base_img.copy()
-            base.thumbnail((result.width, result.height), Image.LANCZOS)
+            base = self._base_img
         except Exception:
             return
-        if base.size != result.size:
-            base = base.resize(result.size, Image.LANCZOS)
-        cut = int(base.width * self._split)
-        strip = base.crop((0, 0, cut, base.height))
-        self._tk_cmp = ImageTk.PhotoImage(strip)
-        x0, y0, w, h = self._draw
-        self.canvas.create_image(x0, y0, anchor='nw', image=self._tk_cmp, tags='compare')
-        # a white/dark pair so the split stays visible on any picture
-        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#101010', width=4, tags='compare')
-        self.canvas.create_line(x0 + cut, y0, x0 + cut, y0 + h, fill='#ffffff', width=2, tags='compare')
+        x0, y0, dw, dh = self._draw
+        vx, vy, vw, vh = self._visible(x0, y0, dw, dh)
+        cut = x0 + int(round(dw * self._split))
+        left, right = max(vx, x0), min(vx + vw, cut)
+        if right > left:
+            strip = self._slice_of(base, dw, dh, left - x0, vy - y0, right - left, vh)
+            if strip is not None:
+                self._tk_cmp = ImageTk.PhotoImage(strip)
+                self.canvas.create_image(left, vy, anchor='nw', image=self._tk_cmp, tags='compare')
+        if vx <= cut <= vx + vw:
+            # a white/dark pair so the split stays visible on any picture
+            self.canvas.create_line(cut, vy, cut, vy + vh, fill='#101010', width=4, tags='compare')
+            self.canvas.create_line(cut, vy, cut, vy + vh, fill='#ffffff', width=2, tags='compare')
         # labels sit on their own chip: bare text over an image was unreadable and collided with content
-        for text, anchor, tx in (('base', 'nw', x0 + 8), ('result', 'ne', x0 + w - 8)):
+        for text, anchor, tx in (('base', 'nw', max(vx, x0) + 8),
+                                 ('result', 'ne', min(vx + vw, x0 + dw) - 8)):
             chip_w = 8 + 7 * len(text)
             cx0 = tx - 4 if anchor == 'nw' else tx - chip_w + 4
-            self.canvas.create_rectangle(cx0, y0 + 6, cx0 + chip_w, y0 + 24, fill='#101010', outline='',
+            self.canvas.create_rectangle(cx0, vy + 6, cx0 + chip_w, vy + 24, fill='#101010', outline='',
                                          tags='compare')
-            self.canvas.create_text(tx, y0 + 15, anchor=anchor, text=text, fill='#ffffff', tags='compare')
+            self.canvas.create_text(tx, vy + 15, anchor=anchor, text=text, fill='#ffffff', tags='compare')
 
     def _on_compare_drag(self, event):
         if getattr(self, 'crop_var', None) is not None and self.crop_var.get():

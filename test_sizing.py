@@ -200,11 +200,17 @@ def main():
     check('a resized pane reflows inside its new width',
           right_edge(pane_cells) <= app.contents_canvas.winfo_width(),
           (right_edge(pane_cells), app.contents_canvas.winfo_width()))
+    # The pane is a fixed width now (the sash sets it), so "hands its column back" is measured where it happens: the
+    # column loses its width and the strip's canvas gains it.
+    open_canvas = app.gal_canvas.winfo_width()
+    pane_w = app.contents_canvas.winfo_width()
     app.select_folder(None)
-    pump(root, app, 0.4)
+    pump(root, app, 0.6)
     check('a hidden pane hands its column width back to the strip',
-          int(app.gal.grid_columnconfigure(2)['weight']) == 0,
-          app.gal.grid_columnconfigure(2))
+          int(app.gal.grid_columnconfigure(2)['weight']) == 0
+          and int(app.gal.grid_columnconfigure(2)['minsize']) == 0
+          and app.gal_canvas.winfo_width() - open_canvas >= pane_w * 0.7,
+          (app.gal.grid_columnconfigure(2), open_canvas, app.gal_canvas.winfo_width(), pane_w))
     root.state('zoomed')
     pump(root, app, 0.6)
 
@@ -355,6 +361,7 @@ def main():
     check('the bar keeps its cell instead of appearing and disappearing',
           app.gal_bar.winfo_manager() == 'grid',
           (app.gal_bar.winfo_manager(), sorted(app.gal_bar.state())))
+
     # ---- L1: a redraw must not leave the folder tiles sized for a canvas they are no longer in
     print('\n-- L1: folder tiles are composed for the canvas they are drawn in, redrawn or not')
     app.toggle_groups(True)
@@ -576,7 +583,252 @@ def main():
     app._set_contents_w(zui.CONTENTS_W, persist=True)
     pump(root, app, 0.4)
 
+    # ---- zoom: 100 % is the picture's own pixels, and a bigger picture pans inside its own bounds
+    print('\n-- zoom: 100 % draws the picture at its own pixels')
+    zoomdir = tmp / 'zoom'
+    zoomdir.mkdir(parents=True, exist_ok=True)
+    big = zoomdir / '20261030-160000_2400x1600_seed501.png'
+    Image.new('RGB', (2400, 1600), (180, 60, 60)).save(big)
+    small = zoomdir / '20261030-160001_200x150_seed502.png'
+    Image.new('RGB', (200, 150), (60, 180, 60)).save(small)
+    app._set_zoom(zui.ZOOM_DEFAULT)
+    check('the level is a toolbar setting with a default of 100 %',
+          app.zoom_var.get() == zui.ZOOM_DEFAULT == '100%', app.zoom_var.get())
+    check('and it is listed the way the ask spells it',
+          zui.ZOOM_STEPS == ('Fit', '50%', '75%', '100%', '125%', '150%', '200%', '400%'), zui.ZOOM_STEPS)
+
+    app.select_file(small)
+    pump(root, app, 0.4)
+    check('100 % draws a picture that fits at the source size', app._draw[2:] == app._img.size,
+          (app._draw[2:], app._img.size))
+    check('and the canvas holds exactly those pixels, not a resample',
+          (app._tk.width(), app._tk.height()) == app._img.size,
+          (app._tk.width(), app._tk.height(), app._img.size))
+
+    app.select_file(big)
+    pump(root, app, 0.4)
+    cw, ch = app.canvas.winfo_width(), app.canvas.winfo_height()
+    check('100 % of a big picture is still 1:1 - the drawn size is the source size',
+          app._draw[2:] == app._img.size == (2400, 1600), (app._draw[2:], app._img.size))
+    check('so it is wider than the canvas it is drawn on', app._draw[2] > cw, (app._draw[2], cw))
+
+    print('\n-- zoom: 400 % pans, and stops at the picture\'s own edge')
+    app._set_zoom('400%')
+    pump(root, app, 0.3)
+    x0, y0, w, h = app._draw
+    check('400 % is four times the source, exactly', (w, h) == (app._img.size[0] * 4, app._img.size[1] * 4),
+          (w, h, app._img.size))
+    check('it overflows the canvas both ways', w > cw and h > ch, (w, cw, h, ch))
+    check('a zoomed picture keeps the corner it was pinned at - its top-right, flush, not off the canvas',
+          (x0, y0) == (cw - w, 0), ((x0, y0), (cw - w, 0)))
+    cx, cy = cw // 2, ch // 2
+
+    app._on_canvas_click(NS(x=cx, y=cy))
+    app._on_pan_drag(NS(x=cx + 99999, y=cy + 99999))
+    app._on_pan_release(NS(x=cx + 99999, y=cy + 99999))
+    check('dragging right and down stops with the picture\'s left/top edges at the canvas edges',
+          app._draw[:2] == (0, 0), app._draw[:2])
+    check('and it still covers the canvas - no blank strip beside it',
+          app._draw[0] + w >= cw and app._draw[1] + h >= ch, (app._draw, cw, ch))
+    app._on_canvas_click(NS(x=cx, y=cy))
+    app._on_pan_drag(NS(x=cx - 99999, y=cy - 99999))
+    app._on_pan_release(NS(x=cx - 99999, y=cy - 99999))
+    check('the other way stops with the right/bottom edges at the canvas edges',
+          app._draw[:2] == (cw - w, ch - h), ((app._draw[:2]), (cw - w, ch - h)))
+
+    dx, dy = (w - cw) // 2, (h - ch) // 2
+    app._on_canvas_click(NS(x=cx, y=cy))
+    app._on_pan_drag(NS(x=cx + dx, y=cy + dy))
+    check('inside the bounds a drag moves the picture by exactly the drag',
+          app._draw[:2] == (cw - w + dx, ch - h + dy), (app._draw[:2], (cw - w + dx, ch - h + dy)))
+    app._on_pan_drag(NS(x=cx, y=cy))
+    check('and bringing the pointer back brings the picture back',
+          app._draw[:2] == (cw - w, ch - h), (app._draw[:2], (cw - w, ch - h)))
+
+    app._on_pan_drag(NS(x=cx + dx, y=cy + dy))          # back to the middle of the picture
+    app._on_pan_release(NS(x=cx + dx, y=cy + dy))
+    xm, ym = app._draw[:2]
+    app._on_canvas_wheel(NS(delta=120, state=0))
+    check('the wheel scrolls it vertically', (app._draw[0], app._draw[1]) == (xm, ym + zui.ZOOM_STEP),
+          (app._draw[:2], (xm, ym + zui.ZOOM_STEP)))
+    app._on_canvas_wheel(NS(delta=120, state=0x0001))
+    check('Shift turns the same wheel horizontal',
+          (app._draw[0], app._draw[1]) == (xm + zui.ZOOM_STEP, ym + zui.ZOOM_STEP),
+          (app._draw[:2], (xm + zui.ZOOM_STEP, ym + zui.ZOOM_STEP)))
+    app._on_pan_key(NS(keysym='Up', state=0))
+    check('an arrow key pans by the same step', app._draw[1] == ym + 2 * zui.ZOOM_STEP,
+          (app._draw[1], ym + 2 * zui.ZOOM_STEP))
+    check('the canvas asks for the keyboard those keys need', bool(int(app.canvas.cget('takefocus'))),
+          app.canvas.cget('takefocus'))
+
+    print('\n-- zoom: Fit is today\'s behaviour - shrink a big picture, never enlarge a small one')
+    app._set_zoom('Fit')
+    pump(root, app, 0.3)
+    fw, fh = app._draw[2:]
+    check('Fit shrinks a picture bigger than the canvas', fw <= cw and fh <= ch and fw < 2400, (fw, fh, cw, ch))
+    check('and keeps its proportions', abs(fw / float(fh) - 2400 / 1600.0) < 0.02, fw / float(fh))
+    app.select_file(small)
+    pump(root, app, 0.4)
+    check('Fit leaves a picture smaller than the canvas alone', app._draw[2:] == (200, 150), app._draw[2:])
+
+    print('\n-- zoom: the level is a view setting, so it outlives the picture')
+    app._set_zoom('200%')
+    pump(root, app, 0.2)
+    saved = zui.load_settings()
+    check('the level is saved beside the other view settings', saved.get('zoom') == '200%', saved.get('zoom'))
+    app.select_file(big)
+    pump(root, app, 0.4)
+    check('and survives showing another picture', app.zoom_var.get() == '200%'
+          and app._draw[2:] == (4800, 3200), (app.zoom_var.get(), app._draw[2:]))
+    check('while the pan itself starts over at the pinned corner',
+          app._draw[:2] == (cw - 4800, 0), (app._draw[:2], (cw - 4800, 0)))
+
+    print('\n-- zoom: the pan never fights the three drags that already own this canvas')
+    app._set_zoom('400%')
+    pump(root, app, 0.3)
+    x0, y0, w, h = app._draw
+
+    check('a zoomed picture that overflows shows the pan cursor',
+          str(app.canvas.cget('cursor')) == 'fleur', app.canvas.cget('cursor'))
+    app._set_zoom('100%')
+    app.select_file(small)                    # 200x150 at 100 %: it fits, so there is nothing to pan
+    pump(root, app, 0.3)
+    check('a picture that fits keeps the plain pointer', str(app.canvas.cget('cursor')) == '',
+          (app.canvas.cget('cursor'), app._draw))
+    app.select_file(big)
+    app._set_zoom('400%')
+    pump(root, app, 0.3)
+    x0, y0, w, h = app._draw
+    cx, cy = app.canvas.winfo_width() // 2, app.canvas.winfo_height() // 2
+
+    app._pinned = Path(paths[0])
+    app._base_img = None
+    app.compare_var.set(True)
+    app._base_img = None
+    app._redraw()
+    root.update()
+    check('compare still draws over a zoomed picture',
+          len(app.canvas.find_withtag('compare')) >= 4, len(app.canvas.find_withtag('compare')))
+    check('and its drag does not wear the pan cursor', str(app.canvas.cget('cursor')) == '',
+          app.canvas.cget('cursor'))
+    before = app._draw
+    app._on_canvas_click(NS(x=cx, y=cy))
+    app._on_pan_drag(NS(x=cx + 300, y=cy + 300))
+    check('a drag with compare on never pans', app._draw == before and app._pan_grab is None,
+          (app._draw, before, app._pan_grab))
+    app._split = 0.5
+    app._on_compare_drag(NS(x=x0 + w // 4, y=y0 + h // 4))
+    check('and the divider still follows the pointer', 0.15 < app._split < 0.35, app._split)
+    app._split = 0.5
+    app.compare_var.set(False)
+    app._pinned = None
+    app._redraw()
+    root.update()
+
+    app.mask_var.set(True)
+    app.toggle_mask_mode(True)
+    root.update()
+    check('the mask is the picture\'s own size', app._mask is not None and app._mask.size == app._img.size,
+          (app._mask.size if app._mask is not None else None, app._img.size))
+    check('painting wears the pencil, not the pan arrow', str(app.canvas.cget('cursor')) == 'pencil',
+          app.canvas.cget('cursor'))
+    before = app._draw
+    strokes = len(app.canvas.find_withtag('paint'))
+    app._on_canvas_click(NS(x=cx, y=cy))
+    app._on_pan_drag(NS(x=cx + 200, y=cy + 200))
+    check('a drag with the mask armed paints, it does not pan',
+          app._draw == before and app._pan_grab is None, (app._draw, before, app._pan_grab))
+    check('and it left a stroke on the canvas', len(app.canvas.find_withtag('paint')) > strokes,
+          (len(app.canvas.find_withtag('paint')), strokes))
+    app.mask_var.set(False)
+    app.toggle_mask_mode(False)
+
+    app.crop_var.set(True)
+    app.toggle_crop_mode(True)
+    root.update()
+    check('the crop rectangle wears the crosshair, not the pan arrow',
+          str(app.canvas.cget('cursor')) == 'crosshair', app.canvas.cget('cursor'))
+    before = app._draw
+    app._on_canvas_click(NS(x=cx, y=cy))
+    check('crop arms its rectangle on the press', app._crop_start is not None, app._crop_start)
+    app._on_pan_drag(NS(x=cx + 200, y=cy + 200))
+    check('a drag with crop armed never pans', app._draw == before and app._pan_grab is None,
+          (app._draw, before, app._pan_grab))
+    crop = app._crop_box(x0 + w // 4, y0 + h // 4, x0 + w // 2, y0 + h // 2)
+    check('and the rectangle still maps onto the source at 400 %',
+          crop is not None and abs((crop[2] - crop[0]) - app._img.size[0] / 4.0) <= 1,
+          (crop, app._img.size))
+    app.crop_var.set(False)
+    app.toggle_crop_mode(False)
+
+    # the bindings, not the handlers: the same synthetic drag has to separate by mode on its own
+    app._pan_xy = None
+    app._redraw()
+    root.update()
+    before = app._draw
+    app.canvas.event_generate('<Button-1>', x=cx, y=cy)
+    app.canvas.event_generate('<B1-Motion>', x=cx + 250, y=cy + 250)
+    app.canvas.update()
+    check('a real press-and-drag pans the picture', app._draw != before, (before, app._draw))
+    app.canvas.event_generate('<ButtonRelease-1>', x=cx + 250, y=cy + 250)
+    app.canvas.update()
+    check('and the release ends the pan', app._pan_grab is None, app._pan_grab)
+    app._pan_xy = None
+    app.crop_var.set(True)
+    app.toggle_crop_mode(True)
+    root.update()
+    before = app._draw
+    app.canvas.event_generate('<Button-1>', x=cx, y=cy)
+    app.canvas.event_generate('<B1-Motion>', x=cx + 250, y=cy + 250)
+    app.canvas.update()
+    check('the same real drag with crop armed arms the rectangle and leaves the picture alone',
+          app._draw == before and app._crop_start is not None and app._pan_grab is None,
+          (before, app._draw, app._crop_start, app._pan_grab))
+    app.crop_var.set(False)
+    app.toggle_crop_mode(False)
+    app._set_zoom('100%')
+
+    print('\n-- zoom: Alt+Z reaches the control, and a restart opens at the level it was left at')
+    check('the zoom control is on the Alt access key', (app._access or {}).get('z') == 'zoom_btn',
+          (app._access or {}).get('z'))
+    check('the button underlines the key, the way the rest of the toolbar does',
+          int(app.zoom_btn.cget('underline')) == 0
+          and str(app.zoom_btn.cget('text'))[:1].lower() == 'z',
+          (app.zoom_btn.cget('underline'), app.zoom_btn.cget('text')))
+    check('and its tooltip names the key',
+          any(t.widget is app.zoom_btn and 'Alt+Z' in t.text for t in app._tips),
+          [t.text for t in app._tips if t.widget is app.zoom_btn])
+    # Alt+Z posts this menu; posting is modal on Windows, so the suite never opens it - it drives the entries instead
+    menu = app.zoom_menu
+    check('the button owns that list', app.zoom_btn.cget('menu') == str(menu), (app.zoom_btn.cget('menu'), str(menu)))
+    labels = [menu.entrycget(i, 'label') for i in range(len(zui.ZOOM_STEPS))]
+    check('the list offers every level, in the order the ask gives them', tuple(labels) == zui.ZOOM_STEPS, labels)
+    check('and nothing else', int(menu.tk.call(str(menu), 'index', 'end')) == len(zui.ZOOM_STEPS) - 1,
+          menu.tk.call(str(menu), 'index', 'end'))
+    check('the key opens that list', callable(getattr(app.zoom_btn, '_access_invoke', None)),
+          getattr(app.zoom_btn, '_access_invoke', None))
+    menu.invoke(1)                     # 50 %, straight from the menu the access key opens
+    root.update()
+    check('picking a level from it changes the zoom, and the button says so',
+          app.zoom_var.get() == '50%' and app.zoom_btn.cget('text') == 'zoom 50%',
+          (app.zoom_var.get(), app.zoom_btn.cget('text')))
+    app._set_zoom('200%')
+    pump(root, app, 0.2)
     root.destroy()
+
+    root9 = tk.Tk()
+    app9 = zui.App(root9, Stub(), args)
+    root9.update()
+    check('a new window opens at the level the last one was left at',
+          app9.zoom_var.get() == '200%', app9.zoom_var.get())
+    app9.select_file(big)
+    for _ in range(30):
+        root9.update()
+        time.sleep(0.02)
+        if app9._draw and app9._draw[2:] == (4800, 3200):
+            break
+    check('and draws the first picture it shows at it', app9._draw[2:] == (4800, 3200), app9._draw)
+    root9.destroy()
 
     print('\n%d failure(s)' % len(FAILS))
     for f in FAILS:

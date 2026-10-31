@@ -3971,6 +3971,10 @@ def main():
           bool(root.bind('<F6>')) and bool(root.bind('<Shift-F6>')))
     try:
         app._region_last = {}
+        # Tk drops a synthetic key event when no widget in this window holds the focus, and which widget does is not
+        # this block's business: focus the prompt box first, the way the other key blocks in this suite do.
+        app.text.focus_force()
+        root.update()
         # generated on a widget inside this window, not on the toplevel: a key event sent to the toplevel is
         # redirected to whatever window holds the real keyboard focus, which in this suite may be a leftover dialog
         app.root.focus_get = lambda: app.text
@@ -4060,7 +4064,8 @@ def main():
 
     print('\n-- Alt+letter: the primary commands, labelled the way Windows labels them')
     pairs = [(k, attr, index) for k, attr, index, _what in zui.ACCESS_COMMANDS]
-    check('the twelve primary commands have an access key', len(pairs) == 12, len(pairs))
+    # thirteen since the zoom list joined the toolbar (2026-10-30): the picture's level is a primary command
+    check('every primary command has an access key', len(pairs) == 13 == len(zui.ACCESS_COMMANDS), len(pairs))
     check('every letter is bound on the window',
           all(root.bind('<Alt-%s>' % k) and root.bind('<Alt-%s>' % k.upper()) for k, _a, _i in pairs),
           [k for k, _a, _i in pairs if not root.bind('<Alt-%s>' % k)])
