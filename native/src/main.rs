@@ -1058,8 +1058,33 @@ unsafe fn layout(hwnd: HWND) {
     let _ = MoveWindow(child(hwnd, ID_STATUS), pad, h - STATUS_H, w - 2 * pad, STATUS_H, true);
 }
 
+/// The app's version, read from `version.py` beside the repository root rather than duplicated here: a copy in Rust would
+/// drift from the number the window and the web page show, and the whole point of one constant is that it cannot.
+fn app_version() -> String {
+    let mut dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+    while let Some(d) = dir.clone() {
+        let candidate = d.join("version.py");
+        if let Ok(text) = std::fs::read_to_string(&candidate) {
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("__version__") {
+                    if let Some(v) = rest.split('\'').nth(1) {
+                        return format!("v{}", v);
+                    }
+                }
+            }
+        }
+        dir = d.parent().map(|p| p.to_path_buf());
+    }
+    "v? (version.py not found)".to_string()
+}
+
 fn main() -> anyhow::Result<()> {
     // `--theme` prints the decision and exits: the only honest way to know whether the registry read works
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("{}", app_version());
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("--theme") {
         println!("dark = {}", dark());
         return Ok(());
@@ -1135,10 +1160,11 @@ fn main() -> anyhow::Result<()> {
             );
         }
 
+        let title = wide(&format!("zimage-native {} \u{2014} real Windows controls", app_version()));
         let _hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
-            w!("zimage-native \u{2014} real Windows controls"),
+            PCWSTR(title.as_ptr()),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT, 1180, 740,
             None,

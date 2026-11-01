@@ -107,6 +107,12 @@ light client edge, so it is dropped rather than fought. The OS reports dark (`Ap
 **Status bar** was clipped at 16 px; it now owns a 22 px line under the controls (`SS_NOPREFIX`, so a prompt containing `&`
 is not eaten as a mnemonic).
 
+## The version, read not copied
+
+`zimage-native --version` prints the app's version, and the window title carries it. It is **read from `../version.py`** by
+walking up from the executable until the file is found, rather than written into Rust: a second copy would drift from the
+number the Tk window shows and the web page serves, and the point of one constant is that it cannot.
+
 ## Not done yet (deliberately)
 
 The A/B review window and generation **are** done (see above); what is left is the deciding half:
