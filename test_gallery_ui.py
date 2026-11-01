@@ -571,6 +571,45 @@ def main():
     app.layout_var.set('single')
     root.update()
 
+    print('\n-- a run checks the server first, and tries to start it once')
+    import unittest.mock as _mock
+
+    def drain(engine, seconds=8.0):
+        got, end = [], time.time() + seconds
+        while time.time() < end:
+            try:
+                got.append(engine.events.get_nowait())
+            except Exception:
+                if got and got[-1][0] in ('error', 'tile', 'done'):
+                    break
+                time.sleep(0.02)
+        return got
+
+    dead = zui.Engine(9, autostart=False, progress=False)      # port 9: nothing listens there
+    dead.generate('x', 64, 64, 1, 1.0, 1, tempfile.mkdtemp(prefix='dead-'))
+    got = drain(dead)
+    err = [g for g in got if g[0] == 'error']
+    check('with autostart off it says the server is not answering, and names the port',
+          bool(err) and 'not answering' in err[-1][1] and ':9' in err[-1][1], err[-1][1] if err else got[:3])
+
+    with _mock.patch.object(zui.zg, 'start_server', side_effect=RuntimeError('no python')):
+        dying = zui.Engine(9, autostart=True, progress=False)
+        dying.generate('x', 64, 64, 1, 1.0, 1, tempfile.mkdtemp(prefix='die-'))
+        got2 = drain(dying)
+    said = [g[1] for g in got2 if g[0] == 'status']
+    err2 = [g for g in got2 if g[0] == 'error']
+    check('with autostart on it says it is starting the server', any('starting it' in s for s in said), said[:3])
+    check('and if that fails it reports why instead of a transport error',
+          bool(err2) and 'would not start' in err2[-1][1], err2[-1][1] if err2 else got2[:3])
+
+    with _mock.patch.object(zui.zg, 'start_server', return_value=None):
+        started = zui.Engine(9, autostart=True, progress=False)
+        started.generate('x', 64, 64, 1, 1.0, 1, tempfile.mkdtemp(prefix='started-'))
+        got3 = drain(started, 12.0)
+    said3 = [g[1] for g in got3 if g[0] == 'status']
+    check('a start that succeeds says so and the run continues',
+          any('started - continuing' in s for s in said3), said3[:4])
+
     print('\n-- the version sits in the window\'s bottom right corner')
     import version as _ver
     check('the window shows the version from the one place it is written',

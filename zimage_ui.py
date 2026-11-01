@@ -1457,6 +1457,22 @@ class Engine:
 
         def work():
             try:
+                # Preflight, because a server that was running at launch can be gone by the time a prompt is pressed (a
+                # VRAM crash, or a start that failed quietly). Attempt to start it and carry on before reporting a
+                # transport failure the user can do nothing about.
+                if not self._answers():
+                    if not self.autostart:
+                        self.events.put(('error', 'ComfyUI is not answering on %s:%d - start it, then press Retry'
+                                                 % (self.host, self.port)))
+                        return
+                    self.events.put(('status', 'ComfyUI is not running - starting it (~25 s)...'))
+                    try:
+                        zg.start_server(self.port, timeout=300)
+                    except Exception as e:
+                        self.events.put(('error', 'ComfyUI would not start: %s: %s' % (type(e).__name__, e)))
+                        return
+                    self.owned = True
+                    self.events.put(('status', 'ComfyUI started - continuing with the run'))
                 out = Path(out_dir)          # not out_dir: assigning that would shadow the parameter
                 out.mkdir(parents=True, exist_ok=True)
                 meta = {'steps': steps, 'cfg': cfg, 'denoise': (denoise if base_path else 1.0),
