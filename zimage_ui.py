@@ -5896,6 +5896,17 @@ class App:
         if over > 0:
             take = min(over, max(0, widths[COL_STRIP] - STRIP_ABS_MIN))
             widths[COL_STRIP] -= take
+            over -= take
+        if over > 0:
+            # Then the prompt: a layout remembered on a wide screen can be wider than the window it is reopened in, and
+            # the prompt box wraps, so it *can* give width back. Without this the four columns simply overflowed - the
+            # suite caught it as "a narrower window re-clamps them instead of overflowing" (sum 1629 in 1100).
+            take = min(over, max(0, widths[COL_PROMPT] - floors[COL_PROMPT]))
+            widths[COL_PROMPT] -= take
+            over -= take
+        if over > 0:
+            take = min(over, max(0, widths[COL_PANE] - floors[COL_PANE]))
+            widths[COL_PANE] -= take
         widths[COL_PICTURE] = max(0, content - widths[COL_STRIP] - widths[COL_PANE] - widths[COL_PROMPT])
         return widths
 

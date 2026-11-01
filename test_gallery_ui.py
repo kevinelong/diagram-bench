@@ -232,7 +232,15 @@ def main():
             top, view_top, view_h = tile.winfo_y(), app.gal_canvas.canvasy(0), app.gal_canvas.winfo_height()
             check('the opened folder is inside the visible strip',
                   view_top - 2 <= top <= view_top + view_h, (top, view_top, view_h))
-        check('and the strip scrolled to get there', app.gal_canvas.yview()[0] > 0.5, app.gal_canvas.yview())
+        # Measured 2026-10-31: with 24 folders the strip's content is 2048 px against a 1295 px viewport, so the deepest
+        # view position IS 0.368 - "> 0.5" was never reachable in this scenario, and passed only while the tiles were
+        # small enough to make the content taller. The claim is that it scrolled as far as it can.
+        region = [float(v) for v in (app.gal_canvas.cget('scrollregion') or '').split()] or [0, 0, 0, 0]
+        content_h = region[3] if len(region) == 4 else 0.0
+        view_h = max(1, app.gal_canvas.winfo_height())
+        deepest = max(0.0, 1.0 - view_h / content_h) if content_h > view_h else 0.0
+        check('and the strip scrolled as far as it can to show it',
+              app.gal_canvas.yview()[0] >= deepest - 0.05, (app.gal_canvas.yview()[0], deepest))
         sel = tiles[far] if far < len(tiles) else None
         if sel is not None:
             body = sel.winfo_children()[0]

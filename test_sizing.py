@@ -338,9 +338,15 @@ def main():
     clamped = app._layout_widths(1200)            # a window far narrower than the layout: re-clamped, not overflowed
     check('and a narrower window re-clamps them instead of overflowing',
           sum(clamped.values()) <= app._content_w(1200), (clamped, app._content_w(1200)))
-    check('taking the difference out of the strip first, which is the column that reflows',
-          clamped[zui.COL_STRIP] <= remembered[0] and clamped[zui.COL_PANE] == remembered[1]
-          and clamped[zui.COL_PROMPT] == remembered[2], (remembered, clamped))
+    # The cascade, in order: the strip gives first (it reflows), then the prompt (its text wraps), and the pane last.
+    # Before 2026-10-31 the prompt never gave at all, so a layout remembered on a wide screen overflowed a narrow one -
+    # which the check above caught, and which this one used to contradict.
+    check('the strip gives up its width first, down to its floor',
+          clamped[zui.COL_STRIP] <= remembered[0]
+          and clamped[zui.COL_STRIP] == max(zui.STRIP_ABS_MIN, clamped[zui.COL_STRIP]), (remembered, clamped))
+    check('then the prompt, and only then the pane',
+          clamped[zui.COL_PROMPT] <= remembered[2] and clamped[zui.COL_PANE] == remembered[1],
+          (remembered, clamped))
     # a profile that never had a boundary dragged opens on the even split instead, whatever it was left at
     app._layout_user = False
     app._apply_layout()
@@ -439,8 +445,12 @@ def main():
     check('and carries only its own chrome around that picture',
           all(w.winfo_width() == w.thumb_px + zui.TILE_CHROME - 2 for w in nine),
           sorted({(w.winfo_width(), w.thumb_px) for w in nine}))
-    check('three across is a wider tile than four would have been in this canvas',
-          tile > canvas.winfo_width() // 4 - zui.TILE_CHROME, (tile, cw))
+    # 2026-10-31: the count follows the tile cap now, so "three is wider than four" is no longer the rule - at this
+    # width four columns would each be at or under the cap, which is what the rule prefers.
+    want_cols, want_tile = zui.tile_grid(cw, zui.STRIP_TILE_MIN, zui.STRIP_TILE_FIT, zui.TILE_CHROME)
+    check('the columns and the tile are what the rule asks for',
+          cols == want_cols and abs(tile - want_tile) <= zui.TILE_CHROME,
+          (cols, tile, want_cols, want_tile))
 
     # a narrower canvas must give up a column rather than clip the last one
     print('\n-- B1: a narrow canvas gives up a column, not the edge of the last one')
