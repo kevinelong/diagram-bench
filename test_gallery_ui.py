@@ -610,6 +610,50 @@ def main():
     check('a start that succeeds says so and the run continues',
           any('started - continuing' in s for s in said3), said3[:4])
 
+    print('\n-- strength: a full-width slider with 5 % detents, arrows, and a number you can type')
+    check('the slider fills the column',
+          app.strength_scale.pack_info().get('fill') == 'x' and bool(int(app.strength_scale.pack_info().get('expand') or 0)),
+          app.strength_scale.pack_info())
+    app.set_strength(0.70, snap=False)
+    check('the readout, the box and the value agree', (app.denoise_text['text'], app.strength_entry_var.get()) == ('70%', '70'),
+          (app.denoise_text['text'], app.strength_entry_var.get()))
+    app._on_strength_move('0.234')
+    check('the slider lands on the 5 % detent, not on what the pointer said', app.denoise.get() == 0.25,
+          app.denoise.get())
+    app._on_strength_move('0.735')
+    check('and it rounds to the nearer detent', abs(app.denoise.get() - 0.75) < 1e-9, app.denoise.get())
+    app.set_strength(0.70)
+    app.nudge_strength(0.01)
+    check('an arrow steps by 1 %, not by a detent', abs(app.denoise.get() - 0.71) < 1e-9, app.denoise.get())
+    app.nudge_strength(0.05)
+    check('and a larger step can land off the detents - that is why there are two controls',
+          abs(app.denoise.get() - 0.76) < 1e-9, app.denoise.get())
+    for text, want in (('22', 0.22), ('22%', 0.22), ('0.22', 0.22), ('0.5', 0.50), ('9', 0.20), ('99', 0.95)):
+        app.strength_entry_var.set(text)
+        app.commit_strength_text()
+        check('typing %-5s means %.2f, clamped to the usable range' % (repr(text), want),
+              abs(app.denoise.get() - want) < 1e-9, (text, app.denoise.get(), want))
+    check('a typed value updates the readout and the slider together',
+          app.denoise_text['text'] == '%d%%' % round(app.denoise.get() * 100)
+          and abs(float(app.strength_scale.get()) - app.denoise.get()) < 1e-6,
+          (app.denoise_text['text'], app.strength_scale.get()))
+    app.strength_entry_var.set('nonsense')
+    before = app.denoise.get()
+    app.commit_strength_text()
+    check('nonsense is refused and the real value comes back',
+          app.denoise.get() == before and app.strength_entry_var.get() == '%d' % round(before * 100),
+          (app.denoise.get(), app.strength_entry_var.get()))
+    app.strength_entry.focus_set()
+    root.update()
+    app.set_strength(0.33)
+    check('a value set elsewhere does not overwrite a box someone is typing in',
+          app.strength_entry_var.get() != '33' or not app._strength_typing(),
+          (app.strength_entry_var.get(), app._strength_typing()))
+    app.strength_entry_var.set('33'); app.commit_strength_text()
+    check('and with the box left, it does follow', app.strength_entry_var.get() == '33', app.strength_entry_var.get())
+    app.set_strength(0.70)      # leave the window as it found it: later checks assert the default ...
+    app._strength_touched = False   # ... including that a style may still propose its own strength
+
     print('\n-- the API summary and the explanation can be selected and copied')
     check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))
     check('so is the hint', isinstance(app.hint, zui.SelectableText), type(app.hint))
@@ -1876,10 +1920,13 @@ def main():
     app.style_var.set('icon'); root.update()
     check('another style proposes another strength',
           abs(app.denoise.get() - (zui.STYLE_STRENGTH['icon'] + offset_now)) < 1e-6, '%.2f' % app.denoise.get())
+    # a drag lands on the 5 % detents, so the value a user can give the slider here is 0.35
     app.strength_scale.set(0.33); root.update()
-    check('moving the slider is remembered', app._strength_touched, str(app._strength_touched))
+    check('moving the slider lands on the nearest detent and is remembered',
+          app._strength_touched and abs(app.denoise.get() - 0.35) < 1e-6,
+          (app._strength_touched, app.denoise.get()))
     app.style_var.set('charcoal'); root.update()
-    check('and no style change overwrites it afterwards', abs(app.denoise.get() - 0.33) < 1e-6, '%.2f' % app.denoise.get())
+    check('and no style change overwrites it afterwards', abs(app.denoise.get() - 0.35) < 1e-6, '%.2f' % app.denoise.get())
     app.clear_base()
     app.strength_scale.set(zui.STYLE_STRENGTH['none']); app._strength_touched = False; root.update()
     app.style_var.set('none'); app.busy = False
@@ -3192,12 +3239,12 @@ def main():
           app.engine.calls and app.engine.calls[-1][0][3] == 9, app.engine.calls[-1][0][3] if app.engine.calls else None)
     app.busy = False
 
-    print("\n-- the strength readout is the value Generate will use (2026-10-28)")
+    print("\n-- the strength readout is the value Generate will use (2026-10-28; read as a percentage since 2026-11-01)")
     app.denoise.set(0.70); root.update()
-    check('the label follows the slider', app.denoise_text.cget('text') == '0.70', app.denoise_text.cget('text'))
+    check('the label follows the slider', app.denoise_text.cget('text') == '70%', app.denoise_text.cget('text'))
     app.denoise.set(0.6); root.update(); time.sleep(0.05); root.update()
-    check('including a value set in code', app.denoise_text.cget('text') == '0.60', app.denoise_text.cget('text'))
-    check('and it is two decimals, not a raw float', len(app.denoise_text.cget('text')) == 4,
+    check('including a value set in code', app.denoise_text.cget('text') == '60%', app.denoise_text.cget('text'))
+    check('and it reads as a whole percentage, not a raw float', app.denoise_text.cget('text') == '60%',
           app.denoise_text.cget('text'))
     app.denoise.set(0.70); root.update()
 

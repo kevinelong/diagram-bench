@@ -151,6 +151,10 @@ ACCESS_COMMANDS = (
 # done: the picture scaled down to the canvas and never up, and still the level that follows a window resize.
 ZOOM_STEPS = ('Fit', '50%', '75%', '100%', '125%', '150%', '200%', '400%')
 ZOOM_DEFAULT = '100%'
+STRENGTH_MIN = 0.20    # below this a base is barely read at all; above STRENGTH_MAX the subject is gone
+STRENGTH_MAX = 0.95
+STRENGTH_STEP = 0.01   # the arrows and Up/Down: the precise control
+STRENGTH_DETENT = 0.05  # the slider: it settles on these, so a drag is repeatable
 ZOOM_MARGIN = 6        # the gap between the picture and the canvas edge; the top-right pin has always used it
 ZOOM_STEP = 48         # canvas pixels per wheel notch and per arrow press
 ZOOM_SLOP = 4          # a press that moves less than this is a click, not a pan
@@ -1212,8 +1216,62 @@ def timing_write(rec):
         pass
 
 
+class _Profile:
+    """Always-on aggregates of the timed blocks, plus the context they happened in.
+
+    The JSONL writer is opt-in (`ZIMAGE_TIMING`), which meant real sessions recorded *nothing* - so the questions worth
+    asking ("is the redraw slow, and at what zoom, on what picture") had no data behind them. This keeps a bounded sample
+    per event in memory as the app is used, with a snapshot of the situation attached, and `write()` turns it into a file.
+
+    Cost per timed block: one `perf_counter` pair and one append into a bounded deque.
+    """
+
+    CAP = 2000
+
+    def __init__(self):
+        self.samples = {}
+        self.started = datetime.now().isoformat(timespec='seconds')
+        self.snapshot = {}          # kept current by the window: files, folders, zoom, canvas, source px ....
+
+    def record(self, ev, ms):
+        bucket = self.samples.get(ev)
+        if bucket is None:
+            bucket = self.samples[ev] = collections.deque(maxlen=self.CAP)
+        bucket.append(round(ms, 2))
+
+    @staticmethod
+    def _stats(values):
+        if not values:
+            return {}
+        ordered = sorted(values)
+        def pct(q):
+            return ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))]
+        return {'n': len(ordered), 'p50': round(pct(.5), 2), 'p90': round(pct(.9), 2),
+                'max': round(ordered[-1], 2), 'total': round(sum(ordered), 1)}
+
+    def summary(self):
+        return {ev: self._stats(list(v)) for ev, v in sorted(self.samples.items())}
+
+    def write(self, path=None):
+        """Write a profile file next to the settings and return where it went."""
+        path = Path(path) if path else (settings_path().parent / ('profile-%s.json' % datetime.now().strftime('%Y%m%d-%H%M%S')))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'started': self.started,
+                                    'version': version.display,
+                                    'context': self.snapshot,
+                                    'events': self.summary()}, indent=1), encoding='utf-8')
+        return path
+
+    def reset(self):
+        self.samples.clear()
+        self.started = datetime.now().isoformat(timespec='seconds')
+
+
+PROFILE = _Profile()
+
+
 class timed:
-    """`with timed('name', n=3):` - one JSONL record on exit; a no-op unless ZIMAGE_TIMING."""
+    """`with timed('name', n=3):` - always aggregates; writes one JSONL record when `ZIMAGE_TIMING` is set."""
 
     __slots__ = ('label', 'detail', 'frame', 't0')
 
@@ -1221,29 +1279,29 @@ class timed:
         self.label, self.detail = label, detail
 
     def __enter__(self):
-        if _TIMING:
-            self.t0 = time.perf_counter()
-            self.frame = {'children': {}}
-            _TIMING_STACK.append(self.frame)
+        self.t0 = time.perf_counter()
+        self.frame = {'children': {}}
+        _TIMING_STACK.append(self.frame)
         return self
 
     def __exit__(self, *_exc):
-        if not _TIMING:
-            return False
         ms = (time.perf_counter() - self.t0) * 1000.0
         _TIMING_STACK.pop()
-        rec = {'t': datetime.now().isoformat(timespec='milliseconds'),
-               'ev': self.label,
-               'ms': round(ms, 1),
-               'own': round(ms - sum(self.frame['children'].values()), 1)}
-        if self.frame['children']:
-            rec['kids'] = {k: round(v, 1) for k, v in self.frame['children'].items()}
-        if self.detail:
-            rec['d'] = self.detail
+        PROFILE.record(self.label, ms)
         if _TIMING_STACK:                       # attribute this block to whichever block wraps it
             parent = _TIMING_STACK[-1]['children']
             parent[self.label] = parent.get(self.label, 0.0) + ms
-        timing_write(rec)
+        if _TIMING:
+            rec = {'t': datetime.now().isoformat(timespec='milliseconds'),
+                   'ev': self.label,
+                   'ms': round(ms, 1),
+                   'own': round(ms - sum(self.frame['children'].values()), 1)}
+            if self.frame['children']:
+                rec['kids'] = {k: round(v, 1) for k, v in self.frame['children'].items()}
+            if self.detail:
+                rec['d'] = self.detail
+            rec['ctx'] = dict(PROFILE.snapshot)
+            timing_write(rec)
         return False
 
 
@@ -3000,28 +3058,60 @@ class App:
 
         self.base_row = ttk.Frame(left)
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
-        ttk.Label(self.base_row, text='base:').pack(side='left')
+        # the base line, and the strength controls underneath it: they belong together, and row 9 of this column already
+        # belongs to the Advanced panel, so they are packed inside this row rather than gridded beside it
+        base_head = ttk.Frame(self.base_row)
+        base_head.pack(fill='x')
+        ttk.Label(base_head, text='base:').pack(side='left')
         # a fixed character width, so a long file name cannot change the column's width
-        self.base_label = ttk.Label(self.base_row, text='(none - text to image)', foreground=self.theme.muted,
+        self.base_label = ttk.Label(base_head, text='(none - text to image)', foreground=self.theme.muted,
                                     width=24, anchor='w')
         self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
-        ttk.Label(self.base_row, text='strength').pack(side='left')
+        # ---- strength: one value, three ways to set it -------------------------------------------------------
+        # The slider is the coarse control and settles on 5 % detents (`resolution`), which is what makes a drag
+        # repeatable; the arrows and the number are the precise ones and move by 1 %. `self.denoise` is the single source
+        # of truth: every control writes it, one trace renders the others from it, so they cannot disagree.
+        self.strength = ttk.Frame(self.base_row)
+        self.strength.pack(fill='x', pady=(4, 0))
+        head = ttk.Frame(self.strength)
+        head.pack(fill='x')
+        ttk.Label(head, text='strength').pack(side='left')
         # 0.70 is the measured pose threshold for flux2 klein; below it an instruction changes the props, not the pose
         self.denoise = tk.DoubleVar(value=float(self._settings.get('denoise') or 0.70))
-        # A style with a base image proposes its own strength (STYLE_STRENGTH), but only while the number is still the one
-        # we proposed: once the user moves the slider, no style change may quietly move it back.
         self._strength_touched = False
         self._strength_programmatic = None
-        self.strength_scale = ttk.Scale(self.base_row, from_=0.2, to=0.95, variable=self.denoise, length=130,
+        # the precise controls sit on this row, above the slider: arrows then a number you can type
+        self.strength_down = ttk.Button(head, text='\u2212', width=2,
+                                        command=lambda: self.nudge_strength(-STRENGTH_STEP))
+        self.strength_down.pack(side='left', padx=(8, 0))
+        self.strength_up = ttk.Button(head, text='+', width=2,
+                                      command=lambda: self.nudge_strength(STRENGTH_STEP))
+        self.strength_up.pack(side='left', padx=(2, 4))
+        self.strength_entry_var = tk.StringVar(value='%d' % round(self.denoise.get() * 100))
+        self.strength_entry = ttk.Entry(head, textvariable=self.strength_entry_var, width=4)
+        self.strength_entry.pack(side='left')
+        ttk.Label(head, text='%').pack(side='left', padx=(2, 0))
+        self.strength_entry.bind('<Return>', self.commit_strength_text)
+        self.strength_entry.bind('<KP_Enter>', self.commit_strength_text)
+        self.strength_entry.bind('<FocusOut>', self.commit_strength_text)
+        # the spinbutton keyboard contract: arrows step, Page Up/Down step further, Home/End are the limits
+        self.strength_entry.bind('<Up>', lambda e: (self.nudge_strength(STRENGTH_STEP * (5 if e.state & 0x1 else 1)), 'break')[1])
+        self.strength_entry.bind('<Down>', lambda e: (self.nudge_strength(-STRENGTH_STEP * (5 if e.state & 0x1 else 1)), 'break')[1])
+        self.strength_entry.bind('<Prior>', lambda e: (self.nudge_strength(STRENGTH_STEP * 10), 'break')[1])
+        self.strength_entry.bind('<Next>', lambda e: (self.nudge_strength(-STRENGTH_STEP * 10), 'break')[1])
+        self.strength_entry.bind('<Home>', lambda e: (self.set_strength(STRENGTH_MIN), 'break')[1])
+        self.strength_entry.bind('<End>', lambda e: (self.set_strength(STRENGTH_MAX), 'break')[1])
+        self.denoise_text = ttk.Label(head, text='%d%%' % round(self.denoise.get() * 100))
+        self.denoise_text.pack(side='right')
+        # The slider does **not** own the value: a `resolution` on a scale quantises the variable it is bound to, so a
+        # typed 0.73 would become 0.75 the moment the bar drew itself. It reads the value in `_render_strength` and snaps
+        # its own drags to the 5 % detents, which leaves the number exact.
+        self.strength_scale = ttk.Scale(self.strength, from_=STRENGTH_MIN, to=STRENGTH_MAX,
                                         command=self._on_strength_move)
-        self.strength_scale.pack(side='left', padx=4)
-        # The readout must be *derived* from the variable. It was created with the literal string '0.60' and only
-        # refreshed by a trace, and a trace fires on changes: nothing changed at startup, so the label said 0.60 while
-        # Generate used the real value (0.70) - the one number a user reads before pressing a button that spends a minute.
-        self.denoise_text = ttk.Label(self.base_row, text='%.2f' % self.denoise.get())
-        self.denoise_text.pack(side='left')
-        self.denoise.trace_add('write', lambda *a: self.denoise_text.configure(text='%.2f' % self.denoise.get()))
+        self.strength_scale.pack(fill='x', expand=True)
+        self.denoise.trace_add('write', lambda *a: self._render_strength())
+        self._render_strength()          # the readout, the box and the ticks all start from the stored value
 
         # the two base-image actions share one row directly above Generate: use the shown picture, or forget it.
         # The deliberate gesture that arms an edit lives here, so a click in the strip only ever looks.
@@ -3105,6 +3195,9 @@ class App:
         self.sampler_cb.pack(side='left')
         adv2 = ttk.Frame(self.advanced)
         adv2.pack(fill='x', pady=(4, 0))
+        self.profile_btn = ttk.Button(adv2, text='profile\u2026', command=self.save_profile)
+        self.profile_btn.pack(side='left', anchor='n', padx=(6, 0))
+        self._tip(self.profile_btn, 'Write what the window has measured (panels, redraws, thumbnails) beside the settings.')
         ttk.Label(adv2, text='negative').pack(side='left', anchor='n')
         self.negative = tk.Text(adv2, height=2, width=42, wrap='word', font=('Segoe UI', 9),
                                 background=self.theme.field, foreground=self.theme.text,
@@ -3385,6 +3478,39 @@ class App:
             # could not reproduce it - so if folders are on and two and a half seconds later there is still no plan and
             # no worker, start one. It is idempotent: `_regroup_now` refuses while a compute is in flight.
             self.root.after(2500, self._folders_watchdog)
+
+    def _note_context(self):
+        """Snapshot of the situation a timed block happens in, so a slow number can be attributed.
+
+        Without this every record said only "25 ms", which cannot distinguish 2 000 files from a 4096 px picture at 400 %.
+        """
+        try:
+            files = len(getattr(self, '_files', ()) or ())
+            groups = len(((getattr(self, '_plan', None) or {}).get('groups') or []))
+            zoom = self.zoom_var.get() if hasattr(self, 'zoom_var') else ''
+            src = self._img.size if getattr(self, '_img', None) is not None else None
+            PROFILE.snapshot = {
+                'files': files,
+                'folders': groups,
+                'zoom': zoom,
+                'source_px': list(src) if src else None,
+                'canvas_px': [self.canvas.winfo_width(), self.canvas.winfo_height()],
+                'layout': self.layout_var.get() if hasattr(self, 'layout_var') else '',
+                'theme': 'dark' if getattr(self.theme, 'dark', False) else 'light',
+            }
+        except Exception:
+            pass
+
+    def save_profile(self, path=None):
+        """Write what has been measured so far and say where: real use must record something."""
+        self._note_context()
+        try:
+            written = PROFILE.write(path)
+            self.hint.configure(text='profile written to %s' % written)
+            return written
+        except Exception as e:
+            self.hint.configure(text='could not write the profile: %s: %s' % (type(e).__name__, e))
+            return None
 
     def _copyable(self, widget, get_text):
         """Right-click Copy on a one-line label.
@@ -6796,6 +6922,7 @@ class App:
         self._on_strip_resize()
         # Warm the thumbnails the next paint will ask for, in the background, so a cold start does not
         # draw twelve empty frames and fill them a second later (reported with a screenshot 2026-10-31).
+        self._note_context()
         self._prewarm_thumbs()
 
     def _refresh_gallery(self, select=None):
@@ -7290,15 +7417,136 @@ class App:
             # the readout already moved, so the sentence only has to say why
             self.hint.configure(text='style %s on a base image: strength %.2f' % (self.style_var.get(), self.denoise.get()))
 
+    # ---- strength ----------------------------------------------------------------------------------------------
     def _on_strength_move(self, value):
-        """Distinguish a value the user moved from one we set, so a style change can respect the difference."""
+        """The slider is the coarse control: it lands on the 5 % detents.
+
+        It also distinguishes a value the user moved from one we set, so a style change can respect the difference.
+        """
         try:
             v = float(value)
         except Exception:
             return
         if self._strength_programmatic is not None and abs(v - self._strength_programmatic) < 1e-6:
+            return                                   # we moved it: not a user gesture
+        if getattr(self, '_strength_echo', False):
+            return                                   # we moved the thumb; the value is already the right one
+        if abs(v - self.denoise.get()) < 1e-6:
+            # the widget echoing the current value, not a drag. The tolerance matters: a Scale reads back
+            # 0.7000000000000001 for 0.7, and at 1e-9 that echo counted as a gesture and marked the value as one the
+            # user had chosen - which then refused every style's proposal.
             return
+        snapped = self.snap_strength(v)
+        if abs(snapped - self.denoise.get()) > 1e-9:
+            self.set_strength(snapped, snap=False)   # already snapped, and it must not snap twice
         self._strength_touched = True
+
+    @staticmethod
+    def snap_strength(value):
+        """Round to the nearest detent, inside the usable range."""
+        v = max(STRENGTH_MIN, min(STRENGTH_MAX, float(value)))
+        snapped = round(round(v / STRENGTH_DETENT) * STRENGTH_DETENT, 2)
+        return max(STRENGTH_MIN, min(STRENGTH_MAX, snapped))
+
+    def set_strength(self, value, snap=False):
+        """The one place the value is written. `self.denoise` is the source of truth; a trace renders the rest."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return
+        v = self.snap_strength(v) if snap else round(max(STRENGTH_MIN, min(STRENGTH_MAX, v)), 2)
+        self._strength_programmatic = v
+        try:
+            if abs(v - self.denoise.get()) > 1e-9:
+                self.denoise.set(v)
+            self._render_strength()
+        finally:
+            self._strength_programmatic = None
+
+    def nudge_strength(self, delta):
+        """Arrows, Up/Down and Page Up/Down all come through here: precise, and never snapped."""
+        self.set_strength(self.denoise.get() + float(delta), snap=False)
+        self._strength_touched = True
+
+    @staticmethod
+    def parse_strength(text):
+        """Read what someone typed into the value box.
+
+        `22`, `22%` and `0.22` all mean twenty-two percent, and `0.5` means fifty: a bare number is read as a percentage,
+        a decimal at or below 1 as a fraction. That is the one ambiguity that has to be decided rather than guessed, and
+        the readout beside the box always shows the percentage it resolved to.
+        """
+        raw = (text or '').strip().replace(',', '.')
+        percent_sign = '%' in raw
+        raw = raw.replace('%', '').strip()
+        if not raw:
+            return None
+        try:
+            v = float(raw)
+        except ValueError:
+            return None
+        if percent_sign:
+            v = v / 100.0
+        elif '.' in raw and v <= 1.0:
+            pass                                     # 0.22 is a fraction
+        else:
+            v = v / 100.0                            # 22 and 22.5 are percentages
+        return max(STRENGTH_MIN, min(STRENGTH_MAX, v))
+
+    def commit_strength_text(self, _event=None):
+        parsed = self.parse_strength(self.strength_entry_var.get())
+        if parsed is None:
+            self._render_strength()                  # put the real value back; a half-typed number is not a value
+            self.hint.configure(text='strength takes a number: 22, 22% or 0.22')
+            return
+        self.set_strength(parsed, snap=False)
+        self._strength_touched = True
+
+    def _render_strength(self):
+        """Whatever changed, the readout, the ticks and the box agree with `self.denoise` - unless someone is typing."""
+        try:
+            v = float(self.denoise.get())
+        except Exception:
+            return
+        if hasattr(self, 'denoise_text'):
+            self.denoise_text.configure(text='%d%%' % round(v * 100))
+        if hasattr(self, 'strength_scale'):
+            try:
+                if abs(float(self.strength_scale.get()) - v) > 1e-9:
+                    self._strength_echo = True       # the thumb moving because we moved it: not a gesture
+                    self.strength_scale.set(v)
+                    self._strength_echo = False
+            except Exception:
+                pass
+        if hasattr(self, 'strength_entry_var') and not self._strength_typing():
+            self.strength_entry_var.set('%d' % round(v * 100))
+        self._draw_strength_ticks()
+
+    def _strength_typing(self):
+        try:
+            return self.focus_get() is self.strength_entry
+        except Exception:
+            return False
+
+    def _draw_strength_ticks(self):
+        """A mark every 5 %, taller every 25 %: the detents made visible."""
+        canvas = getattr(self, 'strength_ticks', None)
+        if canvas is None:
+            return
+        try:
+            canvas.delete('tick')
+            width, height = canvas.winfo_width(), int(canvas.cget('height'))
+            if width <= 1:
+                return
+            span = STRENGTH_MAX - STRENGTH_MIN
+            steps = int(round(span / STRENGTH_DETENT))
+            colour = self.theme.muted
+            for i in range(steps + 1):
+                x = 1 + (width - 2) * i / steps
+                tall = (i % 5 == 0)
+                canvas.create_line(x, height - 1, x, 1 if tall else 4, fill=colour, tags='tick')
+        except Exception:
+            pass
 
     def _apply_style_strength(self, style=None):
         """Give a base image the strength its style asks for. Returns True when it changed anything.
@@ -9275,6 +9523,10 @@ class App:
 
     def clear_base(self):
         self.base_path = None
+        # The strength someone chose belongs to the base it was chosen for (a slider drag, a typed number, or vary()). With
+        # no base there is no such decision, so the next base may hear its style again - which is what lets a style propose
+        # a strength at all after a variation run.
+        self._strength_touched = False
         self._bases = []                 # the other references go with it, or a later render would still combine them
         if hasattr(self, 'clear_base_btn'):
             self.clear_base_btn.state(['disabled'])
@@ -10398,6 +10650,7 @@ class App:
             part = part.resize(target, Image.BILINEAR)
         return part
 
+    @timed_panel('photo_for')
     def _photo_for(self, dx, dy, w, h):
         """The visible part of the shown picture, rendered and cached, so a pan does not re-decode anything."""
         cache = getattr(self, '_preview_cache', None)
@@ -10417,6 +10670,7 @@ class App:
         cache[key] = photo
         return photo
 
+    @timed_panel('redraw')
     def _redraw(self):
         self.canvas.delete('img')
         if self._img is None:
