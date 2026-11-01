@@ -4395,11 +4395,10 @@ class App:
             if not tp:
                 return tk.Label(parent, text=path.name[:18], width=12, height=6,
                                 background=self.theme.window, foreground=self.theme.muted)
-            try:
-                with Image.open(tp) as im:
-                    im.thumbnail((size, size), Image.LANCZOS)
-                    photo = self._photo(im)
-            except Exception:
+            # Through `_photo_of`, not a private decode: same ladder, same bounded cache as the strip and the pane,
+            # so a browser resize reuses Tk images instead of minting one per cell per pixel of width.
+            photo = self._photo_of(tp, size, key=path)
+            if photo is None:
                 return tk.Label(parent, text='?', width=6)
             lab = self._tile_widget(parent, path, photo, browser=True)
             lab.image = photo
@@ -8762,11 +8761,8 @@ class App:
             if not tp:
                 return tk.Label(parent, text=path.name[:12], width=8, height=4,
                                 background=self.theme.window, foreground=self.theme.muted)
-            try:
-                with Image.open(tp) as im:
-                    im.thumbnail((size, size), Image.LANCZOS)
-                    ph = self._photo(im)
-            except Exception:
+            ph = self._photo_of(tp, size, key=path)      # the ladder and the bounded cache, as elsewhere
+            if ph is None:
                 return tk.Label(parent, text='?', width=4)
             self._all_thumbs[path] = ph
             lab = self._tile_widget(parent, path, ph, browser=True)
