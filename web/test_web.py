@@ -4,7 +4,7 @@
 
 No model, no network, no GPU. The gallery is 31 generated pictures built to have a known answer:
 
-  * 18 newest  - the plan's `DEFAULT_RECENT` cut, so they must come back as the "recent" folder and must not be
+  * `DEFAULT_RECENT` newest - the plan's cut, so they must come back as the "recent" folder and must not be
                  filed among the prompt families (this is `group_prompts.plan`'s rule, and the server must not fight it);
   * 8 identical prompts - a family big enough to need ROUNDS (log2 8 = 3), which is where `next_round` lives;
   * 3 identical prompts - small enough that the schedule is EXHAUSTIVE (6 or fewer), so every pair is asked once;
@@ -32,6 +32,11 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+
+import group_prompts  # noqa: E402  the recency window is one number, and the fixture must agree with it
+
+RECENT = group_prompts.DEFAULT_RECENT
+TOTAL = RECENT + 8 + 3 + 2
 import server as web                                        # noqa: E402
 
 FAILS = []
@@ -51,7 +56,7 @@ def stamp(minutes):
 
 
 def make_gallery(root):
-    """Write the 31 pictures and their sidecars. Returns {label: [paths]} for the assertions that need names."""
+    """Write the pictures and their sidecars. Returns {label: [paths]} for the assertions that need names."""
     made = {'recent': [], 'mountain': [], 'pool': [], 'blank': []}
 
     def one(name, prompt, minutes, colour):
@@ -67,7 +72,7 @@ def make_gallery(root):
         made['pool'].append(one('pool%d.png' % i, POOL, i, (40, 90, 200)))
     for i in range(8):                                  # the family that needs rounds
         made['mountain'].append(one('mount%d.png' % i, MOUNTAIN, 10 + i, (60, 160 + i, 70)))
-    for i in range(18):                                 # the newest pictures: the recent cut
+    for i in range(RECENT):                             # the newest pictures: exactly the recent cut
         made['recent'].append(one('rec%02d.png' % i, 'a still life of a bowl of fruit, study %d' % i,
                                   100 + i, (200 - i, 120, 60)))
     for i in range(2):                                  # no prompt, no caption: describe-all's job
@@ -202,11 +207,11 @@ def main():
               all(set(('id', 'label', 'count', 'series', 'kind')) <= set(f) for f in folders), folders[:1])
         check('folder ids are unique', len(ids) == len(set(ids)), ids)
         check('the folder counts add up to every picture',
-              sum(f['count'] for f in folders) == data.get('pictures') == 31,
+              sum(f['count'] for f in folders) == data.get('pictures') == TOTAL,
               (sum(f['count'] for f in folders), data.get('pictures')))
         recent = [f for f in folders if f['kind'] == 'recent']
         check('the plan\'s recent cut comes back as its own folder',
-              len(recent) == 1 and recent[0]['count'] == 18, recent)
+              len(recent) == 1 and recent[0]['count'] == RECENT, recent)
         big = [f for f in folders if f['kind'] == 'group' and f['count'] == 8]
         small = [f for f in folders if f['kind'] == 'group' and f['count'] == 3]
         check('the eight-prompt family is one folder', len(big) == 1, [(f['kind'], f['count']) for f in folders])
@@ -393,7 +398,7 @@ def main():
               all(f['kind'] != 'unfiled' for f in after['folders'])
               and any(f['kind'] == 'group' and f['count'] == 2 for f in after['folders']), labels)
         check('the grouping still accounts for every picture',
-              sum(f['count'] for f in after['folders']) == after['pictures'] == 31,
+              sum(f['count'] for f in after['folders']) == after['pictures'] == TOTAL,
               (sum(f['count'] for f in after['folders']), after['pictures']))
         check('a finished job is still pollable', jcall(base, '/api/job/' + job_id)[0] == 200)
         check('an unknown job is a 404', jcall(base, '/api/job/nope')[0] == 404)
