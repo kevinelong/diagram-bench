@@ -571,6 +571,30 @@ def main():
     app.layout_var.set('single')
     root.update()
 
+    print('\n-- the version sits in the window\'s bottom right corner')
+    import version as _ver
+    check('the window shows the version from the one place it is written',
+          app.version_label['text'] == _ver.display, app.version_label['text'])
+    check('and the string is v plus three numbers',
+          _ver.display.startswith('v') and len(_ver.triple()) == 3 and all(isinstance(n, int) for n in _ver.triple()),
+          _ver.display)
+    place = {k: app.version_label.place_info().get(k) for k in ('relx', 'rely', 'anchor')}
+    check('placed at the bottom-right corner of the window, not of a column',
+          float(place['relx'] or 0) == 1.0 and float(place['rely'] or 0) == 1.0 and place['anchor'] == 'se', place)
+    check('and it is a child of the toplevel, so every column can be resized without moving it',
+          str(app.version_label.winfo_parent()) == str(app.root), app.version_label.winfo_parent())
+
+    print('\n-- Stop keeps its own cell, so Retry cannot cover it')
+    stop_cell = (app.stop_btn.grid_info().get('row'), app.stop_btn.grid_info().get('column'))
+    retry_cell = (app.retry_btn.grid_info().get('row'), app.retry_btn.grid_info().get('column'))
+    check('Stop and Retry are in different cells', stop_cell != retry_cell, (stop_cell, retry_cell))
+    check('Stop is mapped even while idle, so it can be found before a run starts',
+          bool(app.stop_btn.winfo_ismapped()), app.stop_btn.grid_info())
+    app.stop_btn.state(['!disabled'])
+    root.update()
+    check('and it enables while a run is in flight', 'disabled' not in app.stop_btn.state(), app.stop_btn.state())
+    app.stop_btn.state(['disabled'])
+
     print('\n-- hold seed leaves it exactly where it is')
     check('the hold box is off by default', app.hold_seed_var.get() is False)
     app.hold_seed_var.set(True)

@@ -50,6 +50,7 @@ import tkinter.font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 from PIL import Image, ImageDraw, ImageTk
 
+import version
 import zimage_gen as zg
 from rephrase import cycle_period, has_synonyms, rephrase_text
 
@@ -2814,7 +2815,9 @@ class App:
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
         self.stop_btn.grid(row=1, column=0, sticky='w')
         self.retry_btn = ttk.Button(row, text='Retry', command=self.retry)
-        self.retry_btn.grid(row=1, column=0, sticky='w')
+        # its own cell, at the end of the row: sharing Stop's cell meant a failed run drew Retry *over* Stop, so the one
+        # control that stops a run disappeared exactly when the row had something to say about the last one
+        self.retry_btn.grid(row=1, column=6, sticky='w', padx=(10, 0))
         self.retry_btn.grid_remove()
         self.preview_btn = ttk.Button(row, text='Preview', command=self.preview)
         self.preview_btn.grid(row=1, column=1, sticky='w', padx=(6, 0))
@@ -3009,6 +3012,19 @@ class App:
         self.bar.grid_remove()
         self.status = ttk.Label(left, text='starting…', foreground=self.theme.muted)
         self.status.grid(row=6, column=0, sticky='w')
+        # bottom right of the *window*, not of this column: the version is the last thing in the corner, out of the way of
+        # the status line but findable when a screenshot has to say which build produced a picture. `place` rather than a
+        # grid cell so it cannot disturb the column layout the sashes and the size tests depend on.
+        self.version_label = ttk.Label(self.root, text=version.display, foreground=self.theme.muted,
+                                       font=('Segoe UI', 8))
+        self.version_label.place(relx=1.0, rely=1.0, anchor='se', x=-8, y=-4)
+        try:
+            self.version_label.lift()
+        except Exception:
+            pass
+        self._tip(self.version_label,
+                  'Version %s - patch is fixed bugs, minor is new features, major only a published release.'
+                  % version.display)
         self.hint = ttk.Label(left, text='', foreground=self.theme.muted, wraplength=430, justify='left',
                               font=('Segoe UI', 9))
         self.hint.grid(row=7, column=0, sticky='w', pady=(4, 0))

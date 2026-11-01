@@ -1178,6 +1178,26 @@ prompts collapse to **238** distinct ones at 0.90 cosine; and **1,899 of 1,905**
 own sidecar. What cannot be answered at all: sampler (never recorded), wins, rejections, per-render wall time and VRAM
 (clips only).
 
+## Versioning
+
+One constant, `version.py`, and it is the only place a version is written. The window shows it in the **bottom right corner**
+of the window itself (not of a column), so a screenshot says which build produced a picture.
+
+    major . minor . patch
+
+| part | moves when | and then |
+|---|---|---|
+| **patch** | a **bug is fixed** | nothing else changes |
+| **minor** | a **feature is added** | patch goes back to **0** |
+| **major** | **only when an official release is published** | minor and patch go back to **0** |
+
+The left of a point is reached by being released, never by having a lot of work done to it, and the bump belongs to the
+change that earns it - a commit that fixes a bug bumps the patch in that same commit, so the corner never lies about the
+build it is showing.
+
+Started at **v0.1.1** (2026-11-01, Kevin's choice). `test_gallery_ui.py` checks that the label matches `version.display`,
+that it is placed at `relx=1 rely=1 anchor=se` on the toplevel, and that the string is a `v` plus three integers.
+
 ## The toolkit question, parked
 
 Whether Tk itself is the cause of the gallery's UI friction, and whether a native or browser-based shell would behave
