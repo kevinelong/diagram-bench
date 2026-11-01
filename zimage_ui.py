@@ -2658,6 +2658,9 @@ class App:
         self.sashes = (self.gallery_sash, self.prompt_sash)   # the pane's is added with the pane, below
         self.group_var = tk.BooleanVar(value=bool(self._settings.get('folders', True)))
         self._plan = None                 # the grouping plan, when computed
+        # True until the first plan has been applied. A click during that window is acknowledged as "starting up" instead
+        # of pretending the folder is merely opening; a cold-app click measured 2 076 ms end to end, most of it startup.
+        self._booting = True
         self._active_folder = None        # index into self._plan['groups'], or None for everything
         self._grouping = False
         self.folder_bar = ttk.Frame(gal)
@@ -3813,8 +3816,12 @@ class App:
         self._meta_mtimes = meta_mtimes      # a sidecar edit must invalidate the search cache too
         return rows
 
-    def _all_files(self):
-        return [p for p, _m in self._scan()]
+    def _all_files(self, rescan=True):
+        """Every picture in the source. `rescan=False` reuses the last walk: opening a folder changes what is *shown*,
+        not what is on disk, and the walk costs 0.7-1.6 s on the real gallery (measured)."""
+        rows = self._scan() if rescan else (getattr(self, '_scan_rows', None) or self._scan())
+        self._scan_rows = rows
+        return [p for p, _m in rows]
 
     def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
         # A tile is a tab stop, not a mouse target. `takefocus` puts it in the Tab order in the order it was created,
@@ -4415,6 +4422,7 @@ class App:
         self._sheets = {}
         self._plan = plan
         self._grouping = False
+        self._booting = False             # the startup pass is done: clicks from here pay only for themselves
         # keep the open folder by name: a re-group after a generation must not close the view being read, and indexes
         # move when the plan is recomputed
         self._active_folder = None
@@ -4840,9 +4848,11 @@ class App:
         # build, and that build used to run before a single visible thing changed - which is what made a folder click read
         # as dropped. The cursor, the button's label and a title that says "opening" cost about a millisecond.
         self._acknowledge_folder(index)
-        started = time.perf_counter()
-        self._render_contents()
-        PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
+        # Then let the loop paint that acknowledgement *before* the build starts. Running the build in this same callback
+        # meant the paint could only happen afterwards, so the visible response was the build's duration (406 ms p50 on the
+        # real gallery). One turn later, the click is on screen first - and any work the startup pass had already queued is
+        # no longer paid for by this interaction.
+        self._later(1, self._build_contents)
         try:
             self.contents_canvas.yview_moveto(0)
         except Exception:
@@ -4853,7 +4863,9 @@ class App:
                 self.folder_pick_btn.configure(text='%s\u2026' % name)
             except Exception:
                 pass
-        self.refresh_gallery()
+        # Re-scope, do not rescan: this click changes what is *shown*, and the walk of the source is 0.7-1.6 s on the real
+        # gallery - it was the whole cost of a folder click (measured: click handler 1 621 ms, of which refresh 1 621 ms).
+        self.refresh_gallery(rescan=False)
 
     # -- paired A/B review of one folder --------------------------------------------------------------
     def review_paths(self, index=None, paths=None):
@@ -5675,7 +5687,7 @@ class App:
         if getattr(self, '_active_folder', None) is not None:
             self._render_contents()
 
-    def _visible_files(self):
+    def _visible_files(self, rows=None):
         """The flat picture list: filtered by search and stars, **always newest first**.
 
         Asked for 2026-10-31: "the main image list in the first column outside of folder groups should be ordered in date
@@ -5685,7 +5697,9 @@ class App:
 
         Stars are a tie-break, never a primary key: a favourite cannot float above a newer picture here.
         """
-        rows = self._scan()
+        # `_refresh_gallery` has usually just walked the source; a second identical walk here was half of the 1.1 s a
+        # folder click used to cost (measured: refresh 1 103 ms inside a 1 104 ms click handler).
+        rows = rows if rows is not None else (getattr(self, '_scan_rows', None) or self._scan())
         files = [p for p, _m in rows]
         # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
         # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
@@ -6002,6 +6016,14 @@ class App:
         self._idle(self._on_contents_resize)
 
     @timed_panel('render_contents')
+    def _build_contents(self):
+        """The expensive half of opening a folder, one event-loop turn after the acknowledgement."""
+        started = time.perf_counter()
+        try:
+            self._render_contents()
+        finally:
+            PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
+
     def _acknowledge_folder(self, index):
         """The cheap half of opening a folder: say "that one" before doing the expensive half.
 
@@ -6024,10 +6046,13 @@ class App:
             groups = (self._plan or {}).get('groups') or []
             if index is not None and 0 <= index < len(groups):
                 label = (groups[index].get('label') or '').strip()
-                self.contents_title.set_title('%s  -  opening\u2026' % label, width_px=200)
-            self.root.update_idletasks()          # let the paint land before the loop starts
+                self.contents_title.set_title(
+                    '%s  -  %s\u2026' % (label, 'starting up' if getattr(self, '_booting', False) else 'opening'),
+                    width_px=200)
         except Exception:
             pass
+        # deliberately no `update_idletasks()`: it drains the whole interpreter's idle queue, not this paint, and a cold
+        # click measured 1 655 ms of `refresh_gallery` plus 547 ms of `apply_strip_resize` being flushed through it
         PROFILE.record('folder_click_ack', (time.perf_counter() - started) * 1000.0)
 
     def _render_contents(self):
@@ -6934,13 +6959,13 @@ class App:
         return cols, max(48, tile)
 
     @timed_panel('refresh_gallery')
-    def refresh_gallery(self, select=None):
+    def refresh_gallery(self, select=None, rescan=True):
         if getattr(self, '_closing', False) or not self._alive():
             return                       # the window is on its way out: painting it now is a bgerror, not a repaint
         strip_pos = self._scroll_pos(self.gal_canvas)
         self._rebuilding = True          # <Configure> mid-rebuild would see an empty container and clamp the view
         try:
-            self._refresh_gallery(select)
+            self._refresh_gallery(select, rescan=rescan)
         finally:
             self._rebuilding = False
         # A folder that has just been opened asks to be brought into view, and that must beat restoring the old
@@ -6959,18 +6984,18 @@ class App:
         self._note_context()
         self._prewarm_thumbs()
 
-    def _refresh_gallery(self, select=None):
+    def _refresh_gallery(self, select=None, rescan=True):
         self._scene_cache = {}
         # NOT cleared: the signatures are memoised by mtime, so a rewrite invalidates its own entry and everything else
         # stays. `_heads` (the composed sheets) is still cleared, because wins and ordering can change without a pixel
         # changing.
         self._heads = {}
-        everything = self._all_files()
+        everything = self._all_files(rescan=rescan)
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
-        files = self._visible_files()
+        files = self._visible_files(rows=getattr(self, '_scan_rows', None))
         if self._sort_wins():
             import pair_rank
             files = pair_rank.sort_by_wins(files)
