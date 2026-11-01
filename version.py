@@ -14,7 +14,7 @@ The window shows it bottom right; `python -m` and the web server read the same c
 disagree.
 """
 
-__version__ = '0.4.0'
+__version__ = '0.4.1'
 
 #: the same string with the conventional `v` in front, for display
 display = 'v' + __version__

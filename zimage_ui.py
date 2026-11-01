@@ -10278,8 +10278,10 @@ class App:
                     self.bar.stop()
                     self.status.configure(text='failed - nothing was saved')
                     self.hint.configure(
-                        text='%s\n\nThe request went to ComfyUI on 127.0.0.1:%d. If the server is not running, '
-                             'start it and press Retry.' % (payload, self.args.port))
+                        text='%s\n\nThe request went to ComfyUI on 127.0.0.1:%d. The run already checks the '
+                             'server before it starts and tries to launch it when it is missing, so if this repeats '
+                             'the server is failing while it works - press Retry, and if it fails again read the '
+                             'ComfyUI console for the reason.' % (payload, self.args.port))
                     self.retry_btn.grid()
         except queue.Empty:
             pass
