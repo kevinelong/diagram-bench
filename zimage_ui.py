@@ -4836,7 +4836,13 @@ class App:
         # The gallery column's width is the sashes' business now, not a selection's: a folder opening must not move the
         # boundaries the reader set (`_render_contents` keeps the pane's column whatever is open).
         self._content_shown = BATCH_CONTENTS
+        # Acknowledge the click before building anything. On the real gallery the pane takes 406 ms p50 and 1.9 s p90 to
+        # build, and that build used to run before a single visible thing changed - which is what made a folder click read
+        # as dropped. The cursor, the button's label and a title that says "opening" cost about a millisecond.
+        self._acknowledge_folder(index)
+        started = time.perf_counter()
         self._render_contents()
+        PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
         try:
             self.contents_canvas.yview_moveto(0)
         except Exception:
@@ -5996,6 +6002,34 @@ class App:
         self._idle(self._on_contents_resize)
 
     @timed_panel('render_contents')
+    def _acknowledge_folder(self, index):
+        """The cheap half of opening a folder: say "that one" before doing the expensive half.
+
+        Everything here is a paint, not a build, and it is deliberately before `_render_contents` so the first visible
+        response to a click does not wait for the pane. `folder_click_ack` in the profile is that latency; the application
+        of the work is `folder_click_to_pane`.
+        """
+        started = time.perf_counter()
+        try:
+            self._paint_folder_cursor()
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'folder_pick_btn', None) is not None and self._plan:
+                name = 'All folders' if index is None else self._folder_text(index)
+                self.folder_pick_btn.configure(text='%s\u2026' % name)
+        except Exception:
+            pass
+        try:
+            groups = (self._plan or {}).get('groups') or []
+            if index is not None and 0 <= index < len(groups):
+                label = (groups[index].get('label') or '').strip()
+                self.contents_title.set_title('%s  -  opening\u2026' % label, width_px=200)
+            self.root.update_idletasks()          # let the paint land before the loop starts
+        except Exception:
+            pass
+        PROFILE.record('folder_click_ack', (time.perf_counter() - started) * 1000.0)
+
     def _render_contents(self):
         """The open folder's pictures, in the pane beside the folder list - and nothing to "close" but another click.
 
