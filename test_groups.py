@@ -170,6 +170,29 @@ def test_a_stated_head_count_is_a_subject():
 def main():
     test_a_stated_head_count_is_a_subject()
     test_folder_order_follows_newest_member()
+    print('\n-- a folder that is big and not tight is split into the scenes it actually holds')
+    scene_a = ['two women kissing on a leather sofa in a warm living room, lamp light %d' % k for k in range(20)]
+    scene_b = ['a copper-red haired woman in a green armchair by a window, daylight %d' % k for k in range(20)]
+    big_rows = [{'path': '/g/a%d.png' % k, 'prompt': t, 'created': '2026-10-%02d' % (1 + k % 28),
+                 'root': None, 'lineage': None} for k, t in enumerate(scene_a + scene_b)]
+    # the mean is taken over the whole plan, so pad with small folders or a lone big group is never a candidate
+    pad = [{'label': 's%d' % k, 'items': [dict(big_rows[0], path='/g/s%d.png' % k),
+                                          dict(big_rows[1], path='/g/t%d.png' % k)]} for k in range(10)]
+    lex_big = gp.fit_lexicon([r['prompt'] for r in big_rows])
+    out, left = gp.split_loose_groups([{'label': 'big', 'items': big_rows}] + pad, lex_big)
+    biggest = max(len(g['items']) for g in out)
+    check('a loose folder splits into its scenes', biggest < len(big_rows), [len(g['items']) for g in out])
+    check('and nothing is lost in the split',
+          sum(len(g['items']) for g in out) + len(left) == len(big_rows) + 2 * len(pad),
+          (sum(len(g['items']) for g in out), len(left)))
+    tight_rows = [{'path': '/g/t%d.png' % k,
+                   'prompt': 'two women kissing on a leather sofa in a warm living room, lamp light %d' % k,
+                   'created': '', 'root': None, 'lineage': None} for k in range(40)]
+    out2, _left2 = gp.split_loose_groups([{'label': 'tight', 'items': tight_rows}] + pad,
+                                         gp.fit_lexicon([r['prompt'] for r in tight_rows]))
+    check('a tight folder of the same size is left alone',
+          any(len(g['items']) == len(tight_rows) for g in out2), [len(g['items']) for g in out2])
+
     ap = argparse.ArgumentParser()
     ap.add_argument('--real', action='store_true', help='also group the real gallery, read-only, and time it')
     args = ap.parse_args()

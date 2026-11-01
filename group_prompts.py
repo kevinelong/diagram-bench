@@ -637,6 +637,78 @@ def without_counts(prompt):
     return ' '.join(text.split())
 
 
+# A folder that is both big and loose is a chained merge, and size alone is not the signal: the 136-picture
+# "seated black hair" scene survives even at a 0.50 threshold, so splitting on size alone would break a real folder.
+# Measured 2026-10-31 on the real gallery: the 316-picture folder has a median intra-cosine of 0.080 against a corpus
+# median of 0.770, holds 56 distinct lineage roots, and re-clusters into 14 scenes at 0.20.
+SPLIT_SIZE_FACTOR = 2.0     # candidates are folders larger than twice the mean folder
+SPLIT_TIGHT = 0.60          # a folder whose median pairwise cosine is at least this is a real family: never split
+SPLIT_THRESHOLD = 0.30      # the stricter threshold their own members are re-clustered at
+SPLIT_SHRINK = 0.60         # the split counts only if the largest part falls below this fraction of the original
+
+# Re-measured 2026-10-31 on the current corpus, correcting an earlier figure of 0.080: the 316-picture folder has a
+# median intra-cosine of 0.315 (corpus median 0.770), and re-clustering it at 0.30 gives 13 parts, 11 of them with two
+# or more members, the largest 119 (38 % of the original). The first gate was "median below 0.20", which that folder
+# fails - and correctly, since it is nothing like as loose as the 0.080 claimed. The gate is now "not already tight",
+# and the acceptance is that the split actually shrinks the biggest piece.
+
+
+def median_intra_cosine(rows, lexicon):
+    """Median pairwise cosine between a folder's prompts. 1.0 when the folder is too small to have pairs."""
+    vecs = [vector(r['prompt'], lexicon) for r in rows]
+    sims = []
+    n = len(vecs)
+    for i in range(n):
+        for j in range(i + 1, n):
+            sims.append(cosine(vecs[i], vecs[j]))
+    if not sims:
+        return 1.0
+    sims.sort()
+    return sims[len(sims) // 2]
+
+
+def split_loose_groups(groups, lexicon, min_group=MIN_GROUP):
+    """Break folders that are too big AND too loose into the scenes they actually hold.
+
+    Returns (groups, leftovers). Leftovers are members of sub-clusters too small to be folders; the caller adds them to
+    `unfiled` rather than losing them - the same leak that hid 15 pictures in the 2026-10-31 audit.
+    """
+    if not groups:
+        return groups, []
+    sizes = [len(g['items']) for g in groups]
+    mean = sum(sizes) / float(len(sizes))
+    limit = SPLIT_SIZE_FACTOR * mean
+    out, leftovers = [], []
+    for g in groups:
+        items = g.get('items') or []
+        if len(items) <= limit or len(items) < 2 * min_group:
+            out.append(g)
+            continue
+        if median_intra_cosine(items, lexicon) >= SPLIT_TIGHT:
+            out.append(g)                       # already a tight family: leave the real folder alone
+            continue
+        parts = group_texts([r['prompt'] for r in items], threshold=SPLIT_THRESHOLD, lexicon=lexicon)
+        keep = [p for p in parts if len(p) >= min_group]
+        largest = max((len(p) for p in parts), default=len(items))
+        if len(keep) < 2 or largest >= SPLIT_SHRINK * len(items):
+            out.append(g)                       # no real division: the biggest piece is still most of the folder
+            continue
+        for part in keep:
+            rows = sorted((items[i] for i in part), key=lambda r: r.get('created') or '')
+            label_prompts = [r['prompt'] for r in rows]
+            roots = [r.get('root') for r in rows]
+            out.append({'label': label_for(label_prompts, range(len(label_prompts)), lexicon=lexicon, roots=roots),
+                        'title': label_for(label_prompts, range(len(label_prompts)), width=0, lexicon=lexicon,
+                                           roots=roots),
+                        'items': rows, 'oldest': rows[0].get('created') or '',
+                        'newest': rows[-1].get('created') or '',
+                        'series': len({tuple(r.get('lineage') or [r['prompt']]) for r in rows})})
+        for part in parts:
+            if len(part) < min_group:
+                leftovers.extend(items[i] for i in part)
+    return out, leftovers
+
+
 def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MIN_GROUP, keep_lexicon=False,
          progress=None):
     """items: list of dicts with at least 'path', 'prompt', and a sortable 'created' (or 'mtime') key, NEWEST first.
@@ -766,9 +838,12 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
     # Folders are ordered by when they were last touched - the newest picture they hold - not by when they started.
     # A folder order built on the oldest member never moves, which is stable but puts a folder that just received a
     # render in the position it had when it was created. Ties fall back to the label so the order stays deterministic.
+    _tick(progress, 0.95, 'splitting folders that merged by chaining')
+    groups, split_leftovers = split_loose_groups(groups, lexicon)
     groups.sort(key=lambda g: g['label'])
     groups.sort(key=lambda g: g.get('newest') or '', reverse=True)
-    out = {'recent': head, 'groups': groups, 'ungrouped': leftovers + small_family_rows + without,
+    out = {'recent': head, 'groups': groups,
+           'ungrouped': leftovers + small_family_rows + split_leftovers + without,
            'threshold': threshold, 'recent_n': recent}
     if keep_lexicon and lexicon is not None:
         out['_lexicon'] = lexicon      # the open-folder view re-matches new pictures against the same corpus statistics
