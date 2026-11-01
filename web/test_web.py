@@ -200,6 +200,14 @@ def main():
 
         # --- folders -------------------------------------------------------------------------------------------
         status, data = jcall(base, '/api/folders')
+        status, ver = jcall(base, '/api/version')
+        import version as _ver
+        check('GET /api/version reports the same number the window shows',
+              status == 200 and ver.get('version') == _ver.display, (status, ver))
+        check('the page carries a corner element for it and the client fills it from that route',
+              'id="version"' in page and '/api/version' in js and '.version' in css,
+              ('id="version"' in page, '/api/version' in js, '.version' in css))
+
         check('GET /api/folders is JSON', status == 200 and 'folders' in data, (status, data))
         folders = data.get('folders') or []
         ids = [f['id'] for f in folders]

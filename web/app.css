@@ -304,3 +304,14 @@ button.big { font-size: 1.05rem; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* the build, in the corner, as the window has it: patch = fixes, minor = features, major = release */
+.version {
+  position: fixed;
+  right: 10px;
+  bottom: 6px;
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.65;
+  pointer-events: none;
+}

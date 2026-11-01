@@ -48,6 +48,9 @@ import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import version  # noqa: E402  (the one place a number is written)
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -701,6 +704,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get(self, path, query):
         g = self.gallery
+        if path == '/api/version':
+            return self._json({'version': version.display})
         if path in STATIC:
             return self._static(STATIC[path])
         if path == '/favicon.ico':

@@ -482,3 +482,8 @@ $('reset-start').addEventListener('click', () => {
 $('keep-close').addEventListener('click', keepClose);
 
 loadFolders(true).catch((err) => showError(err.message));
+
+fetch('/api/version')
+  .then((r) => r.json())
+  .then((v) => { $('version').textContent = v.version; })
+  .catch(() => {});   // the corner is not worth an error banner
