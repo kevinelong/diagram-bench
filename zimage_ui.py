@@ -3015,9 +3015,13 @@ class App:
         # bottom right of the *window*, not of this column: the version is the last thing in the corner, out of the way of
         # the status line but findable when a screenshot has to say which build produced a picture. `place` rather than a
         # grid cell so it cannot disturb the column layout the sashes and the size tests depend on.
+        # just above the bottom bar and in the theme's own text colour: on the bar itself it sat on a button label, and in
+        # the muted grey it was nearly invisible against the light strip
+        # a themed ttk label, left to draw its own background: a tk.Label given root.cget('bg') rendered as a white box
+        # with invisible text. Placed above the bottom bar so the light strip cannot swallow it.
         self.version_label = ttk.Label(self.root, text=version.display, foreground=self.theme.muted,
                                        font=('Segoe UI', 8))
-        self.version_label.place(relx=1.0, rely=1.0, anchor='se', x=-8, y=-4)
+        self.version_label.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-44)
         try:
             self.version_label.lift()
         except Exception:
@@ -3247,6 +3251,10 @@ class App:
         self._later(400, self.probe_llm)
         root.bind('<Destroy>', self._on_destroy, add='+')
         root.protocol('WM_DELETE_WINDOW', self.on_close)
+        # The version label is placed on the toplevel, so every frame built after it stacks on top of it: lift it once the
+        # window is complete (and again when it is mapped) or it is simply not visible in the corner.
+        self.root.after_idle(self._raise_version)
+        self.root.bind('<Map>', lambda e: self._raise_version(), add='+')
         self._poll()
         # Folders are the default view. Grouping reads a sidecar per picture, so it waits for the window to exist and
         # for the first paint instead of running during construction.
@@ -3256,6 +3264,13 @@ class App:
             # could not reproduce it - so if folders are on and two and a half seconds later there is still no plan and
             # no worker, start one. It is idempotent: `_regroup_now` refuses while a compute is in flight.
             self.root.after(2500, self._folders_watchdog)
+
+    def _raise_version(self):
+        """Keep the version visible: siblings created after it are drawn above a placed widget."""
+        try:
+            self.version_label.lift()
+        except Exception:
+            pass
 
     def _ensure_maximized(self):
         """Ask again once the window is mapped.
