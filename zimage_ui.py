@@ -947,18 +947,18 @@ def thumb_for(png, cache_root=None, build=True):
 
 
 def timed_panel(label):
-    """Decorator: time a whole panel render, with no cost when timing is off.
+    """Decorator: time a whole panel render into the always-on profile.
 
-    Defined here rather than beside the rest of the harness because `thumbs_for` - the single
-    most important number in this file - is defined above it, and a decorator has to exist at
-    the moment the def runs. `timed` and `_TIMING` are resolved when the wrapper is called, so
-    they can be defined further down.
+    Defined here rather than beside the rest of the harness because `thumbs_for` - the single most important number in this
+    file - is defined above it, and a decorator has to exist at the moment the def runs.
+
+    It used to return the function untouched unless `ZIMAGE_TIMING` was set, which is exactly why real sessions recorded
+    nothing: the recorder was behind the gate. The gate now applies only to the JSONL writer inside `timed`; the aggregate
+    in memory is always kept (one `perf_counter` pair and one append per block).
     """
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*a, **k):
-            if not _TIMING:
-                return fn(*a, **k)
             with timed(label):
                 return fn(*a, **k)
         return wrapper
