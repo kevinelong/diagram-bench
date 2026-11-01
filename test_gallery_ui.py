@@ -502,8 +502,14 @@ def main():
     # what won, without hunting for the picker. With no bouts recorded every win count is 0, so this falls back to
     # newest-first and an unreviewed gallery is unchanged - which is why defaulting to it costs nothing.
     check('the sort starts on rank order', app.sort_var.get() == 'Wins', app.sort_var.get())
-    check('and the list is the rank order', app._sort_wins() and app._visible_files()[0] in app._files,
-          app.sort_var.get())
+    # 2026-10-31, revised: the flat list is a timeline. Rank orders the open folder's pane; the strip outside folders is
+    # newest-first, which is where a render that has just landed has to appear. The picker's rank setting must not
+    # reorder this list.
+    flat = app._visible_files()
+    stamps = [Path(p).stat().st_mtime for p in flat]
+    check('the flat list is newest first whatever the sort picker says',
+          stamps == sorted(stamps, reverse=True), 'unsorted' if stamps != sorted(stamps, reverse=True) else 'ok')
+    check('and rank no longer orders it', app._sort_wins() and app._visible_files() == flat, app.sort_var.get())
     check('sizes offered include 704, the clip grid, so a still can need no resample',
           list(app.size_cb['values']) == ['256', '320', '384', '448', '512', '640', '704', '768', '1024'],
           str(list(app.size_cb['values'])))

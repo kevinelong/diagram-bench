@@ -5213,12 +5213,14 @@ class App:
             self._render_contents()
 
     def _visible_files(self):
-        """The gallery as filtered *and ordered*: search, then stars, then the sort the picker names.
+        """The flat picture list: filtered by search and stars, **always newest first**.
 
-        The sort mode was never consulted here - the list always came back favourites-first by mtime - so `Wins` and
-        `Sequence` were options that could not change anything, and the review's rank never reached the lists
-        (reported 2026-10-30). Stars are now the last tie-break rather than the first, so a favourite cannot outrank a
-        picture that won.
+        Asked for 2026-10-31: "the main image list in the first column outside of folder groups should be ordered in date
+        descending not rank order". So rank no longer orders this list at all - the strip outside a folder is a timeline,
+        newest at the top, which is where a render that has just landed has to appear. Rank still orders the open
+        folder's pane (`_render_contents`), and `Sequence` still reads a storyboard in film order when it is chosen.
+
+        Stars are a tie-break, never a primary key: a favourite cannot float above a newer picture here.
         """
         rows = self._scan()
         files = [p for p, _m in rows]
@@ -5236,18 +5238,6 @@ class App:
             files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
-        if self._sort_wins():
-            try:
-                def key(f):
-                    rec = self._record_of(f)
-                    try:
-                        stamp = f.stat().st_mtime
-                    except OSError:
-                        stamp = 0.0
-                    return (-rec['wins'], rec['losses'], -stamp, f.name, f.name not in self._favorites)
-                return sorted(files, key=key)
-            except Exception as exc:
-                log_error('rank order in the picture list', exc)      # fall through to newest-first
         if self._sort_sequence():
             return [Path(p) for p in self._sequence_order(files)]
         files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
