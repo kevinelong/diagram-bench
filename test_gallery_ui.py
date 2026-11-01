@@ -610,6 +610,25 @@ def main():
     check('a start that succeeds says so and the run continues',
           any('started - continuing' in s for s in said3), said3[:4])
 
+    print('\n-- the API summary and the explanation can be selected and copied')
+    check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))
+    check('so is the hint', isinstance(app.hint, zui.SelectableText), type(app.hint))
+    app.hint.configure(text='the request went to ComfyUI on 127.0.0.1:8006')
+    root.update()
+    app.hint.text.tag_add('sel', '1.0', '1.11')          # as a drag would
+    app.hint._copy()
+    check('a selection reaches the clipboard', app.root.clipboard_get() == 'the request', app.root.clipboard_get())
+    check('and the height follows the wrapped text, not a fixed box',
+          int(app.hint.text.cget('height')) >= 1, app.hint.text.cget('height'))
+    for name, widget in (('status', app.status), ('folder title', app.gal_title), ('version', app.version_label)):
+        check('the %s offers Copy on right-click' % name,
+              bool(widget.bind('<Button-3>')), widget.bind('<Button-3>'))
+    app.status.configure(text='failed - nothing was saved')
+    app.status._copy_menu.invoke(0)                            # the menu the right-click opens
+    root.update()
+    check('and its Copy item puts the line on the clipboard',
+          app.root.clipboard_get() == 'failed - nothing was saved', app.root.clipboard_get())
+
     print('\n-- the version sits in the window\'s bottom right corner')
     import version as _ver
     check('the window shows the version from the one place it is written',

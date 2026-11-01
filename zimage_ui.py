@@ -2366,6 +2366,107 @@ class LoadingMeter(ttk.Frame):
         self._started = None
 
 
+class SelectableText(ttk.Frame):
+    """A label whose text can be selected and copied.
+
+    A `ttk.Label` cannot hold a selection at all, and the two long lines in this window - what the last run asked the API and
+    what came back, and the explanation under the status - are exactly the text someone wants to paste into a bug report. This
+    keeps the surface those lines are written through (`configure(text=...)`, `['text']`, `['foreground']`, `grid(...)`) and
+    puts a borderless read-only `tk.Text` underneath, so dragging and Ctrl+C work, and the height follows the wrapped text
+    instead of leaving a fixed box.
+    """
+
+    def __init__(self, master, text='', wraplength=400, width=48, font=('Segoe UI', 9), foreground=None,
+                 justify='left', **kw):
+        super().__init__(master, **kw)
+        self._text = ''
+        self._wraplength = wraplength
+        self._font = font
+        self._fg = foreground
+        background = ttk.Style().lookup('TFrame', 'background') or 'white'
+        self.text = tk.Text(self, wrap='word', height=1, width=width, bd=0, highlightthickness=0,
+                            font=font, background=background, foreground=(foreground or 'black'),
+                            cursor='xterm', padx=0, pady=0, spacing1=0, spacing3=0, takefocus=1)
+        self.text.pack(fill='both', expand=True)
+        self.text.bind('<Control-c>', self._copy)
+        self.configure(text=text, justify=justify)
+
+    # -- the surface a Label has, only what this file uses ------------------------------------------------
+    def configure(self, **kw):
+        text = kw.pop('text', None)
+        fg = kw.pop('foreground', None)
+        wrap = kw.pop('wraplength', None)
+        if wrap is not None:
+            self._wraplength = int(wrap)
+        if fg is not None:
+            self._fg = fg
+            self.text.configure(foreground=fg)
+        if text is not None:
+            self._text = str(text)
+            self.text.configure(state='normal')
+            self.text.delete('1.0', 'end')
+            self.text.insert('1.0', self._text)
+            self.text.configure(state='disabled')
+            self._fit()
+        return self
+
+    config = configure
+
+    def cget(self, key):
+        if key in ('text', '-text'):
+            return self._text
+        if key in ('foreground', '-foreground'):
+            return self._fg
+        return self.text.cget(key)
+
+    def __getitem__(self, key):
+        if key == 'text':
+            return self._text
+        if key == 'foreground':
+            return self._fg
+        return self.text.cget(key)
+
+    def __setitem__(self, key, value):
+        self.configure(**{key: value})
+
+    def __getattr__(self, name):                 # grid/pack/winfo_*/bind/... belong to the frame or the text
+        for target in (self.__dict__.get('text'), ttk.Frame):
+            if target is not None and hasattr(target, name):
+                return getattr(target, name)
+        raise AttributeError(name)
+
+    # -- copying -----------------------------------------------------------------------------------------
+    def _copy(self, _event=None):
+        try:
+            self.text.clipboard_clear()
+            self.text.clipboard_append(self.text.get('sel.first', 'sel.last'))
+        except tk.TclError:
+            self.text.clipboard_clear()
+            self.text.clipboard_append(self._text)
+        return 'break'
+
+    def _fit(self):
+        """Height from the text: greedy wrap at `wraplength`, so no fixed box and no scrollbar."""
+        import tkinter.font as tkfont
+        measure = tkfont.Font(font=self._font).measure
+        limit = max(40, self._wraplength - 6)
+        lines = 0
+        for para in (self._text or '').split('\n'):
+            if not para.strip():
+                lines += 1
+                continue
+            cur = ''
+            for word in para.split(' '):
+                trial = (cur + ' ' + word).strip()
+                if not cur or measure(trial) <= limit:
+                    cur = trial
+                else:
+                    lines += 1
+                    cur = word
+            lines += 1
+        self.text.configure(height=max(1, lines))
+
+
 class App:
     def __init__(self, root, engine, args):
         self.root, self.engine, self.args = root, engine, args
@@ -3016,8 +3117,8 @@ class App:
         # ---- middle: progress (sits under the button, above the status line)
         # the banner answers the only question that matters before pressing Enter
         # wraplength caps the requested width, so a long file name can never widen this column
-        self.banner = ttk.Label(left, text='', font=('Segoe UI', 10, 'bold'), foreground=self.theme.text,
-                                wraplength=396, justify='left')
+        self.banner = SelectableText(left, text='', font=('Segoe UI', 10, 'bold'), foreground=self.theme.text,
+                                     wraplength=396, width=48)
         self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
         self._tip(self.banner, 'What the next Generate will do, with the base file name in full.')
         self.ticks = ttk.Label(left, text='', foreground=self.theme.accent, font=('Consolas', 10))
@@ -3045,8 +3146,8 @@ class App:
         self._tip(self.version_label,
                   'Version %s - patch is fixed bugs, minor is new features, major only a published release.'
                   % version.display)
-        self.hint = ttk.Label(left, text='', foreground=self.theme.muted, wraplength=430, justify='left',
-                              font=('Segoe UI', 9))
+        self.hint = SelectableText(left, text='', foreground=self.theme.muted, wraplength=430, width=52,
+                                   font=('Segoe UI', 9))
         self.hint.grid(row=7, column=0, sticky='w', pady=(4, 0))
 
         self.starters = ttk.Frame(left)
@@ -3269,6 +3370,10 @@ class App:
         root.protocol('WM_DELETE_WINDOW', self.on_close)
         # The version label is placed on the toplevel, so every frame built after it stacks on top of it: lift it once the
         # window is complete (and again when it is mapped) or it is simply not visible in the corner.
+        for short, getter in ((self.status, lambda: self.status['text']),
+                              (self.gal_title, lambda: self.gal_title['text']),
+                              (self.version_label, lambda: self.version_label['text'])):
+            self._copyable(short, getter)
         self.root.after_idle(self._raise_version)
         self.root.bind('<Map>', lambda e: self._raise_version(), add='+')
         self._poll()
@@ -3280,6 +3385,27 @@ class App:
             # could not reproduce it - so if folders are on and two and a half seconds later there is still no plan and
             # no worker, start one. It is idempotent: `_regroup_now` refuses while a compute is in flight.
             self.root.after(2500, self._folders_watchdog)
+
+    def _copyable(self, widget, get_text):
+        """Right-click Copy on a one-line label.
+
+        A `ttk.Label` cannot hold a selection, so the long lines use `SelectableText`; for the short ones - the status, the
+        folder title, the version - a menu is enough, and it keeps the row's layout untouched.
+        """
+        menu = tk.Menu(widget, tearoff=False)
+
+        def copy():
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(get_text())
+            except Exception:
+                pass
+
+        menu.add_command(label='Copy', command=copy)
+        widget.bind('<Button-3>', lambda e: menu.tk_popup(e.x_root, e.y_root), add='+')
+        widget.bind('<Control-c>', lambda e: (copy(), 'break')[1], add='+')
+        widget._copy_menu = menu          # so the wiring can be exercised without a pointer
+        return menu
 
     def _raise_version(self):
         """Keep the version visible: siblings created after it are drawn above a placed widget."""
