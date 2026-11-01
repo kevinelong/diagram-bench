@@ -5471,7 +5471,7 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
     @timed_panel('folder_sheet')
-    def _folder_sheet(self, group, size, gutter=None):
+    def _folder_sheet(self, group, size, gutter=None, head=None):
         """A contact sheet of a folder's newest four distinct pictures, built from the thumbnail cache.
 
         Four rather than nine because the tile has to sit two-up in the first column: a nine-up sheet demanded ~270 px
@@ -5480,7 +5480,10 @@ class App:
         sheet laid out for however many it has (`_sheet_cells`).
         """
         from PIL import Image as _I
-        head = tuple(self._sheet_paths(group))
+        # `head` is the folder's chosen four, persisted in the plan cache after the first paint. Without it the paint
+        # computes a distinctness signature for every candidate - measured 2026-10-31 at 4.47 s for 52 folders, which
+        # is what kept a cached plan from starting instantly.
+        head = tuple(head) if head else tuple(self._sheet_paths(group))
         key = (group['label'], len(group['items']), size, head, gutter)
         hit = self._sheets.get(key)
         if hit is not None:
@@ -6270,6 +6273,7 @@ class App:
         # what these tiles were composed for: `_apply_strip_resize` compares it with the canvas's current width and
         # re-lays them out when it moved, because a folder tile is not one of `_tile_widgets` and nothing else did
         self._folder_geom = (width, cols, sheet_px)
+        heads_wanted = False
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
             # sheet's own gutter, in the same colour), with the caption on an inverted bar. Strong enough to find at a
@@ -6284,7 +6288,13 @@ class App:
             tile.grid(row=index // cols, column=index % cols, padx=5, pady=5, sticky='n')
             body = tk.Frame(tile, background=self.theme.window, padx=3, pady=3)
             body.pack(fill='both', expand=True)
-            photo = self._photo(self._folder_sheet(group, sheet_px, gutter=plate if selected else None))
+            head = group.get('head')
+            if not head:
+                head = self._sheet_paths(group)          # paid once, then written into the plan cache
+                group['head'] = head
+                heads_wanted = True
+            photo = self._photo(self._folder_sheet(group, sheet_px,
+                                                   gutter=plate if selected else None, head=head))
             pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
@@ -6314,6 +6324,13 @@ class App:
             tile.bind('<Tab>', lambda e, w=tile: self._tab_in_list(1, w))
             tile.bind('<Shift-Tab>', lambda e, w=tile: self._tab_in_list(-1, w))
         self._paint_folder_cursor()
+        if heads_wanted:
+            # Persist the four per folder: the next launch paints from the cache without computing a single signature.
+            try:
+                self._plan_save(self._plan, self._plan_signature())
+                folder_event('heads_cached', groups=len(self._plan.get('groups') or []))
+            except Exception:
+                pass
         self._idle(self._on_strip_resize)
         self._idle(lambda: self._fill_view('strip'))
 
