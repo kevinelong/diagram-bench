@@ -3453,13 +3453,18 @@ def main():
           'Recycle Bin' in str(app.hint_label.cget('text')) and 'Ctrl+A' in str(app.hint_label.cget('text')),
           str(app.hint_label.cget('text'))[:60])
 
-    print("\n-- the picture is pinned top-right with its metadata under it, and the clip buttons below (2026-10-28)")
+    print("\n-- the picture is centred in its column with its metadata under it, and the clip buttons below "
+          "(as asked on 2026-11-01)")
     if app._files:
         app.select_file(app._files[0]); root.update(); time.sleep(0.25); root.update()
         box = app.canvas.bbox('img')
         canvas_w = app.canvas.winfo_width()
-        check('the picture sits at the top right of its column',
-              box is not None and box[2] >= canvas_w - 10 and box[1] <= 10, (box, canvas_w))
+        canvas_h = app.canvas.winfo_height()
+        check('the picture is centred in the column, which is what replaced the top-right pin',
+              box is not None and abs(((box[0] + box[2]) // 2) - canvas_w // 2) <= 2
+              and abs(((box[1] + box[3]) // 2) - canvas_h // 2) <= 2, (box, canvas_w, canvas_h))
+        check('and it is not flush against an edge unless it fills the column',
+              box[0] > 0 and box[1] > 0, box)
         check('the metadata block lives under the picture, in the same column',
               app.res_label.winfo_parent() == app.canvas.winfo_parent()
               and int(app.res_label.grid_info().get('row', -1)) == 1,

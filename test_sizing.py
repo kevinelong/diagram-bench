@@ -916,8 +916,10 @@ def main():
     check('400 % is four times the source, exactly', (w, h) == (app._img.size[0] * 4, app._img.size[1] * 4),
           (w, h, app._img.size))
     check('it overflows the canvas both ways', w > cw and h > ch, (w, cw, h, ch))
-    check('a zoomed picture keeps the corner it was pinned at - its top-right, flush, not off the canvas',
-          (x0, y0) == (cw - w, 0), ((x0, y0), (cw - w, 0)))
+    # The contract changed on 2026-11-01: the panel centres its picture, and a picture larger than the canvas starts
+    # centred, so it is cropped by the same amount on all four sides.
+    check('an overflowing picture starts centred, with equal overflow left/right and top/bottom',
+          (x0, y0) == ((cw - w) // 2, (ch - h) // 2) and x0 < 0 and y0 < 0, ((x0, y0), ((cw - w) // 2, (ch - h) // 2)))
     cx, cy = cw // 2, ch // 2
 
     app._on_canvas_click(NS(x=cx, y=cy))
@@ -982,8 +984,10 @@ def main():
     pump(root, app, 0.4)
     check('and survives showing another picture', app.zoom_var.get() == '200%'
           and app._draw[2:] == (4800, 3200), (app.zoom_var.get(), app._draw[2:]))
-    check('while the pan itself starts over at the pinned corner',
-          app._draw[:2] == (cw - 4800, 0), (app._draw[:2], (cw - 4800, 0)))
+    # Centred since 2026-11-01: another picture at the same level starts over at the centre, not at a pinned corner.
+    check('while the pan itself starts over at the centre',
+          app._draw[:2] == ((cw - 4800) // 2, (ch - 3200) // 2),
+          (app._draw[:2], ((cw - 4800) // 2, (ch - 3200) // 2)))
 
     print('\n-- zoom: the pan never fights the three drags that already own this canvas')
     app._set_zoom('400%')

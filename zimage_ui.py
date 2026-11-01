@@ -10337,28 +10337,29 @@ class App:
         return max(1, int(iw * ratio)), max(1, int(ih * ratio))
 
     def _origin(self, dw, dh):
-        """The top-left corner of the drawn picture: the pinned corner, or where a pan left it, clamped."""
+        """The top-left corner of the drawn picture: the centre, or where a pan left it, clamped.
+
+        Asked for 2026-11-01: "selected and generated images in the rightmost panel should be centered in the frame; if
+        larger than the frame it should still default to showing the centre, with an equal amount out of frame above and
+        below, and left and right." So the default is the **centre** on both axes. A picture bigger than the canvas is
+        drawn at a negative offset of half the overflow on each side, which crops it equally on all four sides - and the
+        canvas clips what falls outside rather than the picture being reduced to a slice of itself.
+        """
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        x0, y0 = self._pan_xy if self._pan_xy is not None else (cw - ZOOM_MARGIN - dw, ZOOM_MARGIN)
+        x0, y0 = self._pan_xy if self._pan_xy is not None else ((cw - dw) // 2, (ch - dh) // 2)
         return self._clamp_rect(x0, y0, dw, dh, cw, ch)
 
     @staticmethod
     def _clamp_rect(x0, y0, dw, dh, cw, ch):
         """Where the picture may sit on a `cw x ch` canvas.
 
-        A picture that fits is pinned to the top right, so it keeps still while the metadata under it changes. One that
-        is bigger than the canvas may be dragged anywhere its own bounds allow and no further: at either extreme its
-        edge is flush with the canvas, which is the last position from which the whole of it can still be reached and
-        the only one that never leaves a blank strip beside it.
+        A picture that fits is **centred**, and stays centred while the metadata under it changes. One that is bigger
+        than the canvas may be dragged anywhere its own bounds allow and no further: at either extreme its edge is flush
+        with the canvas, which is the last position from which the whole of it can still be reached and the only one that
+        never leaves a blank strip beside it.
         """
-        if dw <= cw:
-            x0 = cw - ZOOM_MARGIN - dw
-        else:
-            x0 = min(0, max(cw - dw, x0))
-        if dh <= ch:
-            y0 = ZOOM_MARGIN
-        else:
-            y0 = min(0, max(ch - dh, y0))
+        x0 = (cw - dw) // 2 if dw <= cw else min(0, max(cw - dw, x0))
+        y0 = (ch - dh) // 2 if dh <= ch else min(0, max(ch - dh, y0))
         return int(x0), int(y0)
 
     def _visible(self, x0, y0, dw, dh):
