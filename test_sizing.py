@@ -420,8 +420,11 @@ def main():
     check('the columns fit the strip canvas', cols * (tile + zui.TILE_CHROME) <= cw, (cols, tile, cw))
     check('the tile stays between the floor and the base width',
           zui.STRIP_TILE_MIN <= tile <= zui.STRIP_TILE_FIT, (tile, zui.STRIP_TILE_MIN, zui.STRIP_TILE_FIT))
-    check('the tile is the width three of them fill', tile == cw // cols - zui.TILE_CHROME, (tile, cw))
-    check('at least the 160 px fit size', tile >= zui.STRIP_TILE_FIT, tile)
+    # The tile is the width divided by the columns, unless that would leave the band [MIN, cap] - then it is clamped.
+    want = cw // cols - zui.TILE_CHROME
+    check('the tile takes the width it has, inside its band',
+          tile == max(zui.STRIP_TILE_MIN, min(zui.STRIP_TILE_FIT, want)), (tile, want, cw, cols))
+    check('at least the never-shrink floor', tile >= zui.STRIP_TILE_MIN, tile)
     check('inside the 320 px cap', tile <= zui.STRIP_TILE_MAX, tile)
     check('the height gives the three rows the same size, so neither dimension clips',
           tile <= ch // zui.STRIP_FIT_ROWS - zui.TILE_CHROME, (tile, ch))
@@ -558,20 +561,31 @@ def main():
     win.destroy()
     app._review = None
 
-    # ---- B4: the lists follow the sort mode
-    print('\n-- B4: Wins orders the list by wins, not by favourites and date')
+    # ---- B4, revised 2026-10-31: rank orders the open folder's pane; the flat strip list is a timeline
+    print('\n-- B4: Wins orders the open folder by wins; the flat list stays newest-first')
     a, b, c = paths[0], paths[1], paths[2]
     pair_rank.record({}, str(c), str(a), 'left_wins')
     pair_rank.record({}, str(c), str(b), 'left_wins')
     app._wins_cache.clear()
     app.sort_var.set('Wins')
     app.refresh_gallery()
-    order = [p.name for p in app._visible_files()]
-    check('a two-win picture comes first', order[0] == c.name, order[:3])
-    check('the two pictures it beat come last, fewest losses first and newest of them first',
-          order[-2:] == [b.name, a.name], order[-3:])
-    check('the sorted list is what the strip reads', [p.name for p in app._files][:3] == order[:3],
-          [p.name for p in app._files][:3])
+    flat = app._visible_files()
+    stamps = [Path(p).stat().st_mtime for p in flat]
+    check('the flat list ignores rank and stays newest-first', stamps == sorted(stamps, reverse=True),
+          [p.name for p in flat][:3])
+    saved_plan, saved_active = app._plan, app._active_folder
+    group = {'label': 'rank', 'items': [{'path': str(p), 'prompt': 'rank test', 'created': ''}
+                                        for p in (a, b, c)]}
+    app._plan = {'groups': [group], 'recent': [], 'ungrouped': []}
+    app._active_folder = 0
+    app._render_contents(); root.update()
+    check('a two-win picture comes first in the pane', Path(app._content_order[0]) == Path(c),
+          str(Path(app._content_order[0]).name))
+    check('the two it beat come last, fewest losses first',
+          [Path(x).name for x in app._content_order[-2:]] == [Path(b).name, Path(a).name],
+          [Path(x).name for x in app._content_order])
+    app._plan, app._active_folder = saved_plan, saved_active
+    app.refresh_gallery(); root.update()
 
     print('\n-- B4: Sequence is film order, Recent still favourites-first by date')
     for i, p in enumerate((a, b, c)):

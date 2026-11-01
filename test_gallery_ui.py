@@ -1519,6 +1519,32 @@ def main():
           not app.text.tag_ranges('findall') and not app.text.tag_ranges('findhit'), 'tags')
     check('and the bar is hidden again', not app.find_row.winfo_ismapped(), 'mapped')
 
+    print('\n-- upscaling writes a larger file beside the picture, with its provenance in the sidecar')
+    up_src = tmp / '20261031-220000_64x64_seed77.png'
+    Image.new('RGB', (64, 64), (70, 140, 90)).save(up_src)
+    up_src.with_suffix('.json').write_text('{"prompt": "upscale me", "seed": 77}', encoding='utf-8')
+    app._current, app._img = up_src, Image.open(up_src).convert('RGB')
+    app.upscale_current(2, 'lanczos')
+    up_out = None
+    end_up = time.monotonic() + 20
+    while time.monotonic() < end_up:
+        app._poll(); root.update(); time.sleep(0.05)
+        cand = up_src.with_name(up_src.stem + '_x2_lanczos.png')
+        if cand.exists() and cand.with_suffix('.json').exists():
+            up_out = cand
+            break
+    check('a lanczos upscale lands beside the picture', up_out is not None, str(up_out))
+    if up_out is not None:
+        meta = json.loads(up_out.with_suffix('.json').read_text(encoding='utf-8'))
+        check('it is twice the size', Image.open(up_out).size == (128, 128), Image.open(up_out).size)
+        check('the sidecar says what it came from', Path(meta.get('upscale_from')) == up_src, meta.get('upscale_from'))
+        check('and which method did it', meta.get('upscale_method') == 'lanczos', meta.get('upscale_method'))
+        check('and it cannot be mistaken for a render', meta.get('upscale_factor') == 2, meta.get('upscale_factor'))
+        up_out.unlink(missing_ok=True); up_out.with_suffix('.json').unlink(missing_ok=True)
+    check('the model path is offered only when a model is installed',
+          (zui.find_upscale_model() is not None) == bool(zui.upscale_models()), str(zui.upscale_models()))
+    up_src.unlink(missing_ok=True); up_src.with_suffix('.json').unlink(missing_ok=True)
+
     print('\n-- a dialog hands the front back to the main window when it closes')
     raised = []
     real_raise = app._raise_main

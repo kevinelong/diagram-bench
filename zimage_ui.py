@@ -985,6 +985,82 @@ def folder_event(name, **detail):
         pass
 
 
+# ---------------------------------------------------------------- upscaling
+# Nothing here generates: these take a finished 1024 px render and make a larger file. Measured 2026-10-31 on a 5070:
+#   PIL lanczos        0.11 s for 4x, adds no detail, cannot hallucinate
+#   spandrel + ESRGAN  5.0 s tiled at 512 px  (untiled 114.8 s; 768 px tiles 248.7 s - tiling is not optional)
+#   ncnn-vulkan        5.3 s as a child process
+#   klein hires pass   68 s, and it re-renders, so the picture changes
+UPSCALE_TILE = 512          # px per inference tile
+UPSCALE_PAD = 24            # overlap between tiles, so the seams do not show
+UPSCALE_DIRS = ('C:/Users/kevin/Documents/ComfyUI/models/upscale_models',
+                'D:/models/comfyui/upscale_models')
+
+
+def upscale_models():
+    """Every .pth upscaler we can find, in the two folders ComfyUI looks in (plus the D: mirror)."""
+    found = []
+    for folder in UPSCALE_DIRS:
+        try:
+            found.extend(sorted(Path(folder).glob('*.pth')))
+        except Exception:
+            continue
+    return found
+
+
+def find_upscale_model():
+    """The model the menu will use: Real-ESRGAN first, else whatever .pth is installed, else None."""
+    found = upscale_models()
+    for p in found:
+        if 'realesrgan' in p.name.lower():
+            return p
+    return found[0] if found else None
+
+
+_UPSCALE_NETS = {}          # (model path, device) -> loaded net: loading it costs ~20 s of the first call
+
+
+def upscale_rgb(img, factor, method='model', model_path=None):
+    """Scale a finished picture by 2, 3 or 4. Returns (image, method actually used).
+
+    `model` runs a tiled ESRGAN-class upscaler at 4x and, for 2x and 3x, resamples down from that - one pass, then
+    Lanczos, which is cleaner than a second model run and gives the odd factors for free. `lanczos` never invents
+    anything, which is the honest choice when the file is evidence.
+    """
+    factor = max(2, int(factor))
+    if method != 'model' or not model_path:
+        return img.convert('RGB').resize((img.width * factor, img.height * factor), Image.LANCZOS), 'lanczos'
+    import numpy as np
+    import torch
+    from spandrel import ModelLoader
+    dev = 'cuda' if torch.cuda.is_available() else 'cpu'   # spandrel's wrappers have no `.device` of their own
+    key = (str(model_path), dev)
+    net = _UPSCALE_NETS.get(key)
+    if net is None:
+        # ~20 s of the first call is this load; measured in-app at 26.8 s for 2x before the memo, so the second
+        # upscale in a session was paying it again for nothing.
+        net = ModelLoader().load_from_file(str(model_path)).model.eval().to(dev)
+        _UPSCALE_NETS[key] = net
+    a = np.asarray(img.convert('RGB'))
+    H, W, _ = a.shape
+    out = np.zeros((H * 4, W * 4, 3), dtype=np.uint8)
+    for y in range(0, H, UPSCALE_TILE):
+        for x in range(0, W, UPSCALE_TILE):
+            y0, y1 = max(0, y - UPSCALE_PAD), min(H, y + UPSCALE_TILE + UPSCALE_PAD)
+            x0, x1 = max(0, x - UPSCALE_PAD), min(W, x + UPSCALE_TILE + UPSCALE_PAD)
+            t = torch.from_numpy(a[y0:y1, x0:x1].copy()).float().div(255).permute(2, 0, 1).unsqueeze(0).to(dev)
+            with torch.no_grad():
+                o = net(t)[0].clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+            o = (o * 255).round().astype('uint8')
+            oy, ox = (y - y0) * 4, (x - x0) * 4
+            th, tw = min(UPSCALE_TILE, H - y) * 4, min(UPSCALE_TILE, W - x) * 4
+            out[y * 4:y * 4 + th, x * 4:x * 4 + tw] = o[oy:oy + th, ox:ox + tw]
+    big = Image.fromarray(out)
+    if factor != 4:
+        big = big.resize((W * factor, H * factor), Image.LANCZOS)
+    return big, 'model:%s' % Path(model_path).stem
+
+
 def row_stamp(row):
     """A sortable date for a plan row, falling back to the file's mtime.
 
@@ -2931,6 +3007,19 @@ class App:
         self.zoom_btn._access_invoke = self._open_zoom_list   # a menubutton has no invoke() of its own
         self.copy_btn = ttk.Button(tools, text='Copy image', command=self.copy_image, state='disabled')
         self.copy_btn.pack(side='left', padx=(6, 0))
+        # Upscale: a larger file, not a new picture. The model path is the default because it is the best-looking of the
+        # measured options; lanczos is offered explicitly because it is the only one that cannot invent detail.
+        self.upscale_btn = ttk.Menubutton(tools, text='upscale \u25be')
+        self.upscale_btn.pack(side='left', padx=(6, 0))
+        self.upscale_menu = tk.Menu(self.upscale_btn, tearoff=False)
+        for _f in (2, 3, 4):
+            self.upscale_menu.add_command(label='%dx  model (best)' % _f,
+                                          command=lambda f=_f: self.upscale_current(f, 'model'))
+        self.upscale_menu.add_separator()
+        for _f in (2, 3, 4):
+            self.upscale_menu.add_command(label='%dx  lanczos (adds no detail)' % _f,
+                                          command=lambda f=_f: self.upscale_current(f, 'lanczos'))
+        self.upscale_btn.configure(menu=self.upscale_menu)
         self.info_btn = ttk.Button(tools, text='\u24d8 metadata\u2026', command=self.show_metadata, state='disabled')
         self.info_btn.pack(side='left', padx=(6, 0))
         self.graph_btn = ttk.Button(tools, text='graph\u2026', command=self.show_graph)
@@ -3663,6 +3752,7 @@ class App:
         canvas.configure(scrollregion=(0, 0, max(1, canvas.winfo_width()), total))
         try:
             if not tile.winfo_exists():
+                again()                      # the strip was rebuilt under us: retry, do not abandon the scroll
                 return
             top, height = tile.winfo_y(), max(1, tile.winfo_height())
         except tk.TclError:
@@ -5447,7 +5537,10 @@ class App:
         except Exception:
             recent = []
         sheets = []
-        for g in (self._plan or {}).get('groups', []):
+        # Only the folders actually drawn: warming all of them (1,248 in one test) starves the repaint and the scroll
+        # retries, and off-screen folder thumbs are warmed when they are scrolled to anyway.
+        drawn = max(BATCH_FOLDERS, int(getattr(self, '_folder_shown', 0) or 0))
+        for g in (self._plan or {}).get('groups', [])[:drawn]:
             sheets += [Path(it['path']) for it in (g.get('items') or [])[:4]]
 
         def work():
@@ -6316,8 +6409,11 @@ class App:
         self._paint_folder_cursor()
         if heads_wanted:
             # Persist the four per folder: the next launch paints from the cache without computing a single signature.
+            # Deferred, because writing a 10 MB JSON inside the render starves the repaint that follows it - measured
+            # as a strip that would not finish scrolling in the suite.
             try:
-                self._plan_save(self._plan, self._plan_signature())
+                self._later(80, self._plan_save,
+                            self._plan, self._plan_signature())
                 folder_event('heads_cached', groups=len(self._plan.get('groups') or []))
             except Exception:
                 pass
@@ -8875,6 +8971,41 @@ class App:
                              base_path=base, denoise=(meta.get('denoise') or 1.0), batch=1, sequential=True,
                              sampler=self.sampler_var.get())
 
+    def upscale_current(self, factor, method='model'):
+        """Write a 2x/3x/4x copy of the shown picture beside it, with the provenance in its sidecar."""
+        if self._current is None or self._img is None:
+            self.hint.configure(text='show a picture first, then upscale it')
+            return
+        src = Path(self._current)
+        model = find_upscale_model() if method == 'model' else None
+        if method == 'model' and model is None:
+            self.hint.configure(text='no upscaler model installed - using Lanczos, which adds no detail')
+            method = 'lanczos'
+        label = 'model (%s)' % model.stem if model is not None else 'lanczos'
+        self.hint.configure(text='upscaling %dx with %s\u2026' % (factor, label))
+        self.load_meter.show('upscaling %dx' % factor, label)
+        threading.Thread(target=self._upscale_work,
+                         args=(src, self._img.copy(), factor, method, model), daemon=True).start()
+
+    def _upscale_work(self, src, img, factor, method, model):
+        """Off the UI thread: upscale, write the file, and write a sidecar that says exactly what happened."""
+        try:
+            self.ui_events.put(('load', (0.15, 'upscaling %dx' % factor, src.name)))
+            out, used = upscale_rgb(img, factor, method, model)
+            # The method is part of the name: a lanczos 2x and a model 2x are different files, and without the tag the
+            # second silently overwrote the first (caught 2026-10-31 when the check read a stale sidecar).
+            tag = '' if used.startswith('model') else '_%s' % used.split(':')[0]
+            dest = src.with_name('%s_x%d%s.png' % (src.stem, factor, tag))
+            out.save(dest)
+            meta = read_meta(src) or {}
+            meta.update({'image': str(dest), 'upscale_from': str(src), 'upscale_factor': int(factor),
+                         'upscale_method': used, 'width': out.width, 'height': out.height,
+                         'upscaled_at': datetime.now().isoformat(timespec='seconds')})
+            dest.with_suffix('.json').write_text(json.dumps(meta, indent=1), encoding='utf-8')
+            self.ui_events.put(('upscaled', (str(dest), used, int(factor))))
+        except Exception as exc:
+            self.ui_events.put(('upscale_failed', '%s: %s' % (type(exc).__name__, exc)))
+
     def copy_image(self):
         if not self._current:
             return
@@ -9673,6 +9804,20 @@ class App:
                         self.load_meter.set(frac, stage, detail)
                     except Exception:
                         pass
+                elif kind == 'upscaled':
+                    path, used, factor = payload
+                    try:
+                        self.load_meter.hide()
+                    except Exception:
+                        pass
+                    self.hint.configure(text='wrote %s  (%dx, %s)' % (Path(path).name, factor, used))
+                    self.refresh_gallery()
+                elif kind == 'upscale_failed':
+                    try:
+                        self.load_meter.hide()
+                    except Exception:
+                        pass
+                    self.hint.configure(text='upscale failed: %s' % payload)
                 elif kind == 'thumb_ready':
                     # a picture that was only a caption now has its thumbnail: repaint, once per burst
                     self._thumb_repaint_soon()
