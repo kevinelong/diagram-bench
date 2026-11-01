@@ -9788,13 +9788,16 @@ class App:
                                          % (model, alternate))
                 model = alternate
                 steps = self._steps_ceiling(model) or steps
-            self.hint.configure(text='combining %d pictures with %s' % (len(bases), model))
+            self.hint.configure(text='combining %d pictures with %s - strength applies to a single base, not here'
+                                     % (len(bases), model))
         hires, self._pending_hires = self._pending_hires, 0.0
         self.run_started_at = time.time()
         self._run_desc = '%s px · %s steps · %s' % (size, steps, model)
         self.engine.generate(full_prompt, size, size, steps, cfg,
                              seed, self.args.out,
-                             base_path=(str(edit_base) if edit_base else None),
+                             # a combine starts from noise, guided by each reference: sending the armed base as well
+                             # would upload a picture the graph will not read (and it used to veto the references)
+                             base_path=(str(edit_base) if edit_base and len(bases) < 2 else None),
                              mask_path=(str(mask_path) if mask_path else None), outpaint=outpaint,
                              denoise=self.denoise.get(), batch=batch, sequential=self.seq_var.get(),
                              sampler=self.sampler_var.get(), negative=negative, profile=model, style=style,

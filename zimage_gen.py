@@ -364,13 +364,29 @@ def workflow(prompt, width, height, steps, cfg, seed, prefix, base_image=None, d
     # Combining pictures is not img2img of one of them: the output is a *new* picture whose sampling is guided by each
     # reference, which is what ReferenceLatent sets (its own description: chain one node per reference). Measured on both
     # engines - swapping the second reference's content changes the picture (29 % / 49 % of sampled pixels), so both take
-    # more than one. One reference stays img2img above: denoise then still means "how far from that picture".
+    # more than one. A *single* reference next to an armed base is taken to name that same picture (which is what the
+    # window sends when one thumbnail is selected), so it stays img2img above and denoise keeps its meaning; two or more
+    # override the base and start from noise.
     positive = ["4", 0]
     refs = [b for b in (base_images or []) if b]
-    if refs and not base_image and not mask and not outpaint:
+    # The window arms a base picture *and* a list when several thumbnails are selected ("Use as Base"), so a single base
+    # must not veto the references: without `or len(refs) > 1` the list was silently dropped and the render became img2img
+    # of that one picture at the strength chosen for an edit (measured: a near copy at 22 %). A mask or an outpaint still
+    # wins - those paths need the picture's own pixels, and there is nowhere to put references.
+    if refs and (len(refs) > 1 or not base_image) and not mask and not outpaint:
+        # A combine does not start from the base picture: it starts from noise, guided by each reference. When a base was
+        # armed as well, its load/encode nodes are dropped rather than left to run for nothing.
+        if base_image and "6" not in graph:
+            for dead in ("10", "11", "16"):
+                graph.pop(dead, None)
+            graph["6"] = {"class_type": "EmptySD3LatentImage",
+                          "inputs": {"width": width, "height": height, "batch_size": 1}}
+            latent = ["6", 0]
         # N references combine into *one* picture; a batch would only repeat it, so the latent node is told one
         graph["6"]["inputs"]["batch_size"] = 1
         batch = 1
+        # there is no base latent to move away from, so the strength has no meaning here and is pinned to full
+        denoise = 1.0
         for i, name in enumerate(refs):
             load, enc, ref = str(20 + 3 * i), str(21 + 3 * i), str(22 + 3 * i)
             graph[load] = {"class_type": "LoadImage", "inputs": {"image": name}}

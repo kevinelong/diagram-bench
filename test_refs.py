@@ -54,6 +54,26 @@ def main():
     check('a batch cannot multiply a combined picture', many['6']['inputs']['batch_size'] == 1,
           many['6']['inputs']['batch_size'])
 
+    # The window arms a base *and* a list when several thumbnails are selected, and the base used to veto the list: the
+    # render became img2img of that one picture at the edit strength (reported as "an exact copy of one of them" at 22 %).
+    both = zg.workflow('p', 512, 512, 4, 1.0, 1, 'x', base_image='chosen.png', denoise=0.22,
+                       base_images=['a.png', 'b.png', 'c.png'])
+    got = refs_in(both)
+    check('a base must not veto three references', len(got) == 3, len(got))
+    check('they are still chained', got[2][1]['inputs']['conditioning'] == [got[1][0], 0],
+          got[2][1]['inputs']['conditioning'])
+    check('the combine starts from noise, not from the base', both['7']['inputs']['latent_image'] == ['6', 0],
+          both['7']['inputs']['latent_image'])
+    check('and the base is not even loaded', [k for k, v in both.items() if v['class_type'] == 'LoadImage']
+          == ['20', '23', '26'], sorted(k for k, v in both.items() if v['class_type'] == 'LoadImage'))
+    check('the edit strength does not leak into a combine', both['7']['inputs']['denoise'] == 1.0,
+          both['7']['inputs']['denoise'])
+
+    one_ref = zg.workflow('p', 512, 512, 4, 1.0, 1, 'x', base_image='base.png', denoise=0.7, base_images=['a.png'])
+    check('a single reference beside a base stays img2img, as the window sends it', refs_in(one_ref) == []
+          and one_ref['7']['inputs']['latent_image'] == ['11', 0] and one_ref['7']['inputs']['denoise'] == 0.7,
+          (refs_in(one_ref), one_ref['7']['inputs']['latent_image']))
+
     empty = zg.workflow('p', 512, 512, 4, 1.0, 1, 'x', base_images=[])
     check('an empty list is plain text-to-image', refs_in(empty) == [] and empty['7']['inputs']['latent_image'] == ['6', 0])
 
