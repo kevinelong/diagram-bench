@@ -687,11 +687,23 @@ def split_loose_groups(groups, lexicon, min_group=MIN_GROUP):
         if median_intra_cosine(items, lexicon) >= SPLIT_TIGHT:
             out.append(g)                       # already a tight family: leave the real folder alone
             continue
-        parts = group_texts([r['prompt'] for r in items], threshold=SPLIT_THRESHOLD, lexicon=lexicon)
-        keep = [p for p in parts if len(p) >= min_group]
-        largest = max((len(p) for p in parts), default=len(items))
-        if len(keep) < 2 or largest >= SPLIT_SHRINK * len(items):
-            out.append(g)                       # no real division: the biggest piece is still most of the folder
+        # Escalate the threshold if the division is not decisive. Long prompts share a lot of vocabulary simply by
+        # being long, so at 0.30 a 359-word median family of 844 pictures re-clustered into a piece holding 81 % of
+        # itself and the split was refused (measured 2026-11-01, median intra-cosine 0.509 against a 0.60 tight bar:
+        # loose, a candidate, and still unsplittable). Raising the bar is what separates long prompts, so try the next
+        # steps before giving up. Bounded at three attempts, and only for families that already look loose.
+        parts, keep, largest = None, [], len(items)
+        for threshold in (SPLIT_THRESHOLD, SPLIT_THRESHOLD + 0.10, SPLIT_THRESHOLD + 0.20):
+            parts = group_texts([r['prompt'] for r in items], threshold=threshold, lexicon=lexicon)
+            keep = [p for p in parts if len(p) >= min_group]
+            largest = max((len(p) for p in parts), default=len(items))
+            if len(keep) >= 2 and largest < SPLIT_SHRINK * len(items):
+                break
+        else:
+            out.append(g)                       # no real division at any threshold: the biggest piece is still the folder
+            continue
+        if len(keep) < 2:
+            out.append(g)
             continue
         for part in keep:
             rows = sorted((items[i] for i in part), key=lambda r: r.get('created') or '')

@@ -337,6 +337,51 @@ characters.
 Measured at 1707x960 (the logical size of a 2560x1440 screen at 150 %): gallery 314 px, prompt column 547 px, picture
 pane 846 px - the picture keeps the majority, which it did not before.
 
+## Which files count as a picture
+
+The gallery lists every file Pillow can decode, and nothing else. The tuple used to be `png/webp/jpg/jpeg`, so a `.gif`,
+`.bmp`, `.tif`, `.tiff` or `.avif` in the folder was **invisible** - not "unsupported and said so", just absent, which
+reads as a lost file. Measured 2026-11-01 on the real gallery: 2,181 files on disk under those suffixes, **2,181
+listed**; the nine formats Pillow 12.1 in the Comfy venv registers are all taken, and `jxl`/`heic` are deliberately
+absent rather than silently accepted because that Pillow **cannot** open them (`pillow-heif`/`pillow-jxl` would be the
+way). An animated gif or webp shows its first frame, which is what `Image.thumbnail` gives.
+
+Everything downstream is format-blind - the thumbnail, the dHash signature, the size badge, the base upload and the
+upscaler all go through PIL - so the extension tuple is the whole change. One caveat that is the engine's, not the
+gallery's: arming an exotic format as a **base** or **reference** asks ComfyUI's loader to decode it, and if it cannot
+the run fails with the server's error rather than a silent conversion.
+
+**A picture with no prompt cannot join a family, and that used to be a hiding place.** `plan()` files a picture by its
+sidecar text; a screenshot pasted into the folder has none, so it lands in `unfiled`. Measured 2026-11-01: **87
+pictures** - seven pasted reference screenshots among them - and while a folder was open the strip was *scoped to that
+folder*, so all 87 were invisible in the strip and in every search. Two changes: **the strip is the whole gallery,
+always** (the pane scopes itself; the text list of a folder is the pane's job), and the filter row carries a **no
+prompt** checkbox beside `starred only`, which lists exactly those pictures. A tile whose file has no sidecar also
+carries a `no meta` corner badge, drawn the way the size badge is, so the state is visible before it is filtered for.
+
+## The tiles: one ladder, and what it costs
+
+A tile's size came from `width // cols`, so it changed with **every pixel** of window width; each distinct size minted
+its own Tk image per visible tile and its own LANCZOS rescale, and the cache keyed by that exact size had no bound.
+Measured 2026-11-01: a 221-pixel sweep over 18 tiles used to mean 3,978 PhotoImages (a 336 px one is ~450 kB). Tiles
+now snap **down** to a ladder of `TILE_STEP` 16 px, so the same sweep is **10 sizes** (192 to 336) and 180 cache
+entries; 18 tiles cost **32 ms** cold and **0.0 ms** warm. Down, not to the nearest rung: a Tk label sizes itself to
+its image, and rounding 152 up to 160 put a 160 px picture in a 152 px cell and pushed the ninth tile under the
+scrollbar.
+
+The ceiling is `THUMB_PX` (336), not 420: a larger tile was **upscaling** a thumbnail, which is blur rather than
+detail. The PhotoImage cache is bounded at 400 entries, `read_meta` is memoised by `(sidecar, mtime)` - it is called
+from 20 places, several per tile - and the layout uses the same rung the image does, so a resize re-tiles with cache
+hits instead of filling memory.
+
+**A loose family of long prompts splits now.** The split rule refuses a division whose largest piece stays over 60 % of
+the family, and at threshold 0.30 a family of 844 pictures whose median prompt was **359 words** re-clustered into a
+piece holding **81 %** of itself, so it was left whole (median intra-cosine 0.509 against a 0.60 tight bar: loose, a
+candidate, and unsplittable). The threshold now **escalates** by 0.10, twice, before giving up - long prompts share
+vocabulary simply by being long, so a higher bar is what separates them. On the real gallery that took 64 folders to
+**80**, the largest from **844 to 456**, and still accounted 2,158 of 2,158 pictures; the 456 that remain are one
+scene (the velvet-dress series) and belong together.
+
 ## Blender frames: the fixture that proves the animated path
 
 `a4_fixture.py` (run inside Blender's own interpreter) writes **one SVG per frame** plus a single animatable SVG, and

@@ -2585,10 +2585,19 @@ def main():
         app.select_folder(idx); root.update()
         visible = {f.name for f in app._visible_files()}
         chosen = {Path(r['path']).name for r in app._plan['groups'][idx]['items']}
-        check('selecting a folder filters the strip to it', visible and visible <= chosen,
-              '%d visible, %d chosen' % (len(visible), len(chosen)))
+        # Reversed 2026-11-01. The strip used to be scoped to the open folder, and that is what hid two classes of
+        # picture: one written during a run (not in the plan yet) and anything the grouping could not file. Measured
+        # on the real gallery: 2160 files scanned, the default-opened family held 844, and 83 unfiled pictures -
+        # seven pasted reference screenshots among them - were invisible in the strip and in every search. The pane
+        # scopes itself; this list is the timeline of the whole gallery.
+        check('selecting a folder leaves the strip as the whole gallery',
+              len(visible) == len(app._all_files()) and app._active_folder == idx,
+              '%d visible, %d scanned, folder %r' % (len(visible), len(app._all_files()), app._active_folder))
+        check('and the strip still holds pictures outside it', bool(visible - chosen),
+              '%d outside the folder' % len(visible - chosen))
         app.select_folder(None); root.update()
-        check('clearing the selection shows everything again', len(app._visible_files()) >= len(chosen))
+        check('clearing the selection changes nothing in the strip',
+              len(app._visible_files()) == len(app._all_files()))
     app.toggle_groups(False)
     check('turning folders off drops the plan', app._plan is None and not app.folder_bar.winfo_ismapped())
     app.refresh_gallery(); root.update()
@@ -2694,9 +2703,10 @@ def main():
           getattr(app, 'folder_pick_btn', None) and app.folder_pick_btn['text'])
     target = max(range(len(app._plan['groups'])), key=lambda i: len(app._plan['groups'][i]['items']))
     app.select_folder(target); root.update()
-    check('choosing a folder filters the strip to it',
-          app._active_folder == target and len(app._files) == len(app._plan['groups'][target]['items']),
-          '%r but %d files visible' % (app.gal_title['text'], len(app._files)))
+    check('choosing a folder opens it without scoping the strip',
+          app._active_folder == target and len(app._files) == len(app._all_files()),
+          '%r, folder %r, %d files visible of %d' % (app.gal_title['text'], app._active_folder,
+                                                     len(app._files), len(app._all_files())))
     check('and the button names the open folder',
           app._folder_text(target).split(' (')[0] in str(app.folder_pick_btn['text']),
           app.folder_pick_btn['text'])
@@ -2951,7 +2961,10 @@ def main():
         colour = str(badges[0].cget('background'))
         check('the badge colour is one of the three bands', colour in ('#ff6347', '#ffbf00', '#3cb371'), colour)
         check('the badge uses the pixel font', 'Fixedsys' in str(badges[0].cget('font')), badges[0].cget('font'))
-    newest = app._files[0]
+    # The newest file in the gallery, not just the newest in one folder: the strip stopped being scoped to the open
+    # folder on 2026-11-01, so `_files[0]` can be a picture the app did not make (the fixture has a 150x100 foreign
+    # png). The seed line is about a render, so pick a render.
+    newest = next(f for f in app._files if (zui.read_meta(f) or {}).get('seed') is not None)
     app.select_file(newest); root.update(); time.sleep(0.2)
     text = app.res_label['text']
     check('the picture reports its pixels', 'x' in text and text.split('x')[0].isdigit(), text)

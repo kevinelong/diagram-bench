@@ -428,8 +428,12 @@ def main():
           zui.STRIP_TILE_MIN <= tile <= zui.STRIP_TILE_FIT, (tile, zui.STRIP_TILE_MIN, zui.STRIP_TILE_FIT))
     # The tile is the width divided by the columns, unless that would leave the band [MIN, cap] - then it is clamped.
     want = cw // cols - zui.TILE_CHROME
-    check('the tile takes the width it has, inside its band',
-          tile == max(zui.STRIP_TILE_MIN, min(zui.STRIP_TILE_FIT, want)), (tile, want, cw, cols))
+    # 2026-11-01: the size is a rung of the tile ladder now, so a window resize reuses Tk images instead of minting
+    # one per pixel of width (221 widths used to mean 221 PhotoImages per tile, and the cache had no bound). The
+    # contract is the rung of the band value, not the band value itself.
+    check('the tile takes the width it has, rounded down to a rung',
+          tile == zui.tile_bucket(max(zui.STRIP_TILE_MIN, min(zui.STRIP_TILE_FIT, want))),
+          (tile, want, cw, cols))
     check('at least the never-shrink floor', tile >= zui.STRIP_TILE_MIN, tile)
     check('inside the 320 px cap', tile <= zui.STRIP_TILE_MAX, tile)
     check('the height gives the three rows the same size, so neither dimension clips',

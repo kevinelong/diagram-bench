@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import functools
 import hashlib
 import io
@@ -827,7 +828,29 @@ def split_evenly(total, floors, caps=None):
 REVIEW_FINISH_COLS = 4
 REVIEW_FINISH_ROWS = 3
 REVIEW_TILE_MIN = 200
-REVIEW_TILE_MAX = 420
+# The pane size is `width // cols`, so it used to change with every pixel of window width: each step of a drag minted
+# a fresh PhotoImage per visible tile and a LANCZOS rescale to go with it, and the cache (keyed by exact size) had no
+# bound. Tiles now snap to a ladder, so a resize sweep hits the cache instead of filling it. The ceiling is the
+# thumbnail size: asking for more than THUMB_PX is upscaling a thumbnail, which is blur, not detail.
+REVIEW_TILE_MAX = THUMB_PX
+TILE_STEP = 16
+
+
+def tile_bucket(size):
+    """Snap a requested tile size down to the ladder: multiples of TILE_STEP, never above the thumbnail size.
+
+    Down, not to the nearest rung: a Tk label sizes itself to its image, and the layout rule promises that a row of
+    tiles fits inside the canvas. Rounding 152 up to 160 put 160 px into a 152 px cell and pushed the ninth tile under
+    the scrollbar (test_sizing caught it as +16 px). A tile up to TILE_STEP smaller is invisible; a tile larger than
+    its cell is a broken row.
+    """
+    try:
+        size = int(size)
+    except Exception:
+        return TILE_STEP
+    if size <= 0:
+        return TILE_STEP
+    return max(TILE_STEP, min(THUMB_PX, (size // TILE_STEP) * TILE_STEP))
 FOLDER_CELLS = 4     # pictures on a folder tile, as a 2x2 - nine-up forced one folder per row, two is the ask
 FOLDER_COLS = 3      # tiles per row when the column can hold them (2026-10-30 follow-up: it was two, and a 337 px
                      # folder tile was the "thumbnails in folders need to be a little smaller" complaint). Measured on
@@ -1079,15 +1102,34 @@ def row_stamp(row):
         return ''
 
 
+_META_CACHE = {}
+_META_CACHE_CAP = 6000
+
+
 def read_meta(png):
-    """The sidecar written at save time: prompt, seed, size, base image, strength."""
+    """The sidecar written at save time: prompt, seed, size, base image, strength.
+
+    Memoised by (sidecar, mtime): this is called from 20 places, several of them per tile, and each call was a disk
+    read plus a JSON parse. A `(meta,)` tuple is what is stored so a cached "no sidecar" is distinguishable from a
+    miss - `None` is a real answer here.
+    """
     j = Path(png).with_suffix('.json')
-    if not j.exists():
-        return None
     try:
-        return json.loads(j.read_text(encoding='utf-8'))
-    except Exception:
+        stamp = j.stat().st_mtime
+    except OSError:
         return None
+    key = (str(j), stamp)
+    hit = _META_CACHE.get(key)
+    if hit is not None:
+        return hit[0]
+    try:
+        meta = json.loads(j.read_text(encoding='utf-8'))
+    except Exception:
+        meta = None
+    if len(_META_CACHE) >= _META_CACHE_CAP:
+        _META_CACHE.clear()      # cheap bound: a repaint refills what is on screen long before this is hit again
+    _META_CACHE[key] = (meta,)
+    return meta
 
 
 class GenerationCancelled(Exception):
@@ -2328,6 +2370,10 @@ class App:
         self._favorites = set(self._settings.get('favorites') or [])
         self.search_var = tk.StringVar(value='')
         self.starred_only = tk.BooleanVar(value=False)
+        # a picture with no prompt has nowhere to go: it cannot join a family, so the grouping leaves it unfiled and
+        # nothing in the strip surfaces it. Measured 2026-11-01: 83 such pictures (seven pasted reference screenshots
+        # among them) were invisible until they were hunted down by hand.
+        self.noprompt_only = tk.BooleanVar(value=False)
         self.run_started_at = None
         self._pending_hires = 0.0
         self._preview = False
@@ -2366,7 +2412,10 @@ class App:
         self._files = []
         # what we look at (source) and what we write to (args.out) are the same folder until somebody opens another one
         self._thumb_cache = {}            # path -> thumbnail file, resolved once
-        self._photo_cache = {}            # (path, size) -> PhotoImage, so a repaint reuses the Tk image
+        # (path, size) -> PhotoImage, so a repaint reuses the Tk image. Bounded: a 336 px entry is ~450 kB, and
+        # before the size ladder this dict grew once per pixel of window width, for the life of the process.
+        self._photo_cache = collections.OrderedDict()
+        self._photo_cache_cap = 400
 
         self._thumbs_inflight = set()     # paths a background build is already working on
         self._pending_tiles = {}          # path -> [tile widgets waiting for that thumbnail]
@@ -3209,7 +3258,11 @@ class App:
             pass
 
     # -- gallery: thumbnails -------------------------------------------------
-    IMAGE_SUFFIXES = ('.png', '.webp', '.jpg', '.jpeg')
+    # Every format Pillow 12.1 in the Comfy venv can decode. Measured 2026-11-01: png webp jpg jpeg gif bmp tif tiff
+    # avif ico yes; jxl and heic NO without extra packages, so they are deliberately absent rather than silently
+    # accepted. Downstream nothing cares about the format - thumbnails, signatures, the size badge, base upload and
+    # upscaling all go through PIL - so this tuple is the whole change. An animated gif/webp shows its first frame.
+    IMAGE_SUFFIXES = ('.png', '.webp', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.avif')
 
     def _thumb_of(self, path, build=False):
         """A thumbnail for a tile: from memory, then disk - a decode only when `build` says so.
@@ -3267,9 +3320,11 @@ class App:
         """
         if not thumb_path:
             return None
-        cache_key = (str(key if key is not None else thumb_path), int(size))
+        size = tile_bucket(size)
+        cache_key = (str(key if key is not None else thumb_path), size)
         photo = self._photo_cache.get(cache_key)
         if photo is not None:
+            self._photo_cache.move_to_end(cache_key)
             return photo
         try:
             from PIL import ImageTk
@@ -3279,6 +3334,8 @@ class App:
         except Exception:
             return None
         self._photo_cache[cache_key] = photo
+        while len(self._photo_cache) > getattr(self, '_photo_cache_cap', 400):
+            self._photo_cache.popitem(last=False)
         return photo
 
     def _photo(self, image, **kw):
@@ -3471,6 +3528,18 @@ class App:
         lab.image = thumb
         lab.path = path
         lab.pane = bool(pane)
+        # no sidecar -> no prompt -> unfiled, and the tile should not look like every other tile. Same corner and the
+        # same drawing path as the size badge, so the two read as one language.
+        try:
+            no_meta = read_meta(path) is None
+        except Exception:
+            no_meta = False
+        if no_meta:
+            bad = tk.Label(lab, text='no meta', font=PIXEL_FONT, background=self.theme.win_mark,
+                           foreground='#ffffff', bd=0, padx=2, pady=0)
+            bad.place(relx=0.0, rely=0.0, anchor='nw', x=2, y=2)
+            bad.bind('<Button-1>', lambda e, p=path, b=browser, n=pane: self._on_tile_click(e, p, browser=b, pane=n))
+            self._tip(bad, '%s\nno prompt: this picture is unfiled and cannot join a family' % Path(path).name)
         lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser, pane=pane))
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
@@ -5007,7 +5076,7 @@ class App:
         pad = 5
         size = min((w - pad * (cols + 1)) // cols,
                    (h - pad * (REVIEW_FINISH_ROWS + 1)) // REVIEW_FINISH_ROWS)
-        size = max(REVIEW_TILE_MIN, min(REVIEW_TILE_MAX, size))
+        size = tile_bucket(max(REVIEW_TILE_MIN, min(REVIEW_TILE_MAX, size)))
         if (cols, size) == r.get('finish_geom') and len(r.get('finish_tiles') or []) == len(ordered):
             return
         r['finish_geom'] = (cols, size)
@@ -5314,18 +5383,18 @@ class App:
         """
         rows = self._scan()
         files = [p for p, _m in rows]
-        # Scoped to the open folder - except while a run is in flight. A picture written during a run is not in the
-        # plan yet, so scoping hid it from the list the strip draws in exactly the state the strip draws pictures;
-        # measured 2026-10-31, a tile event called refresh_gallery, `_scan()` saw the new file, and `_files` stayed at
-        # eight because the open folder (opened by default since 2026-10-31) did not contain it. That is the "not
-        # showing images as they are generated" report.
-        if self._plan and self._active_folder is not None and not getattr(self, 'busy', False):
-            chosen = {r['path'] for r in self._plan['groups'][self._active_folder]['items']}
-            files = [f for f in files if str(f) in chosen]
+        # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
+        # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
+        # pasted in, a foreign dump. Measured 2026-11-01: 2160 files scanned, the default-opened family held 844 of
+        # them, and seven reference screenshots plus 76 other unfiled pictures were invisible in the strip and in
+        # every search. The pane scopes itself (`_render_contents` draws one folder's members); this list is the
+        # timeline of the whole gallery.
         needle = self.search_var.get().strip().lower()
         if needle:
             stamps = dict(rows)
             files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
+        if getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get():
+            files = [f for f in files if not ((read_meta(f) or {}).get('prompt') or '').strip()]
         if self.starred_only.get():
             files = [f for f in files if f.name in self._favorites]
         if self._sort_sequence():
@@ -5347,6 +5416,7 @@ class App:
         """
         return (bool(self._plan)
                 and not self.search_var.get().strip() and not self.starred_only.get()
+                and not (getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get())
                 and not getattr(self, 'busy', False))
 
     def _signature(self, path):
@@ -6476,7 +6546,10 @@ class App:
             tile = max(STRIP_TILE_MIN, min(tile, h // STRIP_FIT_ROWS - TILE_CHROME))
         while cols > 1 and cols * (tile + TILE_CHROME) > w:
             cols -= 1           # a tile raised off the floor needs the width back, or the last column hangs off
-        return cols, tile
+        # ... and the size is a rung of the ladder, so a resize sweep reuses Thk images instead of minting one per
+        # pixel of window width. Bucketing here rather than in the tile means the cell and the picture are the same
+        # number again, which is what "a tile carries only its own chrome" checks.
+        return cols, tile_bucket(tile)
 
     def _strip_cols(self):
         return self._strip_metrics()[0]
@@ -8671,6 +8744,7 @@ class App:
         box.pack(side='left', padx=(4, 8))
         only = ttk.Checkbutton(head, text='\u2605 only', variable=self.starred_only)
         only.pack(side='left')
+        ttk.Checkbutton(head, text='no prompt', variable=self.noprompt_only).pack(side='left', padx=(4, 0))
         ttk.Button(head, text='\u2605 Star selected', command=lambda: (self.toggle_star(), render())).pack(
             side='left', padx=(8, 0))
         count = ttk.Label(head, text='', foreground=self.theme.muted)
