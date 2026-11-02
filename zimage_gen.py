@@ -97,7 +97,11 @@ MODELS = {
 # 0.70, and the 9B is the remaining checkpoint that does it while keeping the character - the 4B it tied with is gone
 # from the picker, so the tie now costs 3-5x the wall time and ~3 GiB. z-image turbo is faster on text-to-image but
 # needs 0.85 to re-pose, and pays for it in identity.
-DEFAULT_MODEL = 'flux2 klein 9b uncensored'
+# On this box (RTX 4060 Laptop, 8,188 MiB) the 9B is not deployed: `flux-2-klein-9b-Q4_K_M.gguf` and its 5.45 GiB
+# encoder are absent, and its measured 8,837 MiB peak at 512 px is above the card's total. Opening on a profile whose
+# files are missing makes the first Generate fail with 'value_not_in_list', so the default follows the weights that
+# are actually on disk (D:/models/comfyui).
+DEFAULT_MODEL = 'z-image turbo'
 
 # The picker's third option: one render from every profile, each at its own ceiling steps and at the largest size the
 # app offers, so a prompt can be compared across models in one press. Cheapest profile first, because the two models run
