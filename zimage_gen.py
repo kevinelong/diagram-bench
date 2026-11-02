@@ -97,10 +97,20 @@ MODELS = {
     # The 9B diffusion with the 9B uncensored encoder (Qwen3-8B, Q5_K_M). Measured on the frozen corpus at 512 px:
     # OCR exact 0.732 against the 4B's 0.613, 4/10 prompts fully legible against 1/10, at 32.5 s median and an 8.8 GiB
     # peak. Same 4-step distilled settings as klein, so nothing but model size and encoder differs.
+    # NOT IN THE PICKER ON THIS BOX (2026-11-02). The picker already honours `in_picker`, so the profile stays readable
+    # here - with its settings and its measured numbers - while the UI stops offering a choice that cannot render.
+    #
+    # Why: selecting it fails validation on the next Generate, because none of the three files are on D:/models/comfyui -
+    #   VAELoader 3: 'flux2-vae.safetensors' not in [...]
+    #   CLIPLoaderGGUF 2: 'flux2-klein-9b-uncensored-te-q5_k_m.gguf' not in [...]
+    #   UnetLoaderGGUF 1: 'flux-2-klein-9b-Q4_K_M.gguf' not in [...]
+    # and its measured 8,837 MiB peak at 512 px is above this card's 8,188 MiB before any browser is open. On the 5070
+    # box, where the weights exist and fit, delete the flag to put it back.
     'flux2 klein 9b uncensored': {'unet': 'flux-2-klein-9b-Q4_K_M.gguf', 'unet_node': 'UnetLoaderGGUF',
                                   'clip': 'flux2-klein-9b-uncensored-te-q5_k_m.gguf', 'clip_node': 'CLIPLoaderGGUF',
                                   'clip_type': 'flux2',
-                                  'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0},
+                                  'vae': 'flux2-vae.safetensors', 'steps': 4, 'max_steps': 4, 'cfg': 1.0,
+                                  'in_picker': False},
 
 }
 # Default comes from measurement (POSE-LADDER-9B-2026-10-27.md): an edit needs to cross the pose threshold at denoise
@@ -117,7 +127,9 @@ DEFAULT_MODEL = 'z-image turbo'
 # app offers, so a prompt can be compared across models in one press. Cheapest profile first, because the two models run
 # one at a time on a 12 GiB card and something should appear quickly.
 ALL_MODEL = 'ALL'
-ALL_ORDER = ['z-image turbo', 'flux2 klein 9b uncensored']
+# Every name here must also be a key in MODELS: all_plan() looks the profile up and silently substitutes the default
+# step count for a missing one, so a stale name becomes a render that fails validation instead of an error at import.
+ALL_ORDER = ['z-image turbo', 'flux3 klein 4b']
 QUALITY_SIZE = 1024
 
 

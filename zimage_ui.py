@@ -3050,7 +3050,14 @@ class App:
         self.save_style_btn.pack(side='left', padx=(4, 0))
         # the checkpoint is a first-class choice, not an Advanced secret: picking one costs a model reload
         ttk.Label(stylerow, text='model').pack(side='left', padx=(10, 4))
-        self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
+        # A saved value is only honoured if the picker can still offer it. A profile retired from the picker (or one whose
+        # weights are gone) used to be restored verbatim from settings.json and then failed validation on the first
+        # Generate - 'value_not_in_list' on the unet, clip and vae at once, with the app blaming the server's model path.
+        # ALL is always valid: it is a mode, not a profile.
+        _saved_model = self._settings.get('model')
+        _visible = [name for name, prof in zg.MODELS.items() if prof.get('in_picker', True)]
+        self.model_var = tk.StringVar(value=_saved_model if _saved_model in _visible or _saved_model == zg.ALL_MODEL
+                                      else zg.DEFAULT_MODEL)
         self.model_cb = ttk.Combobox(stylerow, textvariable=self.model_var, width=14, state='readonly',
                                      values=[name for name, prof in zg.MODELS.items()
                                              if prof.get('in_picker', True)] + [zg.ALL_MODEL])
