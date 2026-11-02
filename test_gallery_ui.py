@@ -200,6 +200,14 @@ def main():
               initial='', initial_file='', auto=False, no_progress=True)
     app = zui.App(root, StubEngine(), args)
     root.update()
+    # A mapping check on an unmapped window is a coin toss: the suite failed "Stop is mapped", "the model picker is
+    # visible" and "the gallery starts visible" on three separate runs with no code change between them. Wait for the
+    # window to be viewable first, so those checks test the layout rather than the scheduler.
+    end = time.time() + 8.0
+    while time.time() < end and not root.winfo_viewable():
+        root.update()
+        time.sleep(0.02)
+    root.update()
     shot(root, '01-start')
 
     print('\n-- an automatically opened folder is scrolled into view and drawn in reverse video (2026-10-27)')
@@ -750,6 +758,33 @@ def main():
         check('dropping the base itself clears the base', app.base_path is None, app.base_path)
         win.destroy(); root.update()
         app._bases = []
+
+    print('\n-- long work can be interrupted (asked 2026-11-02)')
+    # a matrix is a queue of renders, so stopping has to empty it or the next step simply starts the one after
+    app._matrix_queue = [('a.png', 0.4), ('b.png', 0.6), ('c.png', 0.8)]
+    app.busy = True
+    app.stop()
+    root.update()
+    check('Stop clears a queued matrix, not just the render in flight',
+          getattr(app, '_matrix_queue', None) == [], getattr(app, '_matrix_queue', None))
+    check('and says the matrix was stopped, rather than finished',
+          'matrix stopped' in app.hint['text'], app.hint['text'])
+    app.busy = False
+    app._matrix_queue = []
+    # a newer click wins over a build that was only scheduled
+    groups = ((app._plan or {}).get('groups') or [])
+    if len(groups) >= 2:
+        app.select_folder(0)
+        for _ in range(3):
+            root.update()
+        app.select_folder(1)
+        for _ in range(3):
+            root.update()
+        check('the newer folder click is the one that is open', app._active_folder == 1, app._active_folder)
+        before = [str(r) for r in (app._content_items or [])]
+        app._build_contents(0)          # the superseded build must not paint over the newer folder
+        after = [str(r) for r in (app._content_items or [])]
+        check('a superseded pane build does nothing', before == after, (len(before), len(after)))
 
     print('\n-- a made-from picture says its strength on the tile (asked 2026-11-02)')
     check('the strength badge reads the strength of an edit',

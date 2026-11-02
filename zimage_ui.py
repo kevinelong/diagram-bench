@@ -5130,6 +5130,15 @@ class App:
         # build, and that build used to run before a single visible thing changed - which is what made a folder click read
         # as dropped. The cursor, the button's label and a title that says "opening" cost about a millisecond.
         self._acknowledge_folder(index)
+        # A click while a build is still queued must win: cancel the pending one, or two folders are laid out in turn and
+        # nobody is looking at the first (asked 2026-11-02)
+        pending = getattr(self, '_contents_job', None)
+        if pending is not None:
+            try:
+                self.root.after_cancel(pending)
+            except Exception:
+                pass
+            self._contents_job = None
         # hundreds of pictures take a second or more to lay out: say so, centred and animated, rather than leaving the
         # pane looking like the click did nothing (asked 2026-11-02)
         try:
@@ -5143,7 +5152,7 @@ class App:
         # meant the paint could only happen afterwards, so the visible response was the build's duration (406 ms p50 on the
         # real gallery). One turn later, the click is on screen first - and any work the startup pass had already queued is
         # no longer paid for by this interaction.
-        self._later(1, self._build_contents)
+        self._contents_job = self._later(1, self._build_contents, index)
         try:
             self.contents_canvas.yview_moveto(0)
         except Exception:
@@ -6341,14 +6350,19 @@ class App:
         self._idle(self._on_contents_resize)
 
     @timed_panel('render_contents')
-    def _build_contents(self):
+    def _build_contents(self, for_index=None):
         """The expensive half of opening a folder, one event-loop turn after the acknowledgement.
+
+        `for_index` lets a newer click win: if the open folder changed since this was scheduled, there is nothing to build.
 
         Deferred, so it runs later than the click that asked for it - which means the folder can have changed underneath
         it (a picture deleted, the plan replaced, the window closing). A failed rebuild is logged and dropped: an event-loop
         callback that raises takes the application down with it, and a pane that is one repaint stale is not worth that.
         """
         started = time.perf_counter()
+        self._contents_job = None
+        if for_index is not None and for_index != getattr(self, '_active_folder', None):
+            return                                   # a newer click superseded this build
         try:
             if getattr(self, '_closing', False) or not self._alive():
                 return
@@ -10215,7 +10229,8 @@ class App:
         queue = getattr(self, '_matrix_queue', None) or []
         if not queue:
             self._matrix_queue = []
-            self.hint.configure(text='matrix finished')
+            cancelled, self._matrix_cancelled = getattr(self, '_matrix_cancelled', False), False
+            self.hint.configure(text='matrix stopped' if cancelled else 'matrix finished')
             return
         path, strength = queue[0]
         total = getattr(self, '_matrix_total', None) or len(queue)
@@ -10437,6 +10452,15 @@ class App:
         self._find_focus(self._find_i + delta)
 
     def stop(self):
+        """Stop whatever is running - including a matrix, which is a queue of renders rather than one.
+
+        Asked for 2026-11-02: "a matrix operation should respond to the stop button". Cancelling the engine stops the
+        picture in flight; without clearing the queue the next step would start the one after it.
+        """
+        if getattr(self, '_matrix_queue', None):
+            self._matrix_queue = []
+            self._matrix_cancelled = True
+            self.hint.configure(text='matrix stopped - the renders already made are kept')
         if not self.busy:
             return
         self.status.configure(text='stopping…')
