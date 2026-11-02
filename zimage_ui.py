@@ -2683,6 +2683,13 @@ class App:
         self.group_chk = ttk.Checkbutton(self.title_row, text='folders', variable=self.group_var,
                                          command=self.toggle_groups, style='Big.TCheckbutton')
         self.group_chk.pack(side='left', padx=(8, 0))
+        # Whole-gallery duplicate cleanup, beside the folders switch: both are "the gallery as a set" actions.
+        self.dedupe_all_btn = ttk.Button(self.title_row, text='dedupe', width=7,
+                                         command=lambda: self.dedupe('all'))
+        self.dedupe_all_btn.pack(side='left', padx=(6, 0))
+        self._tip(self.dedupe_all_btn,
+                  'Find duplicates across the whole gallery and send every one except the newest of each to the '
+                  'Recycle Bin.\nDuplicate = the same picture: 0 bits apart for a re-render, up to 6 for an edit.')
         # The picker lived only in the folder bar, which is hidden while options are folded and before a plan exists -
         # so the one control you need in order to look at an unfamiliar folder could be invisible. It gets its own line
         # under the title, always visible, together with what that folder is and whether the walk goes into subfolders.
@@ -2734,9 +2741,20 @@ class App:
         # only by the truncated label back in the first column, so nothing on screen said which folder you were in.
         # a label could not be selected, and this caption is a prompt the reader wants to paste elsewhere: it is a
         # read-only Text with a right-click copy menu (`SelectableTitle`)
-        self.contents_title = SelectableTitle(self.contents_holder, width_px=CONTENTS_W, plate=plate,
+        self.contents_head = ttk.Frame(self.contents_holder)
+        self.contents_head.grid(row=0, column=1, sticky='we', pady=(0, 4))
+        self.contents_head.columnconfigure(0, weight=1)
+        self.contents_title = SelectableTitle(self.contents_head, width_px=CONTENTS_W, plate=plate,
                                               theme=self.theme)
-        self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
+        self.contents_title.grid(row=0, column=0, sticky='we')
+        # The same cleanup, scoped to what this column is showing: a duplicate in another subject is not this folder's
+        # business, and one press here must not reach across the gallery.
+        self.dedupe_folder_btn = ttk.Button(self.contents_head, text='dedupe', width=7,
+                                            command=lambda: self.dedupe('folder'))
+        self.dedupe_folder_btn.grid(row=0, column=1, sticky='e', padx=(6, 0))
+        self._tip(self.dedupe_folder_btn,
+                  'Find duplicates among the pictures of the open folder only, keep the newest of each, send the rest '
+                  'to the Recycle Bin.')
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
         base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
@@ -3607,6 +3625,35 @@ class App:
             self._thumb_cache[str(path)] = got
             self.ui_events.put(('thumb_ready', str(path)))
         threading.Thread(target=work, daemon=True).start()
+
+    def _fill_pending(self, path, thumb=None):
+        """Give every tile parked on `path` its picture.
+
+        The paint path never decodes (`_thumb_of(build=False)`), so a tile whose thumbnail is not cached yet paints a
+        placeholder and parks its label in `_pending_tiles` for whoever lands the thumbnail. Two paths land one, and
+        until 2026-11-02 only one of them filled the parked tiles: the batch `thumbs` event did, `_warm_one` (the single
+        freshly written picture) did not - it posted `thumb_ready`, whose handler only repainted the strip. So a render
+        showed up as its mini inside the folder tile at once, and sat as a blank tile in the open folder's column until
+        the debounced re-group rebuilt the pane (reported 2026-11-02). Both paths come through here now.
+        """
+        key = str(path)
+        if thumb is None:
+            thumb = self._thumb_cache.get(key) or self._thumb_of(path)
+        if not thumb:
+            return False
+        filled = False
+        for lab in self._pending_tiles.pop(key, []) or []:
+            try:
+                if lab is None or not lab.winfo_exists():
+                    continue
+                photo = self._photo_of(thumb, getattr(lab, 'thumb_px', 64))
+                if photo is not None:
+                    lab.configure(image=photo, width=0, height=0)
+                    lab.image = photo
+                    filled = True
+            except Exception:
+                continue
+        return filled
 
     def _thumb_repaint_soon(self):
         """One repaint per burst: a 16-up delivers sixteen arrivals, and sixteen repaints is sixteen times the work."""
@@ -8687,6 +8734,74 @@ class App:
         self._paint()
 
     # -- gallery: delete -----------------------------------------------------
+    def dedupe(self, scope='all'):
+        """Send duplicates to the Recycle Bin, keeping the newest of each family. Returns how many went.
+
+        `scope='all'` looks at the whole gallery; `scope='folder'` only at the pictures in the open folder, so cleaning
+        up one subject cannot reach into another. Detection reuses `_signature` - the same 64-bit difference hash the
+        folder tiles use, memoised by mtime - and groups it transitively at `pair_review.DUPLICATE_DISTANCE`. That
+        number was measured, not guessed: re-rendering the same prompt and seed is 0 bits apart, an edit of the same
+        picture (`girl` vs `combine`) is 2, and two different pictures are 15 and 17.
+
+        Nothing is unlinked: the loser's PNG, sidecar and cached thumbnail go to the Recycle Bin together, which is what
+        makes this safe to press twice and honest when it removes the wrong one.
+        """
+        try:
+            import pair_review as pr
+        except Exception as exc:
+            self.hint.configure(text='duplicate scan unavailable: %s' % exc)
+            return 0
+        if scope == 'folder':
+            rows = getattr(self, '_content_items', None) or []
+            paths = [Path(r['path']) for r in rows if r.get('path')]
+            where = 'this folder'
+        else:
+            paths = [Path(p) for p in (self._files or [])]
+            where = 'the gallery'
+        paths = [p for p in paths if p.exists()]
+        if len(paths) < 2:
+            self.hint.configure(text='nothing to compare in %s' % where)
+            return 0
+        hashes = {}
+        for p in paths:
+            try:
+                sig = self._signature(p)
+            except Exception:
+                sig = None
+            hashes[str(p)] = ('%016x' % sig[0]) if sig else None
+        groups = pr.duplicate_groups(paths, hashes)
+        if not groups:
+            self.hint.configure(text='no duplicates in %s' % where)
+            return 0
+        losers = []
+        for family in groups:
+            losers.extend(family[:-1])          # duplicate_groups orders each family oldest-first
+        extra = len(losers)
+        if not messagebox.askyesno(
+                'Remove duplicates',
+                '%d duplicate picture%s in %d group%s (%s).\n\nKeep the newest of each and send the rest to the '
+                'Recycle Bin?' % (extra, '' if extra == 1 else 's', len(groups), '' if len(groups) == 1 else 's', where),
+                parent=self.root):
+            return 0
+        doomed = []
+        for name in losers:
+            png = Path(name)
+            doomed.extend([png, png.with_suffix('.json'), png.parent / THUMB_DIR / (png.stem + '.jpg')])
+        if not self._recycle_files(doomed):
+            log_error('dedupe recycle', RuntimeError('recycle refused for %d pictures' % len(losers)))
+            self.hint.configure(text='could not recycle %d file%s - nothing was removed'
+                                     % (extra, '' if extra == 1 else 's'))
+            return 0
+        self._hashes.clear()
+        self._heads.clear()
+        self._photo_cache.clear()
+        self.refresh_gallery()
+        if hasattr(self, 'group_var') and self.group_var.get():
+            self._regroup_soon()
+        self.hint.configure(text='removed %d duplicate%s from %s (newest of each kept)'
+                                 % (extra, '' if extra == 1 else 's', where))
+        return extra
+
     def _recycle_files(self, files):
         """Move files to the Windows Recycle Bin. True if the shell accepted every one of them.
 
@@ -10394,7 +10509,11 @@ class App:
                         pass
                     self.hint.configure(text='upscale failed: %s' % payload)
                 elif kind == 'thumb_ready':
-                    # a picture that was only a caption now has its thumbnail: repaint, once per burst
+                    # A picture that was only a caption now has its thumbnail. Fill the tiles parked on it BEFORE the
+                    # repaint: the open folder's pane paints placeholders by rule and is not rebuilt by the strip
+                    # repaint below, so without this a fresh render stayed a blank tile in that column until the
+                    # debounced re-group rebuilt the pane (reported 2026-11-02).
+                    self._fill_pending(payload)
                     self._thumb_repaint_soon()
                 elif kind == 'groups_error':
                     folder_event('error', detail=str(payload)[:120])
@@ -10443,16 +10562,7 @@ class App:
                             self._pending_tiles.pop(str(path), None)
                             continue
                         self._thumb_cache[str(path)] = thumb
-                        for lab in self._pending_tiles.pop(str(path), []) or []:
-                            try:
-                                if lab is None or not lab.winfo_exists():
-                                    continue
-                                photo = self._photo_of(thumb, getattr(lab, 'thumb_px', 64))
-                                if photo is not None:
-                                    lab.configure(image=photo, width=0, height=0)
-                                    lab.image = photo
-                            except Exception:
-                                continue
+                        self._fill_pending(path, thumb)
                 elif kind == 'ws':
                     self._on_ws(payload)
                 elif kind == 'ws_error':

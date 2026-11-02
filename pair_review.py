@@ -45,6 +45,53 @@ def hamming(a, b):
     return bin(int(a, 16) ^ int(b, 16)).count('1')
 
 
+DUPLICATE_DISTANCE = 6         # dHash bits: see duplicate_groups() for where this number comes from
+
+
+def duplicate_groups(paths, hash_map, max_distance=DUPLICATE_DISTANCE):
+    """Families of pictures that are the same picture, newest last in each family.
+
+    Measured 2026-11-02 on the live gallery: the same prompt and seed re-rendered is **0 bits** apart, an edit of the
+    same picture (`girl` vs `combine`) is **2**, and two genuinely different renders are **15** and **17**. Six
+    separates "the same picture" from "a different picture of the same subject" with room on both sides.
+
+    A family is transitive on purpose: three takes of one scene are one duplicate set, not two overlapping pairs, and a
+    chain (a~b, b~c) is exactly what re-rendering the same prompt twice produces. Members are ordered oldest-first so
+    the caller can keep `[-1]` - the newest - without deciding anything itself. Families never contain a picture twice.
+    """
+    keys = [(str(p), (hash_map or {}).get(str(p))) for p in paths]
+    keys = [(p, h) for p, h in keys if h]
+    if len(keys) < 2:
+        return []
+    parent = {p: p for p, _ in keys}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    index = dict(keys)
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            a, b = keys[i][0], keys[j][0]
+            if hamming(index[a], index[b]) <= max_distance:
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent[rb] = ra
+    families = {}
+    for p, _ in keys:
+        families.setdefault(find(p), []).append(p)
+    out = []
+    for members in families.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda q: (Path(q).stat().st_mtime if Path(q).exists() else 0, q))
+        out.append(members)
+    out.sort(key=lambda g: g[-1])
+    return out
+
+
 def hashes(paths, cache=None, store=None):
     """dHash for each path, cached in `cache` (a dict) and persisted to `store` (a JSON path) when given."""
     known = dict(cache) if cache else {}
