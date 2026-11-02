@@ -774,11 +774,15 @@ GAL_ASK_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)    # 318
 # stay readable in, 480 the widest before they stop growing and the strip starves. `SASH_W` is the whole hit area,
 # including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip needs for its nine at the 160 px fit size: no
 # boundary may take a column below its own floor.
-CONTENTS_W_MIN = 180
+CONTENTS_W_MIN = STRIP_TILE_MIN + TILE_CHROME   # 106: the pane compresses to a single column of tiles (2026-11-02)
 CONTENTS_W_MAX = 480
 SASH_W = 8
 SASH_STEP = 16        # one arrow key; Shift makes it four
-GAL_FLOOR_W = STRIP_FIT_W                                      # 510
+# 2026-11-02: the strip's floor was `STRIP_FIT_W` (510, the width at which its nine fit) and is now one column at the
+# 96 px tile floor. The sash can take both list columns to a single column of tiles, which is what the owner asked for;
+# the nine-at-fit behaviour is what the column *starts* at when a window is wide, not what it may never go below.
+GAL_FLOOR_W = STRIP_TILE_MIN + TILE_CHROME                     # 106: one column of tiles (same value as STRIP_ABS_MIN,
+                                                               # spelled out here because that name is defined below)
 # The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
 # it is four: the strip and the open-folder pane share the gallery column (`gal`, boundary 1), and the gallery column,
 # the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
@@ -6543,14 +6547,30 @@ class App:
         return max(0, self._root_w(width) - self._layout_chrome())
 
     def _even_widths(self, width=None):
-        """The content width divided among the four columns: equal shares, floors raised, remainder to the leftmost.
+        """The untouched layout: the two list columns at a single column of tiles, the rest split between prompt and picture.
 
-        This is what a profile that has never seen the layout gets, and it is a pure function of the window and the
-        floors - `split_evenly` - so the same window always opens the same way, with the odd pixels on the left.
+        Owner's ask, 2026-11-02: "the first two list columns should default to their minimum single column width and the
+        controls column and image column should split the remainder 50 50". So the strip and the pane open at their
+        floors - one column of tiles each, the smallest they can be - and everything left over is halved between the
+        prompt and the picture, with the picture taking the odd pixel (it is the column that scales what it shows, and a
+        half-pixel of drift would make the pair disagree with itself).
+
+        A picture floor is still honoured: if half the remainder cannot reach `PICTURE_MIN_W`, the shortfall comes out of
+        the prompt's half first, and only then out of the lists. This is a pure function of the window and the floors, so
+        the same window always opens the same way.
         """
-        floors, caps = self._column_floors(), self._column_caps()
-        shares = split_evenly(self._content_w(width), [floors[c] for c in COLUMNS], [caps[c] for c in COLUMNS])
-        return dict(zip(COLUMNS, shares))
+        floors = self._column_floors()
+        content = self._content_w(width)
+        strip, pane = floors[COL_STRIP], floors[COL_PANE]
+        rest = max(0, content - strip - pane)
+        prompt = rest // 2
+        picture = rest - prompt
+        if picture < floors[COL_PICTURE]:
+            prompt = max(floors[COL_PROMPT], prompt - (floors[COL_PICTURE] - picture))
+            picture = max(0, rest - prompt)
+        return {COL_STRIP: strip, COL_PANE: pane,
+                COL_PROMPT: max(floors[COL_PROMPT], prompt),
+                COL_PICTURE: max(floors[COL_PICTURE], picture)}
 
     def _picture_w(self, widths=None):
         """The picture column is the one that takes what is left: it has no right-hand neighbour to trade with."""
