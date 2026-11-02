@@ -63,7 +63,11 @@ MIN_MEMBER_COVERAGE = 0.30
 # because the 0.20 anchor path is untouched. At 0.55 the gallery collapses to 73 folders; 0.75 loses a member again.
 MEMBER_MATCH = 0.70
 DEFAULT_RECENT = 24
-MIN_GROUP = 2                  # a "folder" of one picture is just the picture
+# Set to 1 on the 4060 box (2026-11-02, owner's choice): every distinct prompt becomes its own folder, so a subject with a
+# single render is still a tile instead of landing in `unfiled`. The cost is exactly what this constant existed to
+# prevent - a one-off dressed up as a category - so on the 5070 box, whose gallery is ~1,800 pictures where folders do
+# the work, it should stay 2.
+MIN_GROUP = 1                  # a "folder" of one picture is just the picture
 
 STOP = set('''a an the and or of to in on at by for with from as is are was were be been being this that these those it
 its into over under near above below behind beside between across through during before after while very more most
