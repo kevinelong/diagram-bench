@@ -786,6 +786,31 @@ def main():
         after = [str(r) for r in (app._content_items or [])]
         check('a superseded pane build does nothing', before == after, (len(before), len(after)))
 
+    print('\n-- a finished picture opens its folder and sits at the top (asked 2026-11-02)')
+    saved_plan, saved_active, saved_group = app._plan, app._active_folder, app.group_var.get()
+    if app._files:
+        first, second = Path(app._files[0]), Path(app._files[1])
+        app._plan = {'groups': [{'label': 'one', 'items': [{'path': str(first), 'created': '2026-10-01T00:00:00'}]},
+                                {'label': 'two', 'items': [{'path': str(second), 'created': '2026-11-02T23:59:00'}]}],
+                     'recent': [], 'ungrouped': []}
+        app.group_var.set(True)
+        app._active_folder = 0
+        app.show_fresh_result(str(second))
+        for _ in range(4):
+            root.update()
+        check('the folder the picture landed in is the one open', app._active_folder == 1, app._active_folder)
+        names = [Path(r['path']).name for r in (app._content_items or [])]
+        check('and it is the first picture in that pane', names and names[0] == second.name, names[:3])
+        # a picture the plan does not know yet leaves the folder alone and asks for a grouping instead
+        app._active_folder = 0
+        unknown = Path(app._files[0]).with_name('not-in-the-plan.png')
+        app.show_fresh_result(str(unknown))
+        root.update()
+        check('an ungrouped result does not move the reader to another folder', app._active_folder == 0,
+              app._active_folder)
+    app._plan, app._active_folder = saved_plan, saved_active
+    app.group_var.set(saved_group)
+
     print('\n-- a made-from picture says its strength on the tile (asked 2026-11-02)')
     check('the strength badge reads the strength of an edit',
           zui.strength_badge_text({'base_image': 'a.png', 'denoise': 0.42}) == '42%',

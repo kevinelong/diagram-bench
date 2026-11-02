@@ -5168,6 +5168,38 @@ class App:
         self.refresh_gallery(rescan=False)
 
     # -- paired A/B review of one folder --------------------------------------------------------------
+    def show_fresh_result(self, path):
+        """Put a picture that just finished where it can be seen: its folder open, and it at the top of the list.
+
+        Asked for 2026-11-02, for every kind of run - a single picture, an N-up's tiles, a matrix's steps: "the folder they
+        are going into should automatically be selected and we should see each image as it is finished placed at the top of
+        the list so we can always see and select the last few". Between items of a series this is allowed to take its time;
+        it is a repaint and a thumbnail, not a render.
+        """
+        try:
+            index = self.folder_holding(path)
+        except Exception:
+            index = None
+        if index is not None and self._folders_view_active() and index != self._active_folder:
+            # the folder this picture landed in is the one to look at; its pane puts the newest first
+            try:
+                self.select_folder(index)
+            except Exception:
+                pass
+        else:
+            self.refresh_gallery()
+        try:
+            self._warm_one(path)          # so the tile that just appeared is a picture, not a placeholder
+        except Exception:
+            pass
+        if index is None and self._folders_view_active():
+            # the plan does not know this picture yet (it is younger than the last grouping): ask for one, debounced,
+            # so the next item in the series lands in the right folder instead of staying unfiled
+            try:
+                self._regroup_soon()
+            except Exception:
+                pass
+
     def folder_holding(self, path):
         """Index of the plan's folder that holds `path`, or None. Used to show a render where it landed."""
         if path is None or not self._plan:
@@ -11256,13 +11288,16 @@ class App:
                     self._display_raw(raw, path)
                     self._run_total = total
                     self._show_tile_progress(idx, total)
-                    # each tile is already on disk: show it in the strip now, not when the whole sheet finishes
-                    self.refresh_gallery()
+                    # each tile is already on disk: open the folder it belongs to and put it at the top, now, not when
+                    # the whole sheet finishes
+                    self.show_fresh_result(path)
                     # and give it a thumbnail on disk, or its tile can only draw its caption until something else
                     # happens to build one
                     self._warm_one(path)
                 elif kind == 'image':
                     raw, path = payload
+                    if not getattr(self, '_preview', False):
+                        self.show_fresh_result(path)
                     if getattr(self, '_matrix_queue', None):
                         self._later(200, self._matrix_next)   # the matrix is a sequence, not one press
                     if self._preview:
