@@ -3816,12 +3816,30 @@ class App:
         self._meta_mtimes = meta_mtimes      # a sidecar edit must invalidate the search cache too
         return rows
 
-    def _all_files(self, rescan=True):
-        """Every picture in the source. `rescan=False` reuses the last walk: opening a folder changes what is *shown*,
-        not what is on disk, and the walk costs 0.7-1.6 s on the real gallery (measured)."""
-        rows = self._scan() if rescan else (getattr(self, '_scan_rows', None) or self._scan())
+    def _scan_cached(self, rescan=True):
+        """The last walk of the source, reused while the folder's own mtime says nothing was added or removed.
+
+        Reusing it blindly was wrong: a file deleted between two refreshes stayed in the cached rows and the next step
+        statted it - the suite caught exactly that. The directory's mtime is one stat, and it changes on add or remove,
+        which is the only thing this cache is about. Without the cache a folder click costs 0.6-0.8 s on 2 400 pictures.
+        """
+        out = Path(getattr(self, '_source', None) or self.args.out)
+        try:
+            stamp = out.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        cached = getattr(self, '_scan_cache', None)
+        if not rescan and cached is not None and cached[0] == stamp and cached[1] is not None:
+            self._scan_rows = cached[1]
+            return cached[1]
+        rows = self._scan()
+        self._scan_cache = (stamp, rows)
         self._scan_rows = rows
-        return [p for p, _m in rows]
+        return rows
+
+    def _all_files(self, rescan=True):
+        """Every picture in the source. `rescan=False` reuses the last walk, validated by the folder's mtime."""
+        return [p for p, _m in self._scan_cached(rescan)]
 
     def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
         # A tile is a tab stop, not a mouse target. `takefocus` puts it in the Tab order in the order it was created,
@@ -4884,7 +4902,27 @@ class App:
         if index is None:
             index = max(range(len(self._plan['groups'])), key=lambda i: len(self._plan['groups'][i]['items']))
         group = self._plan['groups'][index]
+        # The pane adds the pictures the plan has not absorbed yet (`live_append`: a render written while this folder is
+        # open is offered to it before the next grouping). Reading `items` alone made a folder full of fresh renders report
+        # "that folder has only one picture - nothing to pair", because only the one planned member was counted.
+        if index == getattr(self, '_active_folder', None):
+            shown = [r.get('path') if isinstance(r, dict) else str(r)
+                     for r in (getattr(self, '_content_items', None) or [])]
+            shown = [str(x) for x in shown if x]
+            if len(shown) > len(group.get('items') or []):
+                return (group.get('label') or 'folder'), shown
         return (group.get('label') or 'folder'), [r['path'] for r in group.get('items') or []]
+
+    def _review_pairing(self, index=None, paths=None):
+        """What an A/B review will pair, and whether it had to fall back. Policy, separated so it can be tested without a
+        window: one picture selected inside a folder of many is paired with its folder instead of being refused, and the
+        caller says so."""
+        label, paths = self.review_paths(index=index, paths=paths)
+        if paths is not None and len(paths) == 1 and self._active_folder is not None:
+            folder_label, folder_paths = self.review_paths()
+            if len(folder_paths) > 1:
+                return folder_label, folder_paths, True
+        return label, paths, False
 
     def review_pane(self):
         """A/B review the pane's selection, or the whole open folder when nothing is selected."""
@@ -4905,7 +4943,9 @@ class App:
             self.hint.configure(text='folders are still being worked out - try again in a moment' if busy
                                 else 'turn folders on first - A/B review works inside a prompt folder')
             return
-        label, paths = self.review_paths(index=index, paths=paths)
+        label, paths, fell_back = self._review_pairing(index=index, paths=paths)
+        if fell_back:
+            self.hint.configure(text='one picture was selected - pairing its folder instead')
         if not paths:
             self.hint.configure(text='no pictures to pair here')
             return
@@ -5699,7 +5739,7 @@ class App:
         """
         # `_refresh_gallery` has usually just walked the source; a second identical walk here was half of the 1.1 s a
         # folder click used to cost (measured: refresh 1 103 ms inside a 1 104 ms click handler).
-        rows = rows if rows is not None else (getattr(self, '_scan_rows', None) or self._scan())
+        rows = rows if rows is not None else self._scan_cached(False)
         files = [p for p, _m in rows]
         # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
         # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
@@ -6017,10 +6057,19 @@ class App:
 
     @timed_panel('render_contents')
     def _build_contents(self):
-        """The expensive half of opening a folder, one event-loop turn after the acknowledgement."""
+        """The expensive half of opening a folder, one event-loop turn after the acknowledgement.
+
+        Deferred, so it runs later than the click that asked for it - which means the folder can have changed underneath
+        it (a picture deleted, the plan replaced, the window closing). A failed rebuild is logged and dropped: an event-loop
+        callback that raises takes the application down with it, and a pane that is one repaint stale is not worth that.
+        """
         started = time.perf_counter()
         try:
+            if getattr(self, '_closing', False) or not self._alive():
+                return
             self._render_contents()
+        except Exception as e:
+            log_error('folder pane rebuild', e)
         finally:
             PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
 
@@ -6995,7 +7044,7 @@ class App:
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
-        files = self._visible_files(rows=getattr(self, '_scan_rows', None))
+        files = self._visible_files()
         if self._sort_wins():
             import pair_rank
             files = pair_rank.sort_by_wins(files)
@@ -7023,7 +7072,9 @@ class App:
             # painted a page of pictures with folders ticked, and they looked like the view rather than a placeholder
             # ("I was not expecting images in the first column at all in the initial folders enabled state",
             # 2026-10-31). Folders ticked means no pictures, whatever the worker is doing.
-            self.gal_title.configure(text='Grouping prompts\u2026  \u00b7  %d pictures' % len(files))
+            # Plain and true: it clusters the prompt text, it does not look at the pictures. "Categorizing images" would
+            # promise content analysis this never does; "grouping pictures by prompt" says what happens.
+            self.gal_title.configure(text='Grouping pictures by prompt\u2026  \u00b7  %d' % len(files))
             for w in self.recent.winfo_children():
                 w.destroy()
             self._tile_widgets = {}

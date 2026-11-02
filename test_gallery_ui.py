@@ -610,6 +610,26 @@ def main():
     check('a start that succeeds says so and the run continues',
           any('started - continuing' in s for s in said3), said3[:4])
 
+    print('\n-- a folder is paired by what the pane shows, not only by what the plan absorbed')
+    # Deterministic, not guarded on the suite's state at this point: a plan whose folder holds one picture, and a pane
+    # offering five - the shape a folder has right after renders, which reported "only one picture - nothing to pair".
+    saved_plan, saved_active, saved_items = app._plan, app._active_folder, getattr(app, '_content_items', None)
+    one = [{'path': p, 'created': '2026-10-01T00:00:00'} for p in app._files[:1]] or [{'path': 'a.png'}]
+    five = [dict(path=p, created='2026-11-01T00:00:00') for p in app._files[:5]] or [{'path': 'x%d.png' % i} for i in range(5)]
+    app._plan = {'groups': [{'label': 'fresh folder', 'items': one}]}
+    app._active_folder = 0
+    app._content_items = five
+    label, paths = app.review_paths()
+    check('the review counts every picture the pane is showing, not just the plan\'s',
+          len(paths) == len(five), (len(paths), len(five)))
+    check('so a folder of fresh renders is not reported as a single picture', len(paths) > 1, len(paths))
+    # one picture selected inside a folder of many: pair the folder rather than refuse (policy, no window needed)
+    app._content_items = five
+    label, pair, fell_back = app._review_pairing(paths=[five[0]['path']])
+    check('a one-picture review falls back to its folder instead of refusing',
+          fell_back and len(pair) >= 2, (fell_back, len(pair)))
+    app._plan, app._active_folder, app._content_items = saved_plan, saved_active, saved_items
+
     print('\n-- strength: a full-width slider with 5 % detents, arrows, and a number you can type')
     check('the slider fills the column',
           app.strength_scale.pack_info().get('fill') == 'x' and bool(int(app.strength_scale.pack_info().get('expand') or 0)),
