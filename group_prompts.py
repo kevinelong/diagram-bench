@@ -63,7 +63,10 @@ MIN_MEMBER_COVERAGE = 0.30
 # because the 0.20 anchor path is untouched. At 0.55 the gallery collapses to 73 folders; 0.75 loses a member again.
 MEMBER_MATCH = 0.70
 DEFAULT_RECENT = 24
-MIN_GROUP = 2                  # a "folder" of one picture is just the picture
+# Kevin's choice on the RTX 4060 box (2026-11-02, `c552971`): every distinct prompt gets its own tile, so a folder of one
+# picture is allowed. It changes what the folders view *is* - a gallery of 200 unrelated prompts becomes 200 tiles - which
+# is why it is a decision and not a default.
+MIN_GROUP = 1
 
 STOP = set('''a an the and or of to in on at by for with from as is are was were be been being this that these those it
 its into over under near above below behind beside between across through during before after while very more most

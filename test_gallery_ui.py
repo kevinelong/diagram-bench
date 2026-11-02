@@ -4390,8 +4390,14 @@ def main():
         finally:
             app.select_folder = real_select_folder
         check('Enter on a focused folder tile opens that folder', opened == [0], opened)
+    # MIN_GROUP is 1 since 2026-11-02, so the open folder can legitimately hold one picture. What the pane owes is a tile
+    # per picture in the folder it is showing, however few that is - switching folders here would disturb the state the
+    # next checks read, which is what the first version of this fix did.
     pane_tiles = list((getattr(app, '_content_widgets', {}) or {}).values())
-    check('an open folder draws tiles in the pane', len(pane_tiles) >= 2, len(pane_tiles))
+    open_group = ((app._plan or {}).get('groups') or [{}])[app._active_folder or 0] if app._plan else {}
+    owed = len(open_group.get('items') or [])
+    check('the pane draws a tile per picture in the open folder',
+          len(pane_tiles) >= 1 and (owed == 0 or len(pane_tiles) == owed), (len(pane_tiles), owed))
     check('a pane tile is a tab stop',
           bool(pane_tiles) and all(str(t.cget('takefocus')) == '1' for t in pane_tiles),
           [t.cget('takefocus') for t in pane_tiles][:4])

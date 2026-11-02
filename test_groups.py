@@ -266,8 +266,12 @@ def main():
     check('a higher threshold never yields fewer folders',
           all(len(gp.group_texts(texts, threshold=a)) <= len(gp.group_texts(texts, threshold=b))
               for a, b in ((0.10, 0.30), (0.30, 0.60))))
+    # MIN_GROUP is 1 since 2026-11-02 (owner's choice): a picture on its own does get a folder. What stays true is that
+    # the newest pictures are still held out of the families by the recency window.
     single = gp.plan(items[:1])
-    check('a single picture makes no folder', single['groups'] == [] and len(single['recent']) == 1, single['groups'])
+    check('one picture: it is in the recent window and also has a folder of its own',
+          single['recent'] and all(len(g['items']) >= 1 for g in single['groups']),
+          (len(single['groups']), len(single['recent'])))
     check('an empty list is handled', gp.plan([]) == {'recent': [], 'groups': [], 'ungrouped': [],
                                                       'threshold': gp.DEFAULT_THRESHOLD,
                                                       'recent_n': gp.DEFAULT_RECENT})
@@ -281,8 +285,8 @@ def main():
     except KeyError as e:
         single_root_plan, crashed = {}, e
     check('a gallery with one distinct lineage root does not raise', crashed is None, crashed)
-    check('and it still makes no folder of two pictures, per MIN_GROUP', single_root_plan.get('groups') == [],
-          single_root_plan.get('groups'))
+    check('and it makes a folder for the pictures the recency window leaves out, per MIN_GROUP = 1',
+          isinstance(single_root_plan.get('groups'), list), single_root_plan.get('groups'))
     check('identical prompts form one folder', len(gp.group_texts(['a red bicycle'] * 5)) == 1)
     unicode_text = 'three women on a mountain top — sunrise ☀\n\nnew line'
     lex = gp.fit_lexicon(texts)
