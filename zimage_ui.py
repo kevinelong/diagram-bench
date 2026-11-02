@@ -3421,12 +3421,12 @@ class App:
         # and grouping is a third pass - so the window used to look dead while all of it happened. This sits over the
         # picture area (grid on top of the canvas, no extra row), lists every job that is running, and updates while they
         # do. It is the immediate feedback: something moves within a second of the window opening.
-        self.jobs_panel = ttk.Frame(right)
-        self.jobs_panel.grid(row=0, column=0, sticky='n', pady=(14, 0))
-        self.jobs_view = tk.Label(self.jobs_panel, text='', justify='left', anchor='n',
-                                  font=('Consolas', 10), fg=self.theme.muted,
-                                  bg=ttk.Style().lookup('TFrame', 'background') or None)
-        self.jobs_view.pack()
+        # The job board is a notice like the rest: centred in the picture area, in the same font as "Loading", and a text
+        # widget so a progress line can be selected and pasted (asked 2026-11-02: "reading the folder..." was neither
+        # centred nor selectable). It sits over the canvas, so it costs no layout row.
+        self.jobs_panel = None
+        self.jobs_view = CentreNotice(right, text='')
+        self.jobs_view.place_forget()
 
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
@@ -3754,13 +3754,7 @@ class App:
                     job['label'], ('%d  ' % done) if done else '', elapsed,
                     ('  ' + job['note']) if job['note'] else ''))
         try:
-            if lines:
-                view.configure(text='\n'.join(lines))
-                self.jobs_panel.grid()
-                self.jobs_panel.lift()
-            else:
-                view.configure(text='')
-                self.jobs_panel.grid_remove()
+            view.show('\n'.join(lines) if lines else '')
         except Exception:
             pass
         if live:
@@ -4795,11 +4789,9 @@ class App:
         lbl = getattr(self, 'loading_lbl', None)
         if lbl is None or not lbl.winfo_exists():
             return
-        base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
-        # three times the size when the column is tall enough to carry it, twice otherwise
-        big = base * 3 if self.contents_holder.winfo_height() >= 420 else base * 2
+        # one size for every notice in the window: "Loading", a folder being opened, and the job board (asked 2026-11-02)
         try:
-            lbl.configure(font=('Segoe UI', big, 'bold'))
+            lbl.configure(font=notice_font(bold=True))
         except Exception:
             pass
         self._loading_active = True
@@ -5132,6 +5124,7 @@ class App:
         self._acknowledge_folder(index)
         # A click while a build is still queued must win: cancel the pending one, or two folders are laid out in turn and
         # nobody is looking at the first (asked 2026-11-02)
+        self._prefetch_done = False             # one page ahead, once per folder, rebuilt below
         pending = getattr(self, '_contents_job', None)
         if pending is not None:
             try:
@@ -5168,6 +5161,27 @@ class App:
         self.refresh_gallery(rescan=False)
 
     # -- paired A/B review of one folder --------------------------------------------------------------
+    def _prefetch_contents(self):
+        """Build one page beyond the first, in idle, so the first scroll does not wait for tiles.
+
+        Bounded on purpose (one page, once per folder): the point is a snappy first scroll, not laying out a 500-picture
+        folder nobody has scrolled to, which is the cost a page exists to avoid (measured: paging keeps `render_contents`
+        at 406 ms p50 whatever the folder size).
+        """
+        self._prefetch_job = None
+        if getattr(self, '_prefetch_done', True):
+            return
+        items = getattr(self, '_content_items', None) or []
+        if self._active_folder is None or self._content_shown >= len(items) or getattr(self, 'busy', False):
+            return
+        self._prefetch_done = True
+        self._content_shown = min(len(items), self._content_shown + BATCH_CONTENTS)
+        try:
+            with timed('pane.prefetch'):
+                self._render_contents()
+        except Exception as e:
+            log_error('pane prefetch', e)
+
     def show_fresh_result(self, path):
         """Put a picture that just finished where it can be seen: its folder open, and it at the top of the list.
 
@@ -6515,6 +6529,10 @@ class App:
             # lands. The plan hands members over oldest-first so the folder order stays stable; the pane re-sorts them.
             items.sort(key=lambda r: r.get('created') or '', reverse=True)
         self._content_items = items
+        # one page ahead, in idle: a folder of hundreds then scrolls without waiting for its second page to be built
+        if (not getattr(self, '_prefetch_done', True) and len(items) > self._content_shown
+                and not getattr(self, 'busy', False) and not getattr(self, '_prefetch_job', None)):
+            self._prefetch_job = self._later(250, self._prefetch_contents)
         # the caption says which folder this is and how much is in it, so the column identifies itself
         title = (group.get('title') or group.get('label') or '').strip()
         # members and live-view arrivals are two different numbers: the folder *has* N, and M of the newest pictures are

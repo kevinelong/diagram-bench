@@ -900,9 +900,15 @@ def main():
     app._render_jobs()
     check('and it leaves the board after a moment', '2400 pictures' not in app.jobs_view.cget('text'),
           app.jobs_view.cget('text'))
-    check('the board costs no layout row: it is drawn over the picture area',
-          app.jobs_panel.master is app.canvas.master and int(app.jobs_panel.grid_info().get('row', -1)) == 0,
-          (app.jobs_panel.master is app.canvas.master, app.jobs_panel.grid_info()))
+    # the board is a notice now (2026-11-02): centred over the picture area, so it costs no layout row, and a text widget
+    # so a progress line can be selected and pasted
+    info = app.jobs_view.place_info()
+    check('the board is centred over the picture area and costs no layout row',
+          app.jobs_view.master is app.canvas.master
+          and float(info.get('relx') or 0) == 0.5 and float(info.get('rely') or 0) == 0.5,
+          (app.jobs_view.master is app.canvas.master, info))
+    check('and its lines can be selected, like every other notice',
+          isinstance(app.jobs_view.text, tk.Text), type(app.jobs_view).__name__)
 
     print('\n-- the API summary and the explanation can be selected and copied')
     check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))
