@@ -4634,6 +4634,17 @@ class App:
             return False          # only the case this exists for: a base chosen by clicking a picture in a folder
         if not self._folders_view_active() or self._active_folder is None:
             return False
+        # Reported 2026-11-02: "n-up layout renders are not appearing in image list", with the default first folder
+        # left open. The pane shows *one folder's members*, and a picture written a second ago is in none of them, so it
+        # was only in Recent and on the right. Rather than break the pane's ordering by injecting a row into it, open the
+        # folder the render actually landed in - which is the one thing that shows it without touching the list.
+        here = getattr(self, '_current', None)
+        target = self.folder_holding(here) if here else None
+        if target is not None and target != self._active_folder:
+            label = (self._plan['groups'][target].get('label') or '').strip()
+            self.select_folder(target)
+            self.hint.configure(text='%s landed in "%s" - opened it so the render is visible' % (Path(here).name, label[:60]))
+            return True
         self.hint.configure(text='this folder stays open; the new picture is unfiled until the next grouping, '
                                  'so it is in Recent and on the right')
         return False
@@ -5015,6 +5026,17 @@ class App:
         self.refresh_gallery(rescan=False)
 
     # -- paired A/B review of one folder --------------------------------------------------------------
+    def folder_holding(self, path):
+        """Index of the plan's folder that holds `path`, or None. Used to show a render where it landed."""
+        if path is None or not self._plan:
+            return None
+        name = Path(path).name
+        for index, group in enumerate(self._plan.get('groups') or []):
+            for row in group.get('items') or []:
+                if Path(row.get('path') if isinstance(row, dict) else row).name == name:
+                    return index
+        return None
+
     def review_paths(self, index=None, paths=None):
         """(label, paths) for an A/B review - the given pictures, or the folder's, or the biggest folder's.
 
