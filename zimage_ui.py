@@ -3256,21 +3256,9 @@ class App:
         # entries, so it is a button that states its own arithmetic.
         # The matrix controls share the precision row - the same row as the arrows and the value box - because a row of
         # their own pushed the whole column past its height budget (measured: the prompt box 707 px in a 700 px window).
-        self.matrix_min_var = tk.StringVar(value='40')
-        self.matrix_max_var = tk.StringVar(value='80')
-        self.matrix_steps_var = tk.StringVar(value='3')
-        for label, var, width in (('\u00b7', self.matrix_min_var, 3), ('\u2013', self.matrix_max_var, 3),
-                                  ('\u00d7', self.matrix_steps_var, 2)):
-            ttk.Label(head, text=label, foreground=self.theme.muted,
-                      font=('Segoe UI', 8)).pack(side='left', padx=(3, 1))
-            ttk.Entry(head, textvariable=var, width=width).pack(side='left')
-        self.matrix_btn = ttk.Button(head, text='matrix', command=self.start_matrix, state='disabled', width=7)
-        self.matrix_btn.pack(side='left', padx=(4, 0))
-        self._tip(self.matrix_btn,
-                  'Render the prompt once per armed picture at each strength from "from" to "to", in "n" even steps - '
-                  'one base and three strengths is three renders, two bases are six, three are nine. '
-                  'Ignores the layout choice (each render is one picture).')
-
+        # The matrix lives in a dialog now (PLAN-UX-20261102 4.2): its parameters are a range, its count and cost need
+        # stating before a run, and the five widgets that used to sit here (from / to / xn / matrix / base buttons) made
+        # the precision row read as an arithmetic puzzle. Folder title menu -> Matrix…
         # The slider does **not** own the value: a `resolution` on a scale quantises the variable it is bound to, so a
         # typed 0.73 would become 0.75 the moment the bar drew itself. It reads the value in `_render_strength` and snaps
         # its own drags to the 5 % detents, which leaves the number exact.
@@ -10062,7 +10050,7 @@ class App:
         self._base_from_gallery = from_gallery
         self.base_path = Path(path)
         self.base_label.configure(text=self._short_name(self.base_path.name))
-        for name in ('clear_base_btn', 'view_base_btn', 'matrix_btn'):
+        for name in ('clear_base_btn', 'view_base_btn'):
             if hasattr(self, name):
                 getattr(self, name).state(['!disabled'])
         if self._base_tip is None:
@@ -10436,33 +10424,11 @@ class App:
 
         def start():
             (lo, hi), step = numbers()
-            bases = [path for _role, path in self.base_items()]
-            if not bases:
-                cost.configure(text='arm a base first: the matrix renders each armed picture through the ladder')
-                return
-            values = matrix_module.values(lo, hi, step)
-            advice = estimate_module.hunt_advice(self._matrix_card(), self.model_var.get(), self._size_px(),
-                                                 self._size_px() and self.steps_now(),
-                                                 len(values) * len(bases), largest_size=self.MATRIX_FULL_SIZE)
-            if advice.get('warn'):
-                from tkinter import messagebox
-                question = ('%d renders at %d px on %s ≈ %s\n   fastest measured at this size: %s ≈ %s\n\n'
-                            'Estimated %s of extra work.\n\nRender anyway?'
-                            % (advice['n'], self._size_px(), self.model_var.get(),
-                               matrix_module.human_duration(advice['total']), advice['fast_profile'],
-                               matrix_module.human_duration(advice['fast_total']),
-                               matrix_module.human_duration(advice['extra'])))
-                if not messagebox.askokcancel('This matrix is expensive', question, parent=window):
-                    return
-            self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet_var.get())}
-            self._save_settings_best_effort()
-            window.destroy()
-            plan = self.matrix_plan_from(lo, hi, step, bases)
-            self._matrix_queue = list(plan)
-            self._matrix_last_base = None
-            self.layout_var.set('single')
-            self.hint.configure(text='matrix: %d renders queued' % len(plan))
-            self._matrix_next()
+            plan = self.matrix_start(lo, hi, step, sheet=bool(sheet_var.get()), parent=window)
+            if plan:
+                window.destroy()
+            else:
+                cost.configure(text='nothing queued: arm a base first, or the warning was declined')
 
         ttk.Button(body, text='Cancel', command=window.destroy).grid(row=4, column=4, sticky='e', pady=(12, 0))
         ttk.Button(body, text='Start', command=start).grid(row=4, column=5, sticky='e', pady=(12, 0))
@@ -10494,29 +10460,54 @@ class App:
                     pass
 
     def matrix_strengths(self):
-        """The strengths a matrix will render at, from the `from` / `to` / `n` boxes above the button.
+        """The strengths a matrix will render at, from the dialog's remembered values - fractions, as the queue wants.
 
-        From, to and a count rather than three fixed values: "40 60 80" is one ladder, "20 95 4" is another, and the number
-        of renders follows from what is asked for. Values outside the slider's usable range are clamped, and a ladder that
-        cannot be walked falls back to the default rather than silently rendering one picture.
+        The dialog deals in whole percentages because that is what a person types and what the sheet labels show; this
+        converts once, here, so nothing downstream has to know about the unit.
         """
-        def number(var, default):
-            try:
-                return float(str(var.get()).strip().replace('%', '').replace(',', '.'))
-            except (AttributeError, TypeError, ValueError):
-                return default
-        low = max(STRENGTH_MIN, min(STRENGTH_MAX, number(self.matrix_min_var, 40) / 100.0))
-        high = max(STRENGTH_MIN, min(STRENGTH_MAX, number(self.matrix_max_var, 80) / 100.0))
-        try:
-            count = int(number(self.matrix_steps_var, 3))
-        except (TypeError, ValueError):
-            count = 3
-        if high <= low or count < 2:
-            return list(MATRIX_STRENGTHS)
-        if count == 2:
-            return [round(low, 2), round(high, 2)]
-        step = (high - low) / (count - 1)
-        return [round(low + step * i, 2) for i in range(count)]
+        settings = self.matrix_settings()
+        lo, hi, step = settings['from'], settings['to'], settings['step']
+        ladder = [v / 100.0 for v in matrix_module.values(lo, hi, step)]
+        return [max(STRENGTH_MIN, min(STRENGTH_MAX, v)) for v in ladder] or list(MATRIX_STRENGTHS)
+
+    def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None):
+        """Queue the matrix for explicit parameters; the dialog's Start calls this, and so can a test.
+
+        `ask` is the confirmation the hunt warning uses, injected so the decision can be exercised without a pointer.
+        Returns the plan that was queued, or [] when there was nothing to arm or the warning was declined.
+        """
+        import estimate as estimate_module
+        bases = [path for _role, path in self.base_items()]
+        if not bases:
+            self.hint.configure(text='arm a base first: the matrix renders each armed picture through the ladder')
+            return []
+        values = matrix_module.values(lo, hi, step)
+        plan = self.matrix_plan_from(lo, hi, step, bases)
+        advice = estimate_module.hunt_advice(self._matrix_card(), self.model_var.get(), self._size_px(), self.steps_now(),
+                                             len(plan), largest_size=self.MATRIX_FULL_SIZE)
+        if advice.get('warn'):
+            question = ('%d renders at %d px on %s \u2248 %s\n   fastest measured at this size: %s \u2248 %s\n\n'
+                        'Estimated %s of extra work.\n\nRender anyway?'
+                        % (advice['n'], self._size_px(), self.model_var.get(),
+                           matrix_module.human_duration(advice['total']), advice['fast_profile'],
+                           matrix_module.human_duration(advice['fast_total']),
+                           matrix_module.human_duration(advice['extra'])))
+            confirm = ask
+            if confirm is None:
+                from tkinter import messagebox
+                confirm = lambda text, parent=None: messagebox.askokcancel('This matrix is expensive', text,
+                                                                           parent=parent or self.root)
+            if not confirm(question, parent=parent):
+                self.hint.configure(text='matrix cancelled')
+                return []
+        self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet)}
+        self._save_settings_best_effort()
+        self._matrix_queue = list(plan)
+        self._matrix_last_base = None
+        self.layout_var.set('single')
+        self.hint.configure(text='matrix: %d renders queued' % len(plan))
+        self._matrix_next()
+        return plan
 
     def matrix_plan(self):
         """[(base path, strength)] for a base-strength matrix: every armed picture at every strength in the ladder.
@@ -10528,37 +10519,8 @@ class App:
         return [(str(path), strength) for role, path in self.base_items() for strength in ladder]
 
     def start_matrix(self):
-        """Run the prompt once per armed picture per matrix strength, as single pictures rather than N-up tiles."""
-        plan = self.matrix_plan()
-        if not plan:
-            self.hint.configure(text='arm a base first: the matrix renders each armed picture at three strengths')
-            return []
-        bases = len(self.base_items())
-        from tkinter import messagebox
-        # a rough clock, not a promise: the real per-picture cost is measured by the run itself
-        try:
-            per_picture = float(getattr(self, '_seconds_per_picture_value', None) or 20.0)
-        except (TypeError, ValueError):
-            per_picture = 20.0
-        estimate = len(plan) * max(1.0, per_picture)
-        ladder = self.matrix_strengths()
-        if not messagebox.askokcancel(
-                'Base x strength',
-                '%d armed picture%s x %d strengths (%s) = %d renders\n\n'
-                'Each is a separate %s px render, so it ignores the layout choice. Ordering: the current size and '
-                'prompt, one picture per strength.\n\nApproximate time: %.0f min.'
-                % (bases, '' if bases == 1 else 's', len(ladder),
-                   ', '.join('%d%%' % round(s * 100) for s in ladder), len(plan), self.size_var.get(),
-                   max(1.0, estimate) / 60.0),
-                parent=self.root):
-            self.hint.configure(text='matrix cancelled')
-            return []
-        self._matrix_queue = list(plan)
-        self._matrix_last_base = None
-        self.layout_var.set('single')            # one picture per press, which is what the matrix counts
-        self.hint.configure(text='matrix: %d renders queued' % len(plan))
-        self._matrix_next()
-        return plan
+        """Open the matrix dialog: the parameters and their cost are stated there, before anything renders."""
+        return self.open_matrix_dialog()
 
     def _matrix_next(self):
         """Arm the next (base, strength) pair and press Generate; the queue advances on each finished picture."""
@@ -10673,7 +10635,7 @@ class App:
         # a strength at all after a variation run.
         self._strength_touched = False
         self._bases = []                 # the other references go with it, or a later render would still combine them
-        for name in ('clear_base_btn', 'view_base_btn', 'matrix_btn'):
+        for name in ('clear_base_btn', 'view_base_btn'):
             if hasattr(self, name):
                 getattr(self, name).state(['disabled'])
         self._base_from_gallery = False

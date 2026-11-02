@@ -694,46 +694,45 @@ def main():
     if files:
         app._bases = []
         app._set_base(files[0])
-        one = app.matrix_plan()
-        check('the default ladder is 40 / 60 / 80, three renders for one armed picture',
-              len(one) == 3 and [round(s * 100) for _p, s in one] == [40, 60, 80],
-              (len(one), [round(s * 100) for _p, s in one]))
-        app.matrix_min_var.set('20'); app.matrix_max_var.set('95'); app.matrix_steps_var.set('4')
-        ladder = app.matrix_strengths()
-        check('from/to/n builds the ladder: 20 to 95 in four steps',
-              [round(s * 100) for s in ladder] == [20, 45, 70, 95], [round(s * 100) for s in ladder])
-        app.matrix_steps_var.set('2')
-        check('two steps are the ends themselves', [round(s * 100) for s in app.matrix_strengths()] == [20, 95],
-              app.matrix_strengths())
-        app.matrix_min_var.set('80'); app.matrix_max_var.set('40'); app.matrix_steps_var.set('3')
-        check('a ladder that cannot be walked falls back to the default instead of rendering one picture',
-              [round(s * 100) for s in app.matrix_strengths()] == [40, 60, 80], app.matrix_strengths())
-        app.matrix_min_var.set('-50'); app.matrix_max_var.set('900'); app.matrix_steps_var.set('3')
+        # The five inline widgets are gone (plan 4.2): parameters arrive from the dialog, or from a caller that passes them
+        # explicitly, and `matrix_start` is that path. What is checked here is the arithmetic and the queue, not the widget.
+        settings = app.matrix_settings()
+        check('the dialog remembers a window inside the legal range',
+              20 <= settings['from'] < settings['to'] <= 95 and settings['step'] >= 1, settings)
+        ladder = app.matrix_plan_from(20, 95, 25, [str(files[0])])
+        check('from/to/step builds the ladder: 20 to 95 in four values',
+              [round(s * 100) for _p, s in ladder] == [20, 45, 70, 95], [round(s * 100) for _p, s in ladder])
+        two = app.matrix_plan_from(20, 95, 75, [str(files[0])])
+        check('a coarse step gives the ends themselves', [round(s * 100) for _p, s in two] == [20, 95],
+              [round(s * 100) for _p, s in two])
+        check('a reversed pair is read the right way round',
+              [round(s * 100) for _p, s in app.matrix_plan_from(80, 40, 20, [str(files[0])])] == [40, 60, 80],
+              [round(s * 100) for _p, s in app.matrix_plan_from(80, 40, 20, [str(files[0])])])
         check('and values outside the slider are clamped, not taken literally',
               all(zui.STRENGTH_MIN <= s <= zui.STRENGTH_MAX for s in app.matrix_strengths()), app.matrix_strengths())
-        app.matrix_min_var.set('40'); app.matrix_max_var.set('80'); app.matrix_steps_var.set('3')
-        check('the button is enabled once something is armed', 'disabled' not in app.matrix_btn.state(),
-              app.matrix_btn.state())
+        check('one armed picture through 21 strengths is 21 renders',
+              len(app.matrix_plan_from(40, 60, 1, [str(files[0])])) == 21)
         app._bases = [str(p) for p in files]
-        three = app.matrix_plan()
-        check('three armed pictures give nine - three each, not a layout', len(three) == 9, len(three))
-        check('and every pair names a real armed picture and a matrix strength',
-              all(Path(p).exists() and s in zui.MATRIX_STRENGTHS for p, s in three), three[:2])
-        # the confirmation is the one thing between a click and minutes of rendering: answer it here
-        import unittest.mock as _mock
-        with _mock.patch('tkinter.messagebox.askokcancel', return_value=False):
-            check('cancelling the confirmation queues nothing', app.start_matrix() == []
-                  and not getattr(app, '_matrix_queue', None), getattr(app, '_matrix_queue', None))
-        with _mock.patch('tkinter.messagebox.askokcancel', return_value=True):
-            queued = app.start_matrix()
-        check('accepting queues every pair', len(queued) == 9 and len(app._matrix_queue) == 8,
+        check('three armed pictures give three times as many, not a layout',
+              len(app.matrix_plan_from(40, 60, 1, [str(p) for p in files])) == 63)
+        # The warning is the pure module's business (test_matrix.py patches a table with two models at one size, which the
+        # real one does not have yet). Here the point is that a cheap run does not ask, and the queue is exact.
+        asked = []
+        queued = app.matrix_start(40, 60, 1, ask=lambda text, parent=None: (asked.append(text), True)[1])
+        check('a run with no measurement does not interrupt with a warning', asked == [], asked[:1])
+        check('and it queues every pair but the one already running', len(queued) == 63 and len(app._matrix_queue) == 62,
               (len(queued), len(getattr(app, '_matrix_queue', []))))
         check('and it says the matrix overrides the layout, by setting it to single',
               app.layout_var.get() == 'single', app.layout_var.get())
         app._matrix_queue = []
         app.clear_base()
-        check('with nothing armed the plan is empty and the button is off',
-              app.matrix_plan() == [] and 'disabled' in app.matrix_btn.state(), app.matrix_btn.state())
+        check('with nothing armed there is no plan and nothing is queued',
+              app.matrix_plan() == [] and app.matrix_start(40, 60, 1) == [], app.matrix_plan())
+        # the entry point is the dialog now: opening it must not depend on anything having been armed
+        opened = app.start_matrix()
+        check('the menu entry opens the dialog and it can be closed',
+              opened is not None and opened.winfo_exists() == 1, type(opened).__name__)
+        opened.destroy()
 
     print('\n-- View base lists every picture that will be sent, and can drop one')
     # Armed from the gallery's own files: a base outside it is deliberately cleared by the next refresh ("a deleted or

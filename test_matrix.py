@@ -108,5 +108,24 @@ unknown = estimate.hunt_advice('laptop-4060', 'flux3 klein 4b', 1024, 16, 21, la
 check('an unmeasured model reports unknown cost', unknown['per_picture'] is None, unknown)
 check('and does not warn on a guess', unknown['warn'] is False, unknown)
 
+# ---------------------------------------------------------------- the warning, with a table it can actually fire on
+# The real table has no card with two models measured at the same size, so the branch that matters cannot be exercised
+# from it - which is itself worth knowing: until the 4060 box records a second model at 1024 px, the warning stays quiet.
+import deployments
+_saved = deployments.RUNS
+deployments.RUNS = list(_saved) + [
+    dict(card='desktop-5070', profile='a slow model', width=1024, height=1024, steps=9, wall_s=60.0,
+         peak_mib=None, fits=True, provenance='synthetic row for the warning test'),
+]
+try:
+    fired = estimate.hunt_advice('desktop-5070', 'a slow model', 1024, 9, 21, largest_size=1024)
+    check('a slow model at full size warns', fired['warn'] is True, fired)
+    check('and it names the faster model it compared against', fired['fast_profile'] == 'z-image turbo', fired)
+    check('with the extra work, not just the total', round(fired['extra'], 0) == round((60.0 - 14.3) * 21, 0), fired)
+    cheap = estimate.hunt_advice('desktop-5070', 'a slow model', 1024, 9, 2, largest_size=1024)
+    check('two renders of it is under the ten-minute budget', cheap['warn'] is False, cheap)
+finally:
+    deployments.RUNS = _saved
+
 print('FAILURES: %d' % FAILURES[0] if FAILURES[0] else 'ALL PASS')
 raise SystemExit(1 if FAILURES[0] else 0)
