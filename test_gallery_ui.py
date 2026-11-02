@@ -748,6 +748,26 @@ def main():
         win.destroy(); root.update()
         app._bases = []
 
+    print('\n-- clicking a picture with no recorded prompt does not empty the box (reported 2026-11-02)')
+    if app._files:
+        scratch = Path(app._files[0]).with_name('no-prompt-recorded.png')
+        Image.new('RGB', (32, 32), 'olive').save(scratch)
+        scratch.with_suffix('.json').write_text(__import__('json').dumps({'created': '2026-10-02T10:00:00'}),
+                                                encoding='utf-8')
+        was_current = getattr(app, '_current', None)
+        app.text.delete('1.0', 'end')
+        app.text.insert('1.0', 'a prompt I typed myself')
+        app.select_file(scratch)
+        root.update()
+        check('the typed prompt survives a click on a picture with no prompt in its sidecar',
+              app.text.get('1.0', 'end-1c') == 'a prompt I typed myself', app.text.get('1.0', 'end-1c'))
+        check('and the hint says why the box was not touched',
+              'no prompt recorded' in app.hint['text'] or 'left as it is' in app.hint['text'], app.hint['text'])
+        app._current = was_current
+        app.refresh_gallery()
+        scratch.unlink(missing_ok=True)
+        scratch.with_suffix('.json').unlink(missing_ok=True)
+
     print('\n-- each profile remembers its own step count')
     models = [m for m in zui.zg.MODELS]
     if len(models) >= 2:

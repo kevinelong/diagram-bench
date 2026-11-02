@@ -9403,19 +9403,27 @@ class App:
         self._display(path)
         meta = read_meta(path)
         if meta:
-            self.text.delete('1.0', 'end')
             restored = meta.get('prompt') or ''
             if meta.get('style'):
                 self.style_var.set(meta['style'])
                 restored = self._strip_style(restored, meta['style'])
-            self.text.insert('1.0', restored)
+            # Only rewrite the box when there is something to put in it. A sidecar with no prompt (a described picture, a
+            # foreign file, a paste) used to clear whatever was typed - the box emptied itself on a click, with no undo
+            # beyond Ctrl+Z. Reported 2026-11-02 as "what clears the prompt box?".
+            if restored.strip():
+                self.text.delete('1.0', 'end')
+                self.text.insert('1.0', restored)
+            else:
+                self.hint.configure(text='%s has no prompt recorded - the box was left as it is'
+                                         % Path(path).name)
             if meta.get('seed') is not None:
                 self.seed.set(str(meta['seed']))
-            self.hint.configure(text='restored prompt and seed %s from %s%s'
-                                % (meta.get('seed'), Path(path).name,
-                                   ('; itself edited %s at strength %s'
-                                    % (Path(meta['base_image']).name, meta.get('denoise')))
-                                   if meta.get('base_image') else ''))
+            if restored.strip():
+                self.hint.configure(text='restored prompt and seed %s from %s%s'
+                                    % (meta.get('seed'), Path(path).name,
+                                       ('; itself edited %s at strength %s'
+                                        % (Path(meta['base_image']).name, meta.get('denoise')))
+                                       if meta.get('base_image') else ''))
         else:
             self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % Path(path).name)
         self.status.configure(text='viewing %s - Use as Base to edit it at strength %.2f (Enter alone starts fresh)'
