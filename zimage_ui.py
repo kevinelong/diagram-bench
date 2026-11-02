@@ -6414,7 +6414,13 @@ class App:
         caption = '%s  -  %d picture%s' % (title, members, '' if members == 1 else 's')
         if fresh_rows:
             caption += ', %d new' % len(fresh_rows)
-        self.contents_title.set_title(caption, width_px=max(200, width - 6))
+        # A caption has to survive a pane 106 px wide - one column of tiles. At that width 'word' wrap has no word that
+        # fits, so Tk falls back to breaking mid-word and "girl stray" drew as a vertical column of letters (seen
+        # 2026-11-02). Shorten to a few words and let the tooltip carry the rest; the panel is narrow, not broken.
+        narrow = width < 200
+        if narrow:
+            caption = shorten_title(caption, 3)
+        self.contents_title.set_title(caption, width_px=max(80, width - 6))
         if self._sort_wins():
             try:
                 # Wins desc, losses asc, then newest, then name - the same key the flat list uses. This used to be
@@ -6667,6 +6673,15 @@ class App:
             # (`_prompt_w + PROMPT_PAD`), and a canvas that requested `_prompt_w` of its own added the scrollbar's
             # pixels on top of it. One pixel wide, weight 1: it takes exactly the column's width minus the bar.
             self.prompt_canvas.configure(width=1)
+            # A pane 106 px wide has no room for a caption and a button on one line: the button goes, the caption keeps
+            # the column. Both are still reachable - the whole-gallery dedupe sits in the gallery header.
+            try:
+                if self._contents_w >= 150:
+                    self.dedupe_folder_btn.grid()
+                else:
+                    self.dedupe_folder_btn.grid_remove()
+            except Exception:
+                pass
         except Exception:
             pass
         if getattr(self, '_sidebar', True):
