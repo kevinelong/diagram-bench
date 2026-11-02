@@ -3265,6 +3265,17 @@ class App:
         self.canvas = tk.Canvas(right, background=self.theme.window, highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
 
+        # The startup work is long and parallel - the server takes ~25 s to answer, the folder holds thousands of sidecars,
+        # and grouping is a third pass - so the window used to look dead while all of it happened. This sits over the
+        # picture area (grid on top of the canvas, no extra row), lists every job that is running, and updates while they
+        # do. It is the immediate feedback: something moves within a second of the window opening.
+        self.jobs_panel = ttk.Frame(right)
+        self.jobs_panel.grid(row=0, column=0, sticky='n', pady=(14, 0))
+        self.jobs_view = tk.Label(self.jobs_panel, text='', justify='left', anchor='n',
+                                  font=('Consolas', 10), fg=self.theme.muted,
+                                  bg=ttk.Style().lookup('TFrame', 'background') or None)
+        self.jobs_view.pack()
+
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
         self.canvas.bind('<B1-Motion>', self._on_crop_drag, add='+')
@@ -3515,6 +3526,92 @@ class App:
             self.hint.configure(text='could not write the profile: %s: %s' % (type(e).__name__, e))
             return None
 
+    # ---- background jobs: what is running, for how long, how far ------------------------------------------------
+    def job_start(self, key, label, total=None, note=''):
+        """Register a long job so the window says something is happening, from the first second.
+
+        There are three of them at startup and they run in parallel: the ComfyUI probe/start (~25 s), the walk of the
+        gallery (thousands of sidecars) and the grouping pass. None of them used to show anything but a single status line
+        that the next message overwrote.
+        """
+        if not hasattr(self, '_jobs'):
+            self._jobs = {}
+        self._jobs[key] = {'label': label, 'total': total, 'done': 0, 't0': time.time(), 'end': None, 'note': note}
+        self._render_jobs()
+        self._schedule_jobs_tick()
+
+    def job_progress(self, key, done=None, total=None, note=None):
+        job = getattr(self, '_jobs', {}).get(key)
+        if job is None:
+            return
+        if total is not None:
+            job['total'] = total
+        if done is not None:
+            job['done'] = done
+        if note is not None:
+            job['note'] = note
+        self._render_jobs()
+
+    def job_end(self, key, note=''):
+        job = getattr(self, '_jobs', {}).get(key)
+        if job is None:
+            return
+        job['end'] = time.time()
+        job['note'] = note
+        self._render_jobs()
+
+    def _schedule_jobs_tick(self):
+        if getattr(self, '_jobs_ticking', False):
+            return
+        self._jobs_ticking = True
+
+        def tick():
+            self._jobs_ticking = False
+            self._render_jobs()
+            if any(j['end'] is None for j in getattr(self, '_jobs', {}).values()):
+                self._later(400, self._schedule_jobs_tick)
+
+        self._later(400, tick)
+
+    def _render_jobs(self):
+        """One line per job: a spin for elapsed time, a fraction and a percentage when a total is known."""
+        view = getattr(self, 'jobs_view', None)
+        if view is None:
+            return
+        now = time.time()
+        lines, live = [], False
+        for key, job in list(getattr(self, '_jobs', {}).items()):
+            if job['end'] is not None and now - job['end'] > 4.0:
+                del self._jobs[key]                      # a finished job lingers for a moment, then goes
+                continue
+            elapsed = (job['end'] or now) - job['t0']
+            if job['end'] is not None:
+                lines.append('\u2713 %s%s  %.0fs' % (job['label'], (' - ' + job['note']) if job['note'] else '', elapsed))
+            elif job['total']:
+                live = True
+                pct = min(99, int(100.0 * job['done'] / max(1, job['total'])))
+                lines.append('\u25cf %s  %d/%d  %d%%  %.0fs%s' % (
+                    job['label'], job['done'], job['total'], pct, elapsed,
+                    ('  ' + job['note']) if job['note'] else ''))
+            else:
+                live = True
+                done = job['done'] or 0
+                lines.append('\u25cf %s  %s%0.0fs%s' % (
+                    job['label'], ('%d  ' % done) if done else '', elapsed,
+                    ('  ' + job['note']) if job['note'] else ''))
+        try:
+            if lines:
+                view.configure(text='\n'.join(lines))
+                self.jobs_panel.grid()
+                self.jobs_panel.lift()
+            else:
+                view.configure(text='')
+                self.jobs_panel.grid_remove()
+        except Exception:
+            pass
+        if live:
+            self._schedule_jobs_tick()
+
     def _copyable(self, widget, get_text):
         """Right-click Copy on a one-line label.
 
@@ -3761,7 +3858,7 @@ class App:
         except OSError:
             return True
 
-    def _scan(self, recursive=None):
+    def _scan(self, recursive=None, on_progress=None):
         """(path, mtime) for every picture in the *source*, newest first.
 
         The source is what the window looks at; `args.out` is where renders are written. They are the same folder by
@@ -3793,6 +3890,8 @@ class App:
                                     continue           # the same file through two paths (junction, symlink)
                                 seen.add(real)
                                 rows.append((Path(entry.path), entry.stat().st_mtime))
+                                if on_progress is not None and len(rows) % 200 == 0:
+                                    on_progress(len(rows), None)
                         except OSError:
                             continue
             except OSError:
@@ -3813,10 +3912,12 @@ class App:
         except OSError:
             return []
         rows.sort(key=lambda r: -r[1])
+        if on_progress is not None:
+            on_progress(len(rows), len(rows) or None)
         self._meta_mtimes = meta_mtimes      # a sidecar edit must invalidate the search cache too
         return rows
 
-    def _scan_cached(self, rescan=True):
+    def _scan_cached(self, rescan=True, on_progress=None):
         """The last walk of the source, reused while the folder's own mtime says nothing was added or removed.
 
         Reusing it blindly was wrong: a file deleted between two refreshes stayed in the cached rows and the next step
@@ -3832,14 +3933,14 @@ class App:
         if not rescan and cached is not None and cached[0] == stamp and cached[1] is not None:
             self._scan_rows = cached[1]
             return cached[1]
-        rows = self._scan()
+        rows = self._scan(on_progress=on_progress)
         self._scan_cache = (stamp, rows)
         self._scan_rows = rows
         return rows
 
-    def _all_files(self, rescan=True):
+    def _all_files(self, rescan=True, on_progress=None):
         """Every picture in the source. `rescan=False` reuses the last walk, validated by the folder's mtime."""
-        return [p for p, _m in self._scan_cached(rescan)]
+        return [p for p, _m in self._scan_cached(rescan, on_progress=on_progress)]
 
     def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
         # A tile is a tab stop, not a mouse target. `takefocus` puts it in the Tab order in the order it was created,
@@ -7039,7 +7140,16 @@ class App:
         # stays. `_heads` (the composed sheets) is still cleared, because wins and ordering can change without a pixel
         # changing.
         self._heads = {}
-        everything = self._all_files(rescan=rescan)
+        if not rescan:
+            self.job_start('scan', 'reading the folder', note='from the last walk')
+        else:
+            self.job_start('scan', 'reading the folder')
+        try:
+            everything = self._all_files(
+                rescan=rescan,
+                on_progress=lambda done, total: self.job_progress('scan', done, total))
+        finally:
+            self.job_end('scan', '%d pictures' % len(getattr(self, '_scan_rows', []) or []))
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
         # a deleted or moved file must not stay selected
@@ -10408,6 +10518,8 @@ class App:
                 elif kind == 'enhance_failed':
                     self.hint.configure(text='enhance failed: %s' % payload)
                 elif kind == 'groups':
+                    for key in ('group', 'scan'):
+                        self.job_end(key)
                     # posted by _compute_groups on this queue (the engine's queue is a different one, which is why
                     # this branch sat unreachable for a while and the plan never arrived)
                     self._apply_plan(payload)
@@ -10423,6 +10535,12 @@ class App:
                         self.load_meter.set(frac, stage, detail)
                     except Exception:
                         pass
+                    # the grouping pass is threaded and already reports (fraction, stage): the board is where that
+                    # becomes visible while it runs, instead of one status line that the next message overwrites
+                    total = 100
+                    self.job_start('group', stage or 'grouping prompts', total=total)
+                    self.job_progress('group', int(round(100 * float(frac or 0))), total=total,
+                                      note=(detail or ''))
                 elif kind == 'upscaled':
                     path, used, factor = payload
                     try:
@@ -10456,6 +10574,16 @@ class App:
                 kind, payload = self.engine.events.get_nowait()
                 if kind == 'status':
                     self.status.configure(text=payload)
+                    text = str(payload or '')
+                    if 'starting ComfyUI' in text:
+                        self.job_start('comfy', 'starting ComfyUI', note='~25 s')
+                    elif 'using the server already' in text:
+                        self.job_start('comfy', 'ComfyUI')
+                        self.job_end('comfy', 'already running')
+                    elif text.startswith('server ready'):
+                        self.job_end('comfy', 'ready')
+                    elif 'did not start' in text or text.startswith('no server on port'):
+                        self.job_end('comfy', 'not started')
                 elif kind == 'ready':
                     self.retry_btn.grid_remove()
                     self.busy = False

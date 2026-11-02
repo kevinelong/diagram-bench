@@ -674,6 +674,26 @@ def main():
     app.set_strength(0.70)      # leave the window as it found it: later checks assert the default ...
     app._strength_touched = False   # ... including that a style may still propose its own strength
 
+    print('\n-- long jobs announce themselves while they run')
+    app.job_start('probe', 'reading the folder', total=100)
+    app.job_progress('probe', 25)
+    text = app.jobs_view.cget('text')
+    check('a running job shows its fraction, percentage and elapsed time',
+          '25/100' in text and '25%' in text and '\u25cf' in text, text)
+    app.job_progress('probe', 25, note='counting sidecars')
+    check('and a note reaches the line', 'counting sidecars' in app.jobs_view.cget('text'),
+          app.jobs_view.cget('text'))
+    app.job_end('probe', '2400 pictures')
+    text = app.jobs_view.cget('text')
+    check('a finished job says so and how much it did', '\u2713' in text and '2400 pictures' in text, text)
+    app._jobs['probe']['end'] -= 10          # older than the linger window
+    app._render_jobs()
+    check('and it leaves the board after a moment', '2400 pictures' not in app.jobs_view.cget('text'),
+          app.jobs_view.cget('text'))
+    check('the board costs no layout row: it is drawn over the picture area',
+          app.jobs_panel.master is app.canvas.master and int(app.jobs_panel.grid_info().get('row', -1)) == 0,
+          (app.jobs_panel.master is app.canvas.master, app.jobs_panel.grid_info()))
+
     print('\n-- the API summary and the explanation can be selected and copied')
     check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))
     check('so is the hint', isinstance(app.hint, zui.SelectableText), type(app.hint))
