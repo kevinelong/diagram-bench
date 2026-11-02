@@ -112,6 +112,39 @@ def best_for(card: str, vram_mib: int | None = None) -> dict | None:
     return min((r for r in rows if r['width'] == widest), key=lambda r: r['wall_s'])
 
 
+def fits(profile: str, name: str = '', vram_mib: int | None = None, compute: tuple[int, int] | None = None):
+    """Does this profile fit the card? True / False, or None when nothing is known about either.
+
+    `None` matters: it is the difference between "we measured that it does not fit" and "we never tried", and only the
+    first one may hide a profile from the picker or move a default.
+    """
+    key = card_key(name, vram_mib, compute)
+    if key is None:
+        return None
+    limit = vram_mib or CARDS[key]['vram_mib']
+    rows = [r for r in RUNS if r['card'] == key and r['profile'] == profile]
+    if not rows:
+        return None
+    return all(r['fits'] and (r['peak_mib'] or 0) <= limit for r in rows)
+
+
+def pick_profile(default: str, name: str = '', vram_mib: int | None = None,
+                 compute: tuple[int, int] | None = None):
+    """(profile, note) for a machine: the default when it fits, otherwise the card's proven profile.
+
+    The default model was the same string on every box, and on the 8 GiB card it is a profile whose measured peak is
+    8,837 MiB - it cannot run there at all. The note is for the banner: a default that changed must say why.
+    """
+    verdict = fits(default, name, vram_mib, compute)
+    if verdict is not False:
+        return default, None
+    best = best_for(card_key(name, vram_mib, compute), vram_mib)
+    if best is None:
+        return default, ('%s does not fit this card and there is no measured alternative' % default)
+    return best['profile'], ('%s does not fit this card (%s MiB) - started on %s instead'
+                             % (default, vram_mib, best['profile']))
+
+
 def advise(name: str = '', vram_mib: int | None = None, compute: tuple[int, int] | None = None) -> str:
     """A one-line answer for an installer's log: the card, whether FP4 is native, and what to start with."""
     key = card_key(name, vram_mib, compute)
@@ -129,19 +162,30 @@ def advise(name: str = '', vram_mib: int | None = None, compute: tuple[int, int]
                best['profile'], best['width'], best['height'], best['steps'], best['wall_s'], card['measured_on']))
 
 
+_THIS = None
+
+
 def _this_card():
-    """(name, vram MiB, compute) for the GPU in this machine, or (None, None, None) when nvidia-smi is absent."""
-    import subprocess
+    """(name, vram MiB, compute) for the GPU in this machine, or (None, None, None) when nvidia-smi is absent.
+
+    Cached for the process: the hardware does not change, and the call is a child process - asking it once per window
+    was enough to delay the first map and make two mapping checks flap (seen in the suite).
+    """
+    global _THIS
+    if _THIS is not None:
+        return _THIS
+    from winproc import run          # no console window: a child of a GUI app would steal the foreground
     try:
-        out = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total,compute_cap', '--format=csv,noheader,nounits'],
-                             capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
+        out = run(['nvidia-smi', '--query-gpu=name,memory.total,compute_cap', '--format=csv,noheader,nounits'],
+                  capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
         if not out:
             return None, None, None
         name, vram, cap = [part.strip() for part in out[0].split(',')]
         major, minor = (cap.split('.') + ['0'])[:2]
-        return name, int(float(vram)), (int(major), int(minor))
+        _THIS = (name, int(float(vram)), (int(major), int(minor)))
     except Exception:
-        return None, None, None
+        _THIS = (None, None, None)
+    return _THIS
 
 
 if __name__ == '__main__':

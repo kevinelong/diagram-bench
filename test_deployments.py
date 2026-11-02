@@ -57,6 +57,19 @@ def main():
     check('and it is faster than the laptop at the same job, which is the whole point of a per-card table',
           desk['wall_s'] < laptop['wall_s'], (desk['wall_s'], laptop['wall_s']))
 
+    print('\n-- fit is three-valued, and only a measured "no" moves a default')
+    check('a profile over its card is a measured no',
+          d.fits('flux2 klein 9b uncensored', 'NVIDIA GeForce RTX 4060 Laptop', 8188, (8, 9)) is False)
+    check('one that fits is a yes', d.fits('z-image turbo', 'NVIDIA GeForce RTX 4060 Laptop', 8188, (8, 9)) is True)
+    check('an unknown card is None, not a guess',
+          d.fits('z-image turbo', 'NVIDIA GeForce RTX 3090', 24576, (8, 6)) is None)
+    picked, note = d.pick_profile('flux2 klein 9b uncensored', 'NVIDIA GeForce RTX 4060 Laptop', 8188, (8, 9))
+    check('a default that cannot run is replaced by the card\'s proven profile',
+          picked == 'z-image turbo' and note and 'does not fit' in note, (picked, note))
+    kept, no_note = d.pick_profile('flux2 klein 9b uncensored', 'NVIDIA GeForce RTX 5070', 12227, (12, 0))
+    check('a default that fits is left alone, with no note', kept == 'flux2 klein 9b uncensored' and no_note is None,
+          (kept, no_note))
+
     print('\n-- an unknown card says so')
     check('an unmeasured card returns no profile', d.best_for('nvidia-unknown') is None)
     text = d.advise('NVIDIA GeForce RTX 3090', 24576, (8, 6))

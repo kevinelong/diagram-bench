@@ -154,6 +154,11 @@ ZOOM_DEFAULT = '100%'
 STRENGTH_MIN = 0.20    # below this a base is barely read at all; above STRENGTH_MAX the subject is gone
 STRENGTH_MAX = 0.95
 STRENGTH_STEP = 0.01   # the arrows and Up/Down: the precise control
+#: What the two ends of the strength slider mean, in words - a percentage does not say which way "more" goes.
+STRENGTH_EXPLAINED = ('How much of the base picture survives.  Low end (20 %): keeps the base - its composition and pose '
+                      'are kept and the prompt changes details (below 0.60 an instruction usually moves the props, not '
+                      'the pose).  High end (95 %): replaces it - the prompt decides everything and above about 0.85 the '
+                      'subject of the base is usually gone.')
 STRENGTH_DETENT = 0.05  # the slider: it settles on these, so a drag is repeatable
 ZOOM_MARGIN = 6        # the gap between the picture and the canvas edge; the top-right pin has always used it
 ZOOM_STEP = 48         # canvas pixels per wheel notch and per arrow press
@@ -3050,10 +3055,25 @@ class App:
         self.save_style_btn.pack(side='left', padx=(4, 0))
         # the checkpoint is a first-class choice, not an Advanced secret: picking one costs a model reload
         ttk.Label(stylerow, text='model').pack(side='left', padx=(10, 4))
-        self.model_var = tk.StringVar(value=self._settings.get('model') or zg.DEFAULT_MODEL)
+        # What this machine can run, from the measured table (`deployments.py`). The default model used to be the same
+        # string everywhere, and on an 8 GiB card that string is a profile whose measured peak is 8,837 MiB: it cannot run
+        # at all. `pick_profile` leaves the default alone when it fits and moves it with a reason when it does not.
+        import deployments as _deploy
+        self._card = _deploy._this_card()
+        self._card_key = _deploy.card_key(*self._card)
+        # A profile's ceiling was being written into settings on close, so a 4-step model silently turned the next 9-step
+        # session into 4 (found on the 4060 box, 2026-11-02). Steps are remembered per profile instead, and the global
+        # `steps` key stays as the fallback for settings files written before this.
+        self._steps_by_model = {str(k): str(v) for k, v in (self._settings.get('steps_by_model') or {}).items()}
+        wanted = self._settings.get('model') or zg.DEFAULT_MODEL
+        self._model_default, self._model_note = _deploy.pick_profile(wanted, *self._card)
+        self.model_var = tk.StringVar(value=self._model_default)
         self.model_cb = ttk.Combobox(stylerow, textvariable=self.model_var, width=14, state='readonly',
                                      values=[name for name, prof in zg.MODELS.items()
-                                             if prof.get('in_picker', True)] + [zg.ALL_MODEL])
+                                             if prof.get('in_picker', True)
+                                             and _deploy.fits(name, *self._card) is not False] + [zg.ALL_MODEL])
+        if self._model_note:
+            self._later(600, lambda note=self._model_note: self.hint.configure(text=note))
         self.model_cb.pack(side='left')
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
@@ -3113,15 +3133,23 @@ class App:
         self.strength_scale = ttk.Scale(self.strength, from_=STRENGTH_MIN, to=STRENGTH_MAX,
                                         command=self._on_strength_move)
         self.strength_scale.pack(fill='x', expand=True)
+        self._tip(self.strength_scale, STRENGTH_EXPLAINED)
+        # The readout follows the variable whoever writes it: `set_strength` renders itself, but a style proposal, a
+        # settings load or a test writes `denoise` directly. This line went missing in an edit that removed a caption row,
+        # and no check caught it because every other path calls `set_strength`.
         self.denoise.trace_add('write', lambda *a: self._render_strength())
-        self._render_strength()          # the readout, the box and the ticks all start from the stored value
-
+        self._render_strength()
         # the two base-image actions share one row directly above Generate: use the shown picture, or forget it.
         # The deliberate gesture that arms an edit lives here, so a click in the strip only ever looks.
         self.base_actions = ttk.Frame(left)
         self.base_actions.grid(row=10, column=0, sticky='ew', pady=(10, 4))
         self.base_actions.columnconfigure(0, weight=1)
         self.base_actions.columnconfigure(1, weight=1)
+        self.base_actions.columnconfigure(2, weight=0)
+        self.view_base_btn = ttk.Button(self.base_actions, text='View base\u2026', command=self.view_base,
+                                        state='disabled')
+        self.view_base_btn.grid(row=0, column=2, sticky='ew', padx=(4, 0))
+        self._tip(self.view_base_btn, 'Every picture the next render will send, with Remove and Clear.')
         self.use_base_btn = ActionButton(self.base_actions, text='Use as Base', command=self.use_as_base,
                                          font=('Segoe UI', 13), bg='#5c6b80', fg='white',
                                          activebackground='#4a5768', activeforeground='white',
@@ -6263,7 +6291,8 @@ class App:
         # corpus statistics, newest first, and marks them so the folder's own membership stays honest.
         try:
             import group_prompts as _gp
-            fresh = _gp.live_append(group, self._plan) if (self._plan and not group.get('synthetic')) else []
+            with timed('pane.live_append'):
+                fresh = _gp.live_append(group, self._plan) if (self._plan and not group.get('synthetic')) else []
         except Exception:
             fresh = []
         fresh_rows = []
@@ -7145,21 +7174,36 @@ class App:
         else:
             self.job_start('scan', 'reading the folder')
         try:
-            everything = self._all_files(
-                rescan=rescan,
-                on_progress=lambda done, total: self.job_progress('scan', done, total))
+            with timed('refresh.all_files'):
+                everything = self._all_files(
+                    rescan=rescan,
+                    on_progress=lambda done, total: self.job_progress('scan', done, total))
         finally:
             self.job_end('scan', '%d pictures' % len(getattr(self, '_scan_rows', []) or []))
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
-        files = self._visible_files()
-        if self._sort_wins():
+        with timed('refresh.visible_files'):
+            files = self._visible_files()
+        # Ranking 2 400 pictures is 270-410 ms (measured on the real gallery) and a folder click does not change the
+        # ranks: the cache is keyed by the scope (which folder) and the set, so re-scoping reuses the order instead of
+        # recomputing it. Any write path (a new render, a review decision) goes through a full refresh and misses it.
+        # Keyed by the *set*, not by the open folder: `_active_folder` changes on every click, so including it made the
+        # cache miss every time and the ranking still cost 480-530 ms (measured after the first version of this).
+        ranking_key = (self._sort_wins(), self._sort_sequence(),
+                       len(files), files[0].name if files else '', files[-1].name if files else '')
+        cached_rank = getattr(self, '_rank_cache', None)
+        if cached_rank is not None and cached_rank[0] == ranking_key and len(cached_rank[1]) == len(files):
+            files = list(cached_rank[1])
+        elif self._sort_wins():
             import pair_rank
-            files = pair_rank.sort_by_wins(files)
+            with timed('refresh.sort_wins'):
+                files = pair_rank.sort_by_wins(files)
         elif self._sort_sequence():
-            files = self._sequence_order(files)
+            with timed('refresh.sequence_order'):
+                files = self._sequence_order(files)
+        self._rank_cache = (ranking_key, list(files))
         self._files = files
         # a search turns the strip into a result list, so it shows matches from the whole folder, not 18 of them
         filtering = bool(self.search_var.get().strip()) or bool(self.starred_only.get())
@@ -7545,6 +7589,13 @@ class App:
         model, and a control that looks editable but is not is worse than one that says so.
         """
         choice = self.model_var.get()
+        previous = getattr(self, '_model_now', None)
+        if previous and previous != choice and previous != zg.ALL_MODEL:
+            try:
+                self._steps_by_model[previous] = str(int(self.steps_var.get()))
+            except (TypeError, ValueError):
+                pass
+        self._model_now = choice
         if choice == zg.ALL_MODEL:
             plan = zg.all_plan()
             self.size_var.set(str(zg.QUALITY_SIZE))
@@ -7565,7 +7616,17 @@ class App:
             self._clamp_steps(choice, asked)
         prof = zg.MODELS.get(choice) or {}
         top = prof.get('max_steps') or prof.get('steps')
-        if top:
+        # what this profile was last set to, not its ceiling: the ceiling is a limit, not a preference
+        remembered = self._steps_by_model.get(choice)
+        if remembered:
+            try:
+                asked_here = int(remembered)
+                self._clamp_steps(choice, asked_here)
+                self.steps_var.set(str(asked_here))
+            except (TypeError, ValueError):
+                if top:
+                    self.steps_var.set(str(top))
+        elif top:
             self.steps_var.set(str(top))
         self._update_banner()
         self.hint.configure(text='%s: %s steps (its maximum) at cfg %.1f - the first image loads that checkpoint, '
@@ -7729,6 +7790,8 @@ class App:
         except Exception:
             return
         if hasattr(self, 'denoise_text'):
+            # Plain percentage: an attempt to append the meaning ("70% - mixing") left the label stuck at its first value,
+            # because this render runs before the window is complete. The ends are explained by the two tooltips instead.
             self.denoise_text.configure(text='%d%%' % round(v * 100))
         if hasattr(self, 'strength_scale'):
             try:
@@ -9531,8 +9594,9 @@ class App:
         self._base_from_gallery = from_gallery
         self.base_path = Path(path)
         self.base_label.configure(text=self._short_name(self.base_path.name))
-        if hasattr(self, 'clear_base_btn'):
-            self.clear_base_btn.state(['!disabled'])
+        for name in ('clear_base_btn', 'view_base_btn'):
+            if hasattr(self, name):
+                getattr(self, name).state(['!disabled'])
         if self._base_tip is None:
             self._base_tip = self._tip(self.base_label, '')
         self._base_tip.text = self.base_path.name
@@ -9741,6 +9805,84 @@ class App:
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
 
+    def base_items(self):
+        """[(role, path)] for every picture the next render will send - the base first, then the references.
+
+        One base plus several references is what "Use as Base" with a multi-selection arms, and until now there was no way
+        to see them together before spending a minute on a render, nor to drop one of them without clearing all.
+        """
+        items, seen = [], set()
+        if getattr(self, 'base_path', None):
+            items.append(('base', Path(self.base_path)))
+            seen.add(Path(self.base_path).name)
+        for extra in (getattr(self, '_bases', None) or []):
+            path = Path(extra)
+            if path.name not in seen:
+                items.append(('reference', path))
+                seen.add(path.name)
+        return items
+
+    def drop_from_base(self, path):
+        """Remove one picture from the base, or clear the base when it is the base itself."""
+        name = Path(path).name
+        if getattr(self, 'base_path', None) and Path(self.base_path).name == name:
+            self.clear_base()
+            return 'base cleared'
+        self._bases = [p for p in (getattr(self, '_bases', None) or []) if Path(p).name != name]
+        left = len(self.base_items())
+        self.hint.configure(text='%s removed - %d picture%s will be sent' % (name, left, '' if left == 1 else 's'))
+        self._paint()
+        return name
+
+    def view_base(self):
+        """Every picture that will be sent, large, with a way to drop one or clear the lot.
+
+        Asked for on 2026-11-02: "use base" and "clear base" should have a "view base" to see all of the files included
+        full screen, with options from there to remove or clear.
+        """
+        items = self.base_items()
+        win = self._closing_raises_main(tk.Toplevel(self.root))
+        self._later(30, self._retitle, win)
+        win.title('Base - %d picture%s will be sent' % (len(items), '' if len(items) == 1 else 's'))
+        win.geometry('900x560')
+        body = ttk.Frame(win, padding=8)
+        body.pack(fill='both', expand=True)
+
+        def rebuild():
+            for child in body.winfo_children():
+                child.destroy()
+            current = self.base_items()
+            if not current:
+                ttk.Label(body, text='Nothing is armed: text to image.', foreground=self.theme.muted).pack(anchor='w')
+                buttons.state(['disabled'])
+                return
+            buttons.state(['!disabled'])
+            for role, path in current:
+                row = ttk.Frame(body)
+                row.pack(fill='x', pady=4)
+                thumb = thumb_for(path)
+                photo = self._photo_of(thumb, 220, key=path) if thumb else None
+                if photo is not None:
+                    label = tk.Label(row, image=photo, bd=1, relief='solid')
+                    label.image = photo
+                else:
+                    label = ttk.Label(row, text='(no thumbnail)')
+                label.pack(side='left')
+                side = ttk.Frame(row)
+                side.pack(side='left', fill='both', expand=True, padx=(10, 0))
+                ttk.Label(side, text=path.name, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+                ttk.Label(side, text=role + (' - sent as the edit base' if role == 'base' else ' - sent as a reference'),
+                          foreground=self.theme.muted).pack(anchor='w')
+                ttk.Button(side, text='Remove this one',
+                           command=lambda p=path: (self.drop_from_base(p), rebuild())).pack(anchor='w', pady=(6, 0))
+
+        buttons = ttk.Frame(win, padding=(8, 0, 8, 8))
+        buttons.pack(fill='x')
+        ttk.Button(buttons, text='Clear base', command=lambda: (self.clear_base(), rebuild())).pack(side='left')
+        ttk.Button(buttons, text='Close', command=win.destroy).pack(side='right')
+        rebuild()
+        return win
+
     def clear_base(self):
         self.base_path = None
         # The strength someone chose belongs to the base it was chosen for (a slider drag, a typed number, or vary()). With
@@ -9748,8 +9890,9 @@ class App:
         # a strength at all after a variation run.
         self._strength_touched = False
         self._bases = []                 # the other references go with it, or a later render would still combine them
-        if hasattr(self, 'clear_base_btn'):
-            self.clear_base_btn.state(['disabled'])
+        for name in ('clear_base_btn', 'view_base_btn'):
+            if hasattr(self, name):
+                getattr(self, name).state(['disabled'])
         self._base_from_gallery = False
         self.base_label.configure(text='(none - text to image)')
         self.hint.configure(text='')
@@ -10019,7 +10162,13 @@ class App:
 
     # -- persistence, starters, prompt history -------------------------------
     def _persist(self):
+        try:
+            if getattr(self, '_model_now', None) and self._model_now != zg.ALL_MODEL:
+                self._steps_by_model[self._model_now] = str(int(self.steps_var.get()))
+        except (TypeError, ValueError):
+            pass
         self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
+                          'steps_by_model': dict(getattr(self, '_steps_by_model', {})),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),
                           'rephrase_intensity': self.rephrase_intensity.get(),

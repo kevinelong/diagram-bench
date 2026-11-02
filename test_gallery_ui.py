@@ -631,11 +631,15 @@ def main():
     app._plan, app._active_folder, app._content_items = saved_plan, saved_active, saved_items
 
     print('\n-- strength: a full-width slider with 5 % detents, arrows, and a number you can type')
+    check('the strength control explains both ends in words',
+          'keeps the base' in zui.STRENGTH_EXPLAINED and 'replaces it' in zui.STRENGTH_EXPLAINED,
+          zui.STRENGTH_EXPLAINED[:80])
     check('the slider fills the column',
           app.strength_scale.pack_info().get('fill') == 'x' and bool(int(app.strength_scale.pack_info().get('expand') or 0)),
           app.strength_scale.pack_info())
     app.set_strength(0.70, snap=False)
-    check('the readout, the box and the value agree', (app.denoise_text['text'], app.strength_entry_var.get()) == ('70%', '70'),
+    check('the readout, the box and the value agree',
+          app.denoise_text['text'] == '70%' and app.strength_entry_var.get() == '70',
           (app.denoise_text['text'], app.strength_entry_var.get()))
     app._on_strength_move('0.234')
     check('the slider lands on the 5 % detent, not on what the pointer said', app.denoise.get() == 0.25,
@@ -673,6 +677,54 @@ def main():
     check('and with the box left, it does follow', app.strength_entry_var.get() == '33', app.strength_entry_var.get())
     app.set_strength(0.70)      # leave the window as it found it: later checks assert the default ...
     app._strength_touched = False   # ... including that a style may still propose its own strength
+
+    print('\n-- View base lists every picture that will be sent, and can drop one')
+    # Armed from the gallery's own files: a base outside it is deliberately cleared by the next refresh ("a deleted or
+    # moved file must not stay selected"), which is what made the first version of this test arm and lose three pictures.
+    gallery_files = [Path(p) for p in app._files[:3]]
+    if len(gallery_files) == 3:
+        app._bases = [str(p) for p in gallery_files]
+        app._set_base(gallery_files[0]); root.update()
+        items = app.base_items()
+        check('the base and its references are all listed, without duplicates',
+              len(items) == 3 and items[0][0] == 'base', items)
+        check('the button is enabled once something is armed', 'disabled' not in app.view_base_btn.state(),
+              app.view_base_btn.state())
+        win = app.view_base()
+        root.update()
+        check('the window opens with a title that says how many will be sent',
+              '3 picture' in win.title(), win.title())
+        app.drop_from_base(gallery_files[1])
+        check('dropping a reference leaves the others', len(app.base_items()) == 2,
+              [p for _r, p in app.base_items()])
+        app.drop_from_base(app.base_path)
+        check('dropping the base itself clears the base', app.base_path is None, app.base_path)
+        win.destroy(); root.update()
+        app._bases = []
+
+    print('\n-- each profile remembers its own step count')
+    models = [m for m in zui.zg.MODELS]
+    if len(models) >= 2:
+        first, second = models[0], models[1]
+        app.model_var.set(first); app._on_model_change(); root.update()
+        app.steps_var.set('9'); root.update()
+        app.model_var.set(second); app._on_model_change(); root.update()
+        second_steps = app.steps_var.get()
+        app.model_var.set(first); app._on_model_change(); root.update()
+        check('coming back to a profile restores the steps it was left at, not its ceiling',
+              app.steps_var.get() == '9', (app.steps_var.get(), second_steps))
+        check('and the other profile kept its own number', isinstance(second_steps, str) and second_steps.isdigit(),
+              second_steps)
+        saved = dict(getattr(app, '_steps_by_model', {}))
+        check('both are remembered separately', saved.get(first) == '9' and second in saved, saved)
+        app._persist()
+        check('and the map is what gets written to settings',
+              isinstance(app._settings.get('steps_by_model'), dict)
+              and app._settings['steps_by_model'].get(first) == '9',
+              app._settings.get('steps_by_model'))
+        # leave the window as this block found it: later checks assert the defaults
+        app.model_var.set(zui.zg.DEFAULT_MODEL); app._on_model_change()
+        app.steps_var.set('4'); app._steps_by_model.clear(); root.update()
 
     print('\n-- long jobs announce themselves while they run')
     app.job_start('probe', 'reading the folder', total=100)
@@ -1172,7 +1224,12 @@ def main():
     check('and says it is the maximum', 'maximum' in app.hint['text'] and 'cfg 1.0' in app.hint['text'],
           app.hint['text'])
     app.model_var.set('z-image turbo'); app._on_model_change()
-    check('switching back applies the other ceiling', app.steps_var.get() == '9', app.steps_var.get())
+    # Since 2026-11-02 a profile comes back with the number it was left at; its ceiling is the fallback when nothing was
+    # remembered. The old assertion expected the ceiling unconditionally, which is what silently turned 9 steps into 4.
+    expected_z = app._steps_by_model.get('z-image turbo') or str(
+        zui.zg.MODELS['z-image turbo'].get('max_steps') or zui.zg.MODELS['z-image turbo'].get('steps'))
+    check('switching back restores that profile\'s own number', app.steps_var.get() == expected_z,
+          (app.steps_var.get(), expected_z, dict(app._steps_by_model)))
     app.style_var.set('none')
     app.negative.delete('1.0', 'end')
     app.busy = False
