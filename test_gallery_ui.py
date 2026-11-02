@@ -610,6 +610,26 @@ def main():
     check('a start that succeeds says so and the run continues',
           any('started - continuing' in s for s in said3), said3[:4])
 
+    print('\n-- a folder is paired by what the pane shows, not only by what the plan absorbed')
+    # Deterministic, not guarded on the suite's state at this point: a plan whose folder holds one picture, and a pane
+    # offering five - the shape a folder has right after renders, which reported "only one picture - nothing to pair".
+    saved_plan, saved_active, saved_items = app._plan, app._active_folder, getattr(app, '_content_items', None)
+    one = [{'path': p, 'created': '2026-10-01T00:00:00'} for p in app._files[:1]] or [{'path': 'a.png'}]
+    five = [dict(path=p, created='2026-11-01T00:00:00') for p in app._files[:5]] or [{'path': 'x%d.png' % i} for i in range(5)]
+    app._plan = {'groups': [{'label': 'fresh folder', 'items': one}]}
+    app._active_folder = 0
+    app._content_items = five
+    label, paths = app.review_paths()
+    check('the review counts every picture the pane is showing, not just the plan\'s',
+          len(paths) == len(five), (len(paths), len(five)))
+    check('so a folder of fresh renders is not reported as a single picture', len(paths) > 1, len(paths))
+    # one picture selected inside a folder of many: pair the folder rather than refuse (policy, no window needed)
+    app._content_items = five
+    label, pair, fell_back = app._review_pairing(paths=[five[0]['path']])
+    check('a one-picture review falls back to its folder instead of refusing',
+          fell_back and len(pair) >= 2, (fell_back, len(pair)))
+    app._plan, app._active_folder, app._content_items = saved_plan, saved_active, saved_items
+
     print('\n-- strength: a full-width slider with 5 % detents, arrows, and a number you can type')
     check('the slider fills the column',
           app.strength_scale.pack_info().get('fill') == 'x' and bool(int(app.strength_scale.pack_info().get('expand') or 0)),
@@ -653,6 +673,26 @@ def main():
     check('and with the box left, it does follow', app.strength_entry_var.get() == '33', app.strength_entry_var.get())
     app.set_strength(0.70)      # leave the window as it found it: later checks assert the default ...
     app._strength_touched = False   # ... including that a style may still propose its own strength
+
+    print('\n-- long jobs announce themselves while they run')
+    app.job_start('probe', 'reading the folder', total=100)
+    app.job_progress('probe', 25)
+    text = app.jobs_view.cget('text')
+    check('a running job shows its fraction, percentage and elapsed time',
+          '25/100' in text and '25%' in text and '\u25cf' in text, text)
+    app.job_progress('probe', 25, note='counting sidecars')
+    check('and a note reaches the line', 'counting sidecars' in app.jobs_view.cget('text'),
+          app.jobs_view.cget('text'))
+    app.job_end('probe', '2400 pictures')
+    text = app.jobs_view.cget('text')
+    check('a finished job says so and how much it did', '\u2713' in text and '2400 pictures' in text, text)
+    app._jobs['probe']['end'] -= 10          # older than the linger window
+    app._render_jobs()
+    check('and it leaves the board after a moment', '2400 pictures' not in app.jobs_view.cget('text'),
+          app.jobs_view.cget('text'))
+    check('the board costs no layout row: it is drawn over the picture area',
+          app.jobs_panel.master is app.canvas.master and int(app.jobs_panel.grid_info().get('row', -1)) == 0,
+          (app.jobs_panel.master is app.canvas.master, app.jobs_panel.grid_info()))
 
     print('\n-- the API summary and the explanation can be selected and copied')
     check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))

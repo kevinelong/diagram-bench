@@ -3290,6 +3290,17 @@ class App:
         self.canvas = tk.Canvas(right, background=self.theme.window, highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky='nsew')
 
+        # The startup work is long and parallel - the server takes ~25 s to answer, the folder holds thousands of sidecars,
+        # and grouping is a third pass - so the window used to look dead while all of it happened. This sits over the
+        # picture area (grid on top of the canvas, no extra row), lists every job that is running, and updates while they
+        # do. It is the immediate feedback: something moves within a second of the window opening.
+        self.jobs_panel = ttk.Frame(right)
+        self.jobs_panel.grid(row=0, column=0, sticky='n', pady=(14, 0))
+        self.jobs_view = tk.Label(self.jobs_panel, text='', justify='left', anchor='n',
+                                  font=('Consolas', 10), fg=self.theme.muted,
+                                  bg=ttk.Style().lookup('TFrame', 'background') or None)
+        self.jobs_view.pack()
+
         self.canvas.bind('<Configure>', lambda e: self._redraw())
         self.canvas.bind('<Button-1>', self._on_canvas_click)
         self.canvas.bind('<B1-Motion>', self._on_crop_drag, add='+')
@@ -3539,6 +3550,92 @@ class App:
         except Exception as e:
             self.hint.configure(text='could not write the profile: %s: %s' % (type(e).__name__, e))
             return None
+
+    # ---- background jobs: what is running, for how long, how far ------------------------------------------------
+    def job_start(self, key, label, total=None, note=''):
+        """Register a long job so the window says something is happening, from the first second.
+
+        There are three of them at startup and they run in parallel: the ComfyUI probe/start (~25 s), the walk of the
+        gallery (thousands of sidecars) and the grouping pass. None of them used to show anything but a single status line
+        that the next message overwrote.
+        """
+        if not hasattr(self, '_jobs'):
+            self._jobs = {}
+        self._jobs[key] = {'label': label, 'total': total, 'done': 0, 't0': time.time(), 'end': None, 'note': note}
+        self._render_jobs()
+        self._schedule_jobs_tick()
+
+    def job_progress(self, key, done=None, total=None, note=None):
+        job = getattr(self, '_jobs', {}).get(key)
+        if job is None:
+            return
+        if total is not None:
+            job['total'] = total
+        if done is not None:
+            job['done'] = done
+        if note is not None:
+            job['note'] = note
+        self._render_jobs()
+
+    def job_end(self, key, note=''):
+        job = getattr(self, '_jobs', {}).get(key)
+        if job is None:
+            return
+        job['end'] = time.time()
+        job['note'] = note
+        self._render_jobs()
+
+    def _schedule_jobs_tick(self):
+        if getattr(self, '_jobs_ticking', False):
+            return
+        self._jobs_ticking = True
+
+        def tick():
+            self._jobs_ticking = False
+            self._render_jobs()
+            if any(j['end'] is None for j in getattr(self, '_jobs', {}).values()):
+                self._later(400, self._schedule_jobs_tick)
+
+        self._later(400, tick)
+
+    def _render_jobs(self):
+        """One line per job: a spin for elapsed time, a fraction and a percentage when a total is known."""
+        view = getattr(self, 'jobs_view', None)
+        if view is None:
+            return
+        now = time.time()
+        lines, live = [], False
+        for key, job in list(getattr(self, '_jobs', {}).items()):
+            if job['end'] is not None and now - job['end'] > 4.0:
+                del self._jobs[key]                      # a finished job lingers for a moment, then goes
+                continue
+            elapsed = (job['end'] or now) - job['t0']
+            if job['end'] is not None:
+                lines.append('\u2713 %s%s  %.0fs' % (job['label'], (' - ' + job['note']) if job['note'] else '', elapsed))
+            elif job['total']:
+                live = True
+                pct = min(99, int(100.0 * job['done'] / max(1, job['total'])))
+                lines.append('\u25cf %s  %d/%d  %d%%  %.0fs%s' % (
+                    job['label'], job['done'], job['total'], pct, elapsed,
+                    ('  ' + job['note']) if job['note'] else ''))
+            else:
+                live = True
+                done = job['done'] or 0
+                lines.append('\u25cf %s  %s%0.0fs%s' % (
+                    job['label'], ('%d  ' % done) if done else '', elapsed,
+                    ('  ' + job['note']) if job['note'] else ''))
+        try:
+            if lines:
+                view.configure(text='\n'.join(lines))
+                self.jobs_panel.grid()
+                self.jobs_panel.lift()
+            else:
+                view.configure(text='')
+                self.jobs_panel.grid_remove()
+        except Exception:
+            pass
+        if live:
+            self._schedule_jobs_tick()
 
     def _copyable(self, widget, get_text):
         """Right-click Copy on a one-line label.
@@ -3815,7 +3912,7 @@ class App:
         except OSError:
             return True
 
-    def _scan(self, recursive=None):
+    def _scan(self, recursive=None, on_progress=None):
         """(path, mtime) for every picture in the *source*, newest first.
 
         The source is what the window looks at; `args.out` is where renders are written. They are the same folder by
@@ -3847,6 +3944,8 @@ class App:
                                     continue           # the same file through two paths (junction, symlink)
                                 seen.add(real)
                                 rows.append((Path(entry.path), entry.stat().st_mtime))
+                                if on_progress is not None and len(rows) % 200 == 0:
+                                    on_progress(len(rows), None)
                         except OSError:
                             continue
             except OSError:
@@ -3867,15 +3966,35 @@ class App:
         except OSError:
             return []
         rows.sort(key=lambda r: -r[1])
+        if on_progress is not None:
+            on_progress(len(rows), len(rows) or None)
         self._meta_mtimes = meta_mtimes      # a sidecar edit must invalidate the search cache too
         return rows
 
-    def _all_files(self, rescan=True):
-        """Every picture in the source. `rescan=False` reuses the last walk: opening a folder changes what is *shown*,
-        not what is on disk, and the walk costs 0.7-1.6 s on the real gallery (measured)."""
-        rows = self._scan() if rescan else (getattr(self, '_scan_rows', None) or self._scan())
+    def _scan_cached(self, rescan=True, on_progress=None):
+        """The last walk of the source, reused while the folder's own mtime says nothing was added or removed.
+
+        Reusing it blindly was wrong: a file deleted between two refreshes stayed in the cached rows and the next step
+        statted it - the suite caught exactly that. The directory's mtime is one stat, and it changes on add or remove,
+        which is the only thing this cache is about. Without the cache a folder click costs 0.6-0.8 s on 2 400 pictures.
+        """
+        out = Path(getattr(self, '_source', None) or self.args.out)
+        try:
+            stamp = out.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        cached = getattr(self, '_scan_cache', None)
+        if not rescan and cached is not None and cached[0] == stamp and cached[1] is not None:
+            self._scan_rows = cached[1]
+            return cached[1]
+        rows = self._scan(on_progress=on_progress)
+        self._scan_cache = (stamp, rows)
         self._scan_rows = rows
-        return [p for p, _m in rows]
+        return rows
+
+    def _all_files(self, rescan=True, on_progress=None):
+        """Every picture in the source. `rescan=False` reuses the last walk, validated by the folder's mtime."""
+        return [p for p, _m in self._scan_cached(rescan, on_progress=on_progress)]
 
     def _tile_widget(self, parent, path, thumb, size=52, browser=False, pane=False):
         # A tile is a tab stop, not a mouse target. `takefocus` puts it in the Tab order in the order it was created,
@@ -4938,7 +5057,27 @@ class App:
         if index is None:
             index = max(range(len(self._plan['groups'])), key=lambda i: len(self._plan['groups'][i]['items']))
         group = self._plan['groups'][index]
+        # The pane adds the pictures the plan has not absorbed yet (`live_append`: a render written while this folder is
+        # open is offered to it before the next grouping). Reading `items` alone made a folder full of fresh renders report
+        # "that folder has only one picture - nothing to pair", because only the one planned member was counted.
+        if index == getattr(self, '_active_folder', None):
+            shown = [r.get('path') if isinstance(r, dict) else str(r)
+                     for r in (getattr(self, '_content_items', None) or [])]
+            shown = [str(x) for x in shown if x]
+            if len(shown) > len(group.get('items') or []):
+                return (group.get('label') or 'folder'), shown
         return (group.get('label') or 'folder'), [r['path'] for r in group.get('items') or []]
+
+    def _review_pairing(self, index=None, paths=None):
+        """What an A/B review will pair, and whether it had to fall back. Policy, separated so it can be tested without a
+        window: one picture selected inside a folder of many is paired with its folder instead of being refused, and the
+        caller says so."""
+        label, paths = self.review_paths(index=index, paths=paths)
+        if paths is not None and len(paths) == 1 and self._active_folder is not None:
+            folder_label, folder_paths = self.review_paths()
+            if len(folder_paths) > 1:
+                return folder_label, folder_paths, True
+        return label, paths, False
 
     def review_pane(self):
         """A/B review the pane's selection, or the whole open folder when nothing is selected."""
@@ -4959,7 +5098,9 @@ class App:
             self.hint.configure(text='folders are still being worked out - try again in a moment' if busy
                                 else 'turn folders on first - A/B review works inside a prompt folder')
             return
-        label, paths = self.review_paths(index=index, paths=paths)
+        label, paths, fell_back = self._review_pairing(index=index, paths=paths)
+        if fell_back:
+            self.hint.configure(text='one picture was selected - pairing its folder instead')
         if not paths:
             self.hint.configure(text='no pictures to pair here')
             return
@@ -5753,7 +5894,7 @@ class App:
         """
         # `_refresh_gallery` has usually just walked the source; a second identical walk here was half of the 1.1 s a
         # folder click used to cost (measured: refresh 1 103 ms inside a 1 104 ms click handler).
-        rows = rows if rows is not None else (getattr(self, '_scan_rows', None) or self._scan())
+        rows = rows if rows is not None else self._scan_cached(False)
         files = [p for p, _m in rows]
         # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
         # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
@@ -6071,10 +6212,19 @@ class App:
 
     @timed_panel('render_contents')
     def _build_contents(self):
-        """The expensive half of opening a folder, one event-loop turn after the acknowledgement."""
+        """The expensive half of opening a folder, one event-loop turn after the acknowledgement.
+
+        Deferred, so it runs later than the click that asked for it - which means the folder can have changed underneath
+        it (a picture deleted, the plan replaced, the window closing). A failed rebuild is logged and dropped: an event-loop
+        callback that raises takes the application down with it, and a pane that is one repaint stale is not worth that.
+        """
         started = time.perf_counter()
         try:
+            if getattr(self, '_closing', False) or not self._alive():
+                return
             self._render_contents()
+        except Exception as e:
+            log_error('folder pane rebuild', e)
         finally:
             PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
 
@@ -7044,12 +7194,21 @@ class App:
         # stays. `_heads` (the composed sheets) is still cleared, because wins and ordering can change without a pixel
         # changing.
         self._heads = {}
-        everything = self._all_files(rescan=rescan)
+        if not rescan:
+            self.job_start('scan', 'reading the folder', note='from the last walk')
+        else:
+            self.job_start('scan', 'reading the folder')
+        try:
+            everything = self._all_files(
+                rescan=rescan,
+                on_progress=lambda done, total: self.job_progress('scan', done, total))
+        finally:
+            self.job_end('scan', '%d pictures' % len(getattr(self, '_scan_rows', []) or []))
         if self.base_path is not None and not any(f.name == self.base_path.name for f in everything):
             self.clear_base()
         # a deleted or moved file must not stay selected
         self.selected = [p for p in self.selected if any(f.name == Path(p).name for f in everything)]
-        files = self._visible_files(rows=getattr(self, '_scan_rows', None))
+        files = self._visible_files()
         if self._sort_wins():
             import pair_rank
             files = pair_rank.sort_by_wins(files)
@@ -7077,7 +7236,9 @@ class App:
             # painted a page of pictures with folders ticked, and they looked like the view rather than a placeholder
             # ("I was not expecting images in the first column at all in the initial folders enabled state",
             # 2026-10-31). Folders ticked means no pictures, whatever the worker is doing.
-            self.gal_title.configure(text='Grouping prompts\u2026  \u00b7  %d pictures' % len(files))
+            # Plain and true: it clusters the prompt text, it does not look at the pictures. "Categorizing images" would
+            # promise content analysis this never does; "grouping pictures by prompt" says what happens.
+            self.gal_title.configure(text='Grouping pictures by prompt\u2026  \u00b7  %d' % len(files))
             for w in self.recent.winfo_children():
                 w.destroy()
             self._tile_widgets = {}
@@ -10479,6 +10640,8 @@ class App:
                 elif kind == 'enhance_failed':
                     self.hint.configure(text='enhance failed: %s' % payload)
                 elif kind == 'groups':
+                    for key in ('group', 'scan'):
+                        self.job_end(key)
                     # posted by _compute_groups on this queue (the engine's queue is a different one, which is why
                     # this branch sat unreachable for a while and the plan never arrived)
                     self._apply_plan(payload)
@@ -10494,6 +10657,12 @@ class App:
                         self.load_meter.set(frac, stage, detail)
                     except Exception:
                         pass
+                    # the grouping pass is threaded and already reports (fraction, stage): the board is where that
+                    # becomes visible while it runs, instead of one status line that the next message overwrites
+                    total = 100
+                    self.job_start('group', stage or 'grouping prompts', total=total)
+                    self.job_progress('group', int(round(100 * float(frac or 0))), total=total,
+                                      note=(detail or ''))
                 elif kind == 'upscaled':
                     path, used, factor = payload
                     try:
@@ -10531,6 +10700,16 @@ class App:
                 kind, payload = self.engine.events.get_nowait()
                 if kind == 'status':
                     self.status.configure(text=payload)
+                    text = str(payload or '')
+                    if 'starting ComfyUI' in text:
+                        self.job_start('comfy', 'starting ComfyUI', note='~25 s')
+                    elif 'using the server already' in text:
+                        self.job_start('comfy', 'ComfyUI')
+                        self.job_end('comfy', 'already running')
+                    elif text.startswith('server ready'):
+                        self.job_end('comfy', 'ready')
+                    elif 'did not start' in text or text.startswith('no server on port'):
+                        self.job_end('comfy', 'not started')
                 elif kind == 'ready':
                     self.retry_btn.grid_remove()
                     self.busy = False
