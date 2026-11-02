@@ -1893,6 +1893,14 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### Comparing two machines (2026-11-02)
+
+[MACHINES-2026-11-02.md](MACHINES-2026-11-02.md) is what a comparison between this desktop and the RTX 4060 laptop has
+to record to mean anything: the UI interaction latencies against the 0.1 / 1 / 10 s budgets (`folder_click_ack`,
+`folder_click_to_pane`, `render_contents`, `apply_strip_resize`, `refresh_gallery`), the LLM numbers that a reader actually
+feels (TTFT, decode tok/s **with the context length**, peak VRAM), the figures already measured here, the blanks on the
+laptop (its CPU, RAM and token rates are simply not recorded), and the protocol to fill them.
+
 ### What is still open (2026-10-30)
 
 [PLAN-OPEN-20261030.md](PLAN-OPEN-20261030.md) is the tracked list: native parity that is started and not finished, the
