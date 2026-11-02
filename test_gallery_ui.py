@@ -748,6 +748,23 @@ def main():
         win.destroy(); root.update()
         app._bases = []
 
+    print('\n-- unfiled is pinned first in the folders list (asked 2026-11-02)')
+    # A pure function, so this cannot skip on whatever state the window happens to be in.
+    sample = zui.with_synthetic_head({'groups': [{'label': 'a family', 'items': [{'path': 'f.png'}]}],
+                                      'recent': [{'path': 'r.png'}], 'ungrouped': [{'path': 'u.png'}]})
+    labels = [g['label'] for g in sample['groups']]
+    check('unfiled leads, Recent follows, then the families', labels == ['unfiled (1)', 'Recent (1)', 'a family'],
+          labels)
+    check('with unfiled absent, Recent still leads',
+          [g['label'] for g in zui.with_synthetic_head({'groups': [], 'recent': [{'path': 'r.png'}],
+                                                        'ungrouped': []})['groups']] == ['Recent (1)'])
+    check('and with Recent absent, unfiled leads',
+          [g['label'] for g in zui.with_synthetic_head({'groups': [], 'recent': [],
+                                                        'ungrouped': [{'path': 'u.png'}]})['groups']] == ['unfiled (1)'])
+    check('neither tile is ever named after a family, both say they are synthetic',
+          all(g.get('synthetic') for g in sample['groups'][:2] if not g['label'].startswith('a family')),
+          [(g['label'], g.get('synthetic')) for g in sample['groups'][:2]])
+
     print('\n-- clicking a picture with no recorded prompt does not empty the box (reported 2026-11-02)')
     if app._files:
         scratch = Path(app._files[0]).with_name('no-prompt-recorded.png')
@@ -3179,8 +3196,13 @@ def main():
             if app._plan and app._plan.get('_lexicon'):
                 break
             time.sleep(0.05)
-    if app._plan and app._plan['groups']:
-        sample = app._plan['groups'][0]['items'][0]['prompt']
+    # the first group used to be a family; since 2026-11-02 the unfiled bucket is pinned first, and its pictures have no
+    # prompt - so the sample comes from the first *real* family, which is what this check is about
+    family = next((g for g in ((app._plan or {}).get('groups') or [])
+                   if not g.get('synthetic') and (g.get('items') or []) and (g['items'][0].get('prompt') or '').strip()),
+                  None)
+    if app._plan and app._plan['groups'] and family is not None:
+        sample = family['items'][0]['prompt']
         app.select_folder(None); root.update()
         app.busy = False
         app.text.delete('1.0', 'end')

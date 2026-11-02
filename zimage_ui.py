@@ -2532,6 +2532,27 @@ class SelectableText(ttk.Frame):
         self.text.configure(height=max(1, lines))
 
 
+def with_synthetic_head(plan):
+    """Put the two synthetic tiles at the head of a plan: **unfiled first**, then Recent, then the families.
+
+    Order asked for on 2026-11-02. Unfiled is the bucket you check when a picture seems to have vanished, which made the
+    tail the worst possible place for it; Recent keeps the place it earned next to it. Pure and module-level so the rule
+    can be asserted without a window or a corpus.
+    """
+    unfiled = [row for row in (plan.get('ungrouped') or []) if row.get('path')]
+    recent = [row for row in (plan.get('recent') or []) if row.get('path')]
+    head = []
+    if unfiled:
+        head.append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,
+                     'oldest': None, 'newest': None, 'synthetic': True})
+    if recent:
+        head.append({'label': 'Recent (%d)' % len(recent), 'items': recent,
+                     'oldest': None, 'newest': None, 'synthetic': True})
+    if head:
+        plan['groups'] = head + list(plan.get('groups') or [])
+    return plan
+
+
 class App:
     def __init__(self, root, engine, args):
         self.root, self.engine, self.args = root, engine, args
@@ -4564,14 +4585,7 @@ class App:
             # drawn nowhere - and a gallery younger than that window had no groups at all, which is how a finished render
             # came to be invisible (measured 2026-10-30). They get their own tile, at the head, the way `unfiled` already
             # covers the leftovers at the tail.
-            recent_rows = [row for row in (plan.get('recent') or []) if row.get('path')]
-            if recent_rows:
-                plan['groups'] = [{'label': 'Recent (%d)' % len(recent_rows), 'items': recent_rows,
-                                   'oldest': None, 'newest': None, 'synthetic': True}] + list(plan['groups'])
-            unfiled = [row for row in (plan.get('ungrouped') or []) if row.get('path')]
-            if unfiled:
-                plan.setdefault('groups', []).append({'label': 'unfiled (%d)' % len(unfiled), 'items': unfiled,
-                                                      'oldest': None, 'newest': None, 'synthetic': True})
+            plan = with_synthetic_head(plan)
             plan['seconds'] = round(time.time() - started, 2)
             self._plan_save(plan, signature)
             self.ui_events.put(('groups', plan))
