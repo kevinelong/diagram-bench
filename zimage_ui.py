@@ -785,7 +785,12 @@ GAL_FLOOR_W = STRIP_FIT_W                                      # 510
 # rail is not one of them - it replaces the gallery column when it is shown, it never sits beside it.
 COLUMNS = ('strip', 'pane', 'prompt', 'picture')
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
-PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
+PROMPT_MIN_W = 180    # the prompt column's floor: the narrowest its flowed rows stay usable at (2026-11-02)
+
+# Until 2026-11-02 this was 420, with the note "its combos cannot shrink", and `_prompt_floor()` measured the widest
+# control row and used that as the floor - because Tk's answer to a child that wants more than its column was given is
+# to widen the column. The rows now wrap (`App._flow`) and the column scrolls, so the measurement collapses to the
+# longest single control instead of the sum of a row, and the sash can take the column down to a sliver.
 PICTURE_MIN_W = 283   # the picture column's floor: the width of its action bar, measured 2026-10-30, so the row of
                       # buttons under the picture is never clipped by the sash. Its toolbar row above asks for 501 px and
                       # has always been packed (it clips past 449 today); a floor of 501 would leave the other three
@@ -2936,15 +2941,52 @@ class App:
         self.rail_btn.pack(anchor='n')
         self.rail.grid_remove()
 
-        left = ttk.Frame(root, padding=(10, 10, 6, 10))
-        left.grid(row=0, column=2, sticky='nsew')       # the sash between the gallery and it is column 1
+        # ---- prompt column: scrollable, because a narrow column is taller than the window
+        # The column was a plain frame: narrow it and the rows below the fold were simply off the bottom of the screen
+        # with no way to reach them, while every other pane on this window scrolls. It is a canvas now, with the column
+        # itself inside it - nothing below is re-parented, so every grid row keeps the place it had.
+        self.prompt_col = ttk.Frame(root)
+        self.prompt_col.grid(row=0, column=2, sticky='nsew')   # the sash between the gallery and it is column 1
+        self.prompt_col.columnconfigure(0, weight=1)
+        self.prompt_col.rowconfigure(0, weight=1)
+        self.prompt_canvas = tk.Canvas(self.prompt_col, highlightthickness=0, borderwidth=0, background=plate)
+        self.prompt_canvas.grid(row=0, column=0, sticky='nsew')
+        self.prompt_bar = ttk.Scrollbar(self.prompt_col, orient='vertical', command=self.prompt_canvas.yview)
+        self.prompt_bar.grid(row=0, column=1, sticky='ns')
+        self.prompt_canvas.configure(yscrollcommand=self.prompt_bar.set)
+        left = ttk.Frame(self.prompt_canvas, padding=(10, 10, 6, 10))
+        self._prompt_win = self.prompt_canvas.create_window((0, 0), window=left, anchor='nw')
         left.columnconfigure(0, weight=1)
         left.rowconfigure(1, weight=1)
+
+        def _prompt_scrolled(_e=None):
+            box = self.prompt_canvas.bbox('all') or (0, 0, 0, 0)
+            self.prompt_canvas.configure(scrollregion=box)
+            # the bar appears only when there is something to scroll to, like the panes'
+            tall = box[3] > self.prompt_canvas.winfo_height() + 1
+            if tall and not self.prompt_bar.winfo_ismapped():
+                self.prompt_bar.grid()
+            elif not tall and self.prompt_bar.winfo_ismapped():
+                self.prompt_bar.grid_remove()
+            # the rows were laid out for the width they were built at; now that the column has a real width, wrap again
+            self._reflow_all()
+
+        left.bind('<Configure>', _prompt_scrolled, add='+')
+        self.prompt_canvas.bind('<Configure>',
+                                lambda e: (self.prompt_canvas.itemconfigure(self._prompt_win, width=e.width),
+                                           _prompt_scrolled()), add='+')
+        # The column is 200 px but the frame inside it is as wide as its widest natural child, so the canvas width has to
+        # be pushed in from every direction the column can change - set here as well as on the canvas, because a sash
+        # drag resizes the container before the canvas reports it.
+        self.prompt_col.bind('<Configure>',
+                             lambda e: self.prompt_canvas.itemconfigure(self._prompt_win, width=max(1, e.width)), add='+')
+        self._prompt_scrolled = _prompt_scrolled
+        # the wheel is already routed by `_on_any_wheel` -> `_wheel_owner`, which now answers 'prompt' for this column
 
         ttk.Label(left, text='Prompt  (Enter generates · Shift+Enter adds a line · Ctrl+\u2191/\u2193 recalls)'
                   ).grid(row=0, column=0, sticky='w')
         # a tall minimum height here pushes the rows below it off the bottom of the window once Advanced opens
-        self.text = tk.Text(left, wrap='word', width=48, height=7, undo=True, font=('Segoe UI', 10),
+        self.text = tk.Text(left, wrap='word', width=10, height=7, undo=True, font=('Segoe UI', 10),
                             background=self.theme.field, foreground=self.theme.text,
                             insertbackground=self.theme.text, selectbackground=self.theme.accent,
                             selectforeground=self.theme.on_accent, highlightthickness=1,
@@ -2985,6 +3027,7 @@ class App:
         self.find_next_btn.pack(side='left', padx=(2, 4))
         self.find_close_btn = ttk.Button(self.find_row, text='\u00d7', width=3, command=self.find_close)
         self.find_close_btn.pack(side='left')
+        self._flow(self.find_row)
         self._find_hits, self._find_i = [], -1
         self.find_var.trace_add('write', lambda *_: self._find_refresh())
         self.find_entry.bind('<Return>', lambda e: (self.find_step(1), 'break')[1])
@@ -3007,6 +3050,7 @@ class App:
         self.rephrase_matching = tk.StringVar(value=self._settings.get('rephrase_matching') or 'strict')
         ttk.Combobox(rephrase_row, textvariable=self.rephrase_matching, width=6, state='readonly',
                      values=['off', 'strict', 'loose']).pack(side='left')
+        self._flow(rephrase_row)
 
         self.stop_btn = ttk.Button(row, text='Stop', command=self.stop, state='disabled')
         self.stop_btn.grid(row=1, column=0, sticky='w')
@@ -3056,6 +3100,7 @@ class App:
         self.seed_plus.pack(side='left', padx=(2, 0))
         self.seed_rnd = ttk.Button(seedbox, text='Rnd', width=4, command=self.random_seed)
         self.seed_rnd.pack(side='left', padx=(4, 0))
+        self._flow(seedbox)
 
         stylerow = ttk.Frame(row)
         stylerow.grid(row=4, column=0, columnspan=5, sticky='w', pady=(6, 0))
@@ -3083,6 +3128,9 @@ class App:
         self.model_cb.bind('<<ComboboxSelected>>', self._on_model_change)
         self.adv_btn = ttk.Button(stylerow, text='Advanced \u25b8', command=self.toggle_advanced)
         self.adv_btn.pack(side='left', padx=(12, 0))
+        self._flow(stylerow)
+        # `row` last: it places the blocks above (rephrase, seed, style) as items of its own flow, so it has to see them
+        self._flow(row)
 
         self.base_row = ttk.Frame(left)
         self.base_row.grid(row=8, column=0, sticky='ew', pady=(8, 0))
@@ -3096,6 +3144,7 @@ class App:
                                     width=24, anchor='w')
         self._base_tip = None
         self.base_label.pack(side='left', padx=(4, 10))
+        self._flow(base_head)
         # ---- strength: one value, three ways to set it -------------------------------------------------------
         # The slider is the coarse control and settles on 5 % detents (`resolution`), which is what makes a drag
         # repeatable; the arrows and the number are the precise ones and move by 1 %. `self.denoise` is the single source
@@ -3132,6 +3181,7 @@ class App:
         self.strength_entry.bind('<End>', lambda e: (self.set_strength(STRENGTH_MAX), 'break')[1])
         self.denoise_text = ttk.Label(head, text='%d%%' % round(self.denoise.get() * 100))
         self.denoise_text.pack(side='right')
+        self._flow(head)
         # The slider does **not** own the value: a `resolution` on a scale quantises the variable it is bound to, so a
         # typed 0.73 would become 0.75 the moment the bar drew itself. It reads the value in `_render_strength` and snaps
         # its own drags to the 5 % detents, which leaves the number exact.
@@ -3199,6 +3249,7 @@ class App:
         self.seed_step.pack(side='left', padx=(4, 4))
         ttk.Label(adv_step, text='added per tile: 1 = seed, seed+1, seed+2 ...',
                   foreground=self.theme.muted).pack(side='left')
+        self._flow(adv_step)
 
         adv_sweep = ttk.Frame(self.advanced)
         adv_sweep.pack(fill='x', pady=(4, 0))
@@ -3211,6 +3262,7 @@ class App:
         ttk.Entry(adv_sweep, textvariable=self.sweep_values, width=14).pack(side='left')
         ttk.Label(adv_sweep, text='e.g. 1,2,3 or 1..4x6 (blank = spread over the tiles)',
                   foreground=self.theme.muted).pack(side='left', padx=(4, 0))
+        self._flow(adv_sweep)
         ttk.Label(adv1, text='steps').pack(side='left')
         self.steps_var = tk.StringVar(value=str(self._settings.get('steps') or self.args.steps))
         self.steps_cb = ttk.Combobox(adv1, textvariable=self.steps_var, width=4, state='readonly',
@@ -3221,17 +3273,19 @@ class App:
         self.sampler_cb = ttk.Combobox(adv1, textvariable=self.sampler_var, width=15, state='readonly',
                                        values=['euler', 'euler_ancestral'])
         self.sampler_cb.pack(side='left')
+        self._flow(adv1)
         adv2 = ttk.Frame(self.advanced)
         adv2.pack(fill='x', pady=(4, 0))
         self.profile_btn = ttk.Button(adv2, text='profile\u2026', command=self.save_profile)
         self.profile_btn.pack(side='left', anchor='n', padx=(6, 0))
         self._tip(self.profile_btn, 'Write what the window has measured (panels, redraws, thumbnails) beside the settings.')
         ttk.Label(adv2, text='negative').pack(side='left', anchor='n')
-        self.negative = tk.Text(adv2, height=2, width=42, wrap='word', font=('Segoe UI', 9),
+        self.negative = tk.Text(adv2, height=2, width=10, wrap='word', font=('Segoe UI', 9),
                                 background=self.theme.field, foreground=self.theme.text,
                                 insertbackground=self.theme.text, relief='flat', highlightthickness=1,
                                 highlightbackground=self.theme.border)
         self.negative.pack(side='left', padx=(4, 0), fill='x', expand=True)
+        self._flow(adv2)
         if not (self._settings.get('advanced') or False):
             self.advanced.grid_remove()
 
@@ -3239,7 +3293,7 @@ class App:
         # the banner answers the only question that matters before pressing Enter
         # wraplength caps the requested width, so a long file name can never widen this column
         self.banner = SelectableText(left, text='', font=('Segoe UI', 10, 'bold'), foreground=self.theme.text,
-                                     wraplength=396, width=48)
+                                     wraplength=396, width=10)
         self.banner.grid(row=3, column=0, sticky='w', pady=(10, 0))
         self._tip(self.banner, 'What the next Generate will do, with the base file name in full.')
         self.ticks = ttk.Label(left, text='', foreground=self.theme.accent, font=('Consolas', 10))
@@ -3267,7 +3321,7 @@ class App:
         self._tip(self.version_label,
                   'Version %s - patch is fixed bugs, minor is new features, major only a published release.'
                   % version.display)
-        self.hint = SelectableText(left, text='', foreground=self.theme.muted, wraplength=430, width=52,
+        self.hint = SelectableText(left, text='', foreground=self.theme.muted, wraplength=430, width=10,
                                    font=('Segoe UI', 9))
         self.hint.grid(row=7, column=0, sticky='w', pady=(4, 0))
 
@@ -3280,6 +3334,7 @@ class App:
                            command=lambda p=prompt: self.use_starter(p))
             b.pack(side='left', padx=(0, 6), pady=(4, 0))
             self._tip(b, prompt)
+        self._flow(self.starters)
         self.starters.grid_remove()
 
         # ---- right: the picture
@@ -6428,6 +6483,10 @@ class App:
             self.contents_canvas.configure(width=self._contents_w)
             self.contents_title.set_title(self.contents_title.title(), width_px=max(120, self._contents_w - 6))
             self.gal.columnconfigure(2, weight=0, minsize=0)
+            # The canvas must not *ask* for width: the column's minsize is the contract the sash and the tests work in
+            # (`_prompt_w + PROMPT_PAD`), and a canvas that requested `_prompt_w` of its own added the scrollbar's
+            # pixels on top of it. One pixel wide, weight 1: it takes exactly the column's width minus the bar.
+            self.prompt_canvas.configure(width=1)
         except Exception:
             pass
         if getattr(self, '_sidebar', True):
@@ -6438,6 +6497,8 @@ class App:
             except Exception:
                 pass
         self._apply_prompt_wrap()
+        self._reflow_all()
+        self._later(120, self._reflow_all)      # again once Tk has settled the widths the first pass guessed at
         self._apply_window_min()
         self._layout_w = self._root_w(width)
         if persist:
@@ -6462,14 +6523,95 @@ class App:
         except Exception:
             pass
 
+    def _flow(self, master, gap=6, line_gap=4):
+        """Wrap `master`'s children into lines at the frame's width, and again whenever that width changes.
+
+        Every control row in the prompt column was one `pack(side='left')` line. At 420 px they fitted; the moment a sash
+        made the column narrower the right-hand controls were clipped off the edge instead of wrapping. HTML answers
+        this with flow - a line takes what fits and the rest drops to the next line - so this is that, over `place`, so
+        each child keeps its own requested size (a 4-character combobox stays 4 characters; nothing is squeezed).
+
+        Children are placed, so the frame reports almost no requested width: that is deliberate, and it is why
+        `_prompt_floor()` collapses to `PROMPT_MIN_W` instead of the width of the widest row. A child that was hidden
+        when the row was built (Retry, before a failure) is left out; `_flow_shown` remembers that.
+        """
+        def shown(child):
+            manager = child.winfo_manager()
+            if manager == 'grid':
+                return bool(child.grid_info())
+            if manager == 'pack':
+                return bool(child.pack_info())
+            return True
+
+        def arrange(_event=None):
+            width = master.winfo_width()
+            if width <= 1:
+                return
+            master._flow_last = width
+            x = y = line_h = natural = 0
+            for child in master.winfo_children():
+                if not getattr(child, '_flow_shown', True):
+                    continue
+                child.update_idletasks()
+                w = max(child.winfo_reqwidth(), getattr(child, '_flow_natural', 0))
+                h = child.winfo_reqheight()
+                w = min(w, width)
+                if x and x + w > width:
+                    x = 0
+                    y += line_h + line_gap
+                    line_h = 0
+                child.place(x=x, y=y, width=w, height=h)
+                x += w + gap
+                natural = max(natural, x - gap)
+                line_h = max(line_h, h)
+            master._flow_natural = max(natural, 1)
+            try:
+                master.configure(height=y + line_h)
+            except Exception:
+                pass
+
+        for child in master.winfo_children():
+            child._flow_shown = shown(child)
+            for forget in (child.pack_forget, child.grid_remove, child.place_forget):
+                try:
+                    forget()
+                except Exception:
+                    pass
+        master.bind('<Configure>', arrange, add='+')
+        master.after_idle(arrange)
+        self._flows = getattr(self, '_flows', []) + [(master, arrange)]
+        return master
+
+    def _reflow_all(self, force=False):
+        """Re-run every flow whose width has moved since it last laid itself out.
+
+        A flow is triggered by its own `<Configure>`, and a row whose width never changes after its first pass would keep
+        the line breaks of the width it was born with - which is exactly what a column narrowed by a sash produced: one
+        long line clipped at the edge. The canvas reports the column's real width later than the rows are built, so this
+        runs from there and from the layout, and only for the rows that actually need it (`_flow_last`), so a re-layout
+        cannot bounce between the two.
+        """
+        for master, arrange in getattr(self, '_flows', []):
+            try:
+                width = master.winfo_width()
+                if force or width <= 1 or width != getattr(master, '_flow_last', None):
+                    arrange()
+            except Exception:
+                continue
+
     def _apply_prompt_wrap(self):
         """The prompt column reflows rather than clipping: its long lines wrap at the width the column actually has.
 
         The Text widget already did (`wrap='word'`, gridded with a weight); the one-line reports under it did not, and
         one long folder name widened the column far enough to fight the sash. They wrap now, at this column's width.
+
+        The checkbox rows are here for the same reason and because of a second one: a flowed row places a child at its
+        *natural* width, and a ttk checkbutton whose text is longer than the column draws straight past the edge rather
+        than adopting the slot it was given. `wraplength` is what makes it adopt it.
         """
-        wrap = max(160, self._prompt_w - PROMPT_PAD - 4)
-        for attr in ('banner', 'hint', 'status', 'last_label'):
+        wrap = max(120, self._prompt_w - PROMPT_PAD - 4)
+        for attr in ('banner', 'hint', 'status', 'last_label',
+                     'seq_chk', 'chain_chk', 'hold_seed_chk', 'base_label'):
             widget = getattr(self, attr, None)
             if widget is None:
                 continue
@@ -8545,13 +8687,18 @@ class App:
         ttk.Button(win, text='Copy metadata', command=copy).pack(pady=(0, 8))
 
     def _wheel_owner(self, widget):
-        """Which list the pointer is over: 'contents', 'strip', or None for anything else (the prompt, dialogs)."""
+        """Which list the pointer is over: 'contents', 'strip', 'prompt', or None for anything else (dialogs)."""
         node = widget
         while node is not None:
+            # A text box scrolls its own content; routing the wheel as well would move it twice as fast.
+            if isinstance(node, (tk.Text, ttk.Entry, ttk.Spinbox, ttk.Combobox)):
+                return None
             if node is self.contents_canvas or node is self.contents:
                 return 'contents'
             if node is self.gal_canvas or node is self.recent:
                 return 'strip'
+            if node is getattr(self, 'prompt_canvas', None):
+                return 'prompt'
             node = getattr(node, 'master', None)
         return None
 
@@ -8576,6 +8723,9 @@ class App:
         if owner == 'strip':
             self.gal_canvas.yview_scroll(steps, 'units')
             self._maybe_more('strip')
+            return 'break'
+        if owner == 'prompt':
+            self.prompt_canvas.yview_scroll(steps, 'units')
             return 'break'
         return None
 
