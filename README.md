@@ -1893,6 +1893,13 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### The matrix dialog (2026-11-02)
+
+The open folder's title menu carries **Matrix…**: ±10 % around the current strength by default (95 % opens at 80–100),
+a step, a live chip list, the render count, the **measured** cost for this card/model/size, an optional contact sheet, and
+a warning with *render anyway* when the run is expensive at full size on a slow model. Core arithmetic and cost live in
+`matrix.py` / `estimate.py` with their own tests (`test_matrix.py`); the details are in `STATE-2026-10-31.md` §21.
+
 ### Planned UX work (2026-11-02)
 
 [PLAN-UX-20261102.md](PLAN-UX-20261102.md) is the reviewed plan for decluttering the window: right-click menus on picture and

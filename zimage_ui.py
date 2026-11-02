@@ -824,6 +824,8 @@ GAL_FLOOR_W = STRIP_FIT_W                                      # 510
 # rail is not one of them - it replaces the gallery column when it is shown, it never sits beside it.
 COLUMNS = ('strip', 'pane', 'prompt', 'picture')
 import sessions as sessions_mod
+import matrix as matrix_module
+import deployments
 
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
 PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
@@ -3862,6 +3864,9 @@ class App:
 
     def _session_menu(self, event, label):
         menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Matrix…  (strengths × bases, with a cost estimate)',
+                         command=self.open_matrix_dialog)
+        menu.add_separator()
         menu.add_command(label='Split into sessions (breaks of %d h or more)'
                                % int(sessions_mod.DEFAULT_GAP_HOURS),
                          command=lambda: self._split_into_sessions(label))
@@ -10340,6 +10345,153 @@ class App:
             self._focus_target = self.text
         except Exception:
             pass
+
+    # ---------------------------------------------------------------- the matrix dialog (PLAN-UX-20261102 4.2)
+    MATRIX_FULL_SIZE = 1024      # the largest size today's profiles offer; the hunt warning fires at this size
+
+    def matrix_settings(self):
+        """The matrix dialog's remembered values: percentages, and whether the last run asked for a contact sheet."""
+        raw = (self._settings.get('matrix') or {}) if hasattr(self, '_settings') else {}
+        current = int(round(self.strength_scale.get() * 100)) if hasattr(self, 'strength_scale') else 60
+        lo, hi = getattr(self, '_matrix_window', (None, None)) or (None, None)
+        if lo is None:
+            lo, hi = matrix_module.window(current, low=int(round(STRENGTH_MIN * 100)),
+                                          high=int(round(STRENGTH_MAX * 100)))
+        return {'from': int(raw.get('from', lo)), 'to': int(raw.get('to', hi)),
+                'step': int(raw.get('step', 1)), 'sheet': bool(raw.get('sheet', False))}
+
+    def _matrix_card(self):
+        """This machine's card key, so the estimate and the warning use its own measurements."""
+        try:
+            return deployments.card_key(*deployments._this_card())
+        except Exception:
+            return None
+
+    def matrix_plan_from(self, lo, hi, step, bases):
+        """[(base path, strength fraction)] from dialog percentages - the shape `_matrix_next` already consumes."""
+        # matrix.plan() speaks in whole percentages (it is also the form the sheet labels use); the render queue wants
+        # the 0.20-0.95 fraction the strength control uses, so the division happens here and in exactly one place.
+        values = matrix_module.values(lo, hi, step)
+        return [(path, value / 100.0) for path, value in matrix_module.plan(values, bases)]
+
+    def open_matrix_dialog(self):
+        """The matrix as a dialog: parameters, the resulting count, the measured cost, and the warning - all before a render."""
+        import estimate as estimate_module
+        from tkinter import Toplevel, StringVar, BooleanVar
+        settings = self.matrix_settings()
+        window = Toplevel(self.root)
+        window.title('Strength × base matrix')
+        window.transient(self.root)
+        body = ttk.Frame(window, padding=12)
+        body.pack(fill='both', expand=True)
+
+        lo_var, hi_var, step_var = StringVar(value=str(settings['from'])), StringVar(value=str(settings['to'])), StringVar(value=str(settings['step']))
+        sheet_var = BooleanVar(value=settings['sheet'])
+        summary = ttk.Label(body, text='', font=('Segoe UI', 9, 'bold'), justify='left')
+        summary.grid(row=0, column=0, columnspan=6, sticky='w', pady=(0, 8))
+        cost = ttk.Label(body, text='', justify='left', wraplength=460)
+        cost.grid(row=1, column=0, columnspan=6, sticky='w', pady=(0, 8))
+        chips = ttk.Label(body, text='', wraplength=460, justify='left', foreground=self.theme.muted)
+        chips.grid(row=2, column=0, columnspan=6, sticky='w', pady=(0, 8))
+
+        for column, (text, var) in enumerate((('from %', lo_var), ('to %', hi_var), ('step', step_var))):
+            ttk.Label(body, text=text).grid(row=3, column=column * 2, sticky='e', padx=(0, 4))
+            ttk.Entry(body, textvariable=var, width=5).grid(row=3, column=column * 2 + 1, sticky='w', padx=(0, 12))
+        ttk.Checkbutton(body, text='also compose a contact sheet', variable=sheet_var).grid(
+            row=3, column=6, columnspan=2, sticky='w')
+
+        def numbers():
+            def one(var, default):
+                try:
+                    return int(float(str(var.get()).strip()))
+                except (TypeError, ValueError):
+                    return default
+            lo, hi = one(lo_var, settings['from']), one(hi_var, settings['to'])
+            step = max(1, one(step_var, settings['step']))
+            return (hi, lo) if hi < lo else (lo, hi), step
+
+        def refresh(*_):
+            (lo, hi), step = numbers()
+            values = matrix_module.values(lo, hi, step)
+            bases = [path for _role, path in self.base_items()]
+            per = estimate_module.wall_seconds(self._matrix_card(), self.model_var.get(), self._size_px())
+            total = estimate_module.total(len(values) * max(1, len(bases)), per)
+            cells = matrix_module.sheet_cells(len(values) * max(1, len(bases)))
+            summary.configure(text='%d strengths × %d base%s = %d renders · %d→%d by %d%s'
+                                   % (len(values), max(1, len(bases)), '' if len(bases) == 1 else 's',
+                                      len(values) * max(1, len(bases)), lo, hi, step,
+                                      '' if not bases else ' · base: %s' % Path(bases[0]).name))
+            if per is None:
+                cost.configure(text='cost unknown on this machine (no measurement for this card, model and size)')
+            else:
+                cost.configure(text='%s each ≈ %s, at %d px on %s'
+                                    % (matrix_module.human_duration(per),
+                                       matrix_module.human_duration(total), self._size_px(), self.model_var.get()))
+            chips.configure(text=' '.join(str(v) for v in values) +
+                                 ('' if not cells else '   (%d empty cell%s in a %dx%d sheet)'
+                                  % (cells, '' if cells == 1 else 's', *matrix_module.sheet_grid(len(values) * max(1, len(bases))))))
+
+        for var in (lo_var, hi_var, step_var):
+            var.trace_add('write', refresh)
+
+        def start():
+            (lo, hi), step = numbers()
+            bases = [path for _role, path in self.base_items()]
+            if not bases:
+                cost.configure(text='arm a base first: the matrix renders each armed picture through the ladder')
+                return
+            values = matrix_module.values(lo, hi, step)
+            advice = estimate_module.hunt_advice(self._matrix_card(), self.model_var.get(), self._size_px(),
+                                                 self._size_px() and self.steps_now(),
+                                                 len(values) * len(bases), largest_size=self.MATRIX_FULL_SIZE)
+            if advice.get('warn'):
+                from tkinter import messagebox
+                question = ('%d renders at %d px on %s ≈ %s\n   fastest measured at this size: %s ≈ %s\n\n'
+                            'Estimated %s of extra work.\n\nRender anyway?'
+                            % (advice['n'], self._size_px(), self.model_var.get(),
+                               matrix_module.human_duration(advice['total']), advice['fast_profile'],
+                               matrix_module.human_duration(advice['fast_total']),
+                               matrix_module.human_duration(advice['extra'])))
+                if not messagebox.askokcancel('This matrix is expensive', question, parent=window):
+                    return
+            self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet_var.get())}
+            self._save_settings_best_effort()
+            window.destroy()
+            plan = self.matrix_plan_from(lo, hi, step, bases)
+            self._matrix_queue = list(plan)
+            self._matrix_last_base = None
+            self.layout_var.set('single')
+            self.hint.configure(text='matrix: %d renders queued' % len(plan))
+            self._matrix_next()
+
+        ttk.Button(body, text='Cancel', command=window.destroy).grid(row=4, column=4, sticky='e', pady=(12, 0))
+        ttk.Button(body, text='Start', command=start).grid(row=4, column=5, sticky='e', pady=(12, 0))
+        refresh()
+        window.bind('<Return>', lambda _e: start())
+        window.bind('<Escape>', lambda _e: window.destroy())
+        return window
+
+    def _size_px(self):
+        try:
+            return int(float(str(self.size_var.get()).strip()))
+        except (AttributeError, TypeError, ValueError):
+            return 1024
+
+    def steps_now(self):
+        try:
+            return int(float(str(self.steps_var.get()).strip()))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _save_settings_best_effort(self):
+        for name in ('_save_settings', 'save_settings', '_persist_settings'):
+            fn = getattr(self, name, None)
+            if callable(fn):
+                try:
+                    fn()
+                    return
+                except Exception:
+                    pass
 
     def matrix_strengths(self):
         """The strengths a matrix will render at, from the `from` / `to` / `n` boxes above the button.
