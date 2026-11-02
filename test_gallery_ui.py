@@ -530,8 +530,11 @@ def main():
     if app.engine.calls:
         call = app.engine.calls[-1][0]
         # call signature is (prompt, width, height, steps, cfg, seed, out, kwargs)
+        # The size is read from the box rather than pinned to 512: selecting a picture now restores the size it was made
+        # at (2026-11-02), so the contract this check exists for is "what the box says is what reaches the engine".
         check('generate passed prompt/size/steps/seed/out',
-              call[0] == 'a red bicycle' and (call[1], call[2]) == (512, 512) and call[3] == 4
+              call[0] == 'a red bicycle' and (call[1], call[2]) == (int(app.size_var.get()),) * 2
+              and call[3] == int(app.steps_var.get())
               and isinstance(call[5], int) and call[6] == str(tmp), str(call[:7]))
     check('button locked while busy', 'disabled' in app.gen_btn.state())
     app.busy = False
@@ -747,6 +750,18 @@ def main():
         check('dropping the base itself clears the base', app.base_path is None, app.base_path)
         win.destroy(); root.update()
         app._bases = []
+
+    print('\n-- a made-from picture says its strength on the tile (asked 2026-11-02)')
+    check('the strength badge reads the strength of an edit',
+          zui.strength_badge_text({'base_image': 'a.png', 'denoise': 0.42}) == '42%',
+          zui.strength_badge_text({'base_image': 'a.png', 'denoise': 0.42}))
+    check('a picture that was not made from another gets no strength badge',
+          zui.strength_badge_text({'denoise': 0.42}) is None
+          and zui.strength_badge_text({'base_image': None, 'denoise': 0.7}) is None)
+    check('nor does one with no strength recorded',
+          zui.strength_badge_text({'base_image': 'a.png'}) is None)
+    check('the badge is mid grey with black text, as asked',
+          zui.STRENGTH_BADGE_BG.lower() == '#cccccc', zui.STRENGTH_BADGE_BG)
 
     print('\n-- unfiled is pinned first in the folders list (asked 2026-11-02)')
     # A pure function, so this cannot skip on whatever state the window happens to be in.

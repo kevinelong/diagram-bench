@@ -80,11 +80,30 @@ def _registry_value(path, name, default=None):
 
 # A real bitmap face: at 8 px an antialiased UI font turns to mush, and Fixedsys is what Windows still ships for exactly
 # this job. Falls back to a monospace face that exists everywhere.
+#: the strength badge's ground: mid grey with black text, as asked on 2026-11-02, so it reads as a
+#: different fact from the size band (which is coloured by file size)
+STRENGTH_BADGE_BG = '#cccccc'
 PIXEL_FONT = ('Fixedsys', 8)
 FALLBACK_PIXEL_FONT = ('Consolas', 7)
 SIZE_BANDS = ((64 * 1024, '#ff6347', '#ffffff'),        # tomato red: 64 kB or less
               (1024 * 1024, '#ffbf00', '#1a1a1a'),      # amber yellow: in between
               (None, '#3cb371', '#0b1a10'))             # medium green: 1 MB or more
+
+
+def strength_badge_text(meta):
+    """`'42%'` when a picture was made from another one at that strength, else None.
+
+    Its own badge, in the corner opposite the file-size band and in grey rather than a size colour, so "how much of the
+    base survived" is not read as "how big the file is".
+    """
+    if not isinstance(meta, dict):
+        return None
+    if not meta.get('base_image') or meta.get('denoise') is None:
+        return None
+    try:
+        return '%d%%' % round(float(meta['denoise']) * 100)
+    except (TypeError, ValueError):
+        return None
 
 
 def human_size(n):
@@ -1540,7 +1559,8 @@ class Engine:
                     self.events.put(('status', 'ComfyUI started - continuing with the run'))
                 out = Path(out_dir)          # not out_dir: assigning that would shadow the parameter
                 out.mkdir(parents=True, exist_ok=True)
-                meta = {'steps': steps, 'cfg': cfg, 'denoise': (denoise if base_path else 1.0),
+                meta = {'steps': steps, 'cfg': cfg, 'width': width, 'height': height,
+                        'denoise': (denoise if base_path else 1.0),
                         'base_image': (str(base_path) if base_path else None),
                         'negative': negative or None, 'style': style or None,
                         'model': (profile or zg.DEFAULT_MODEL),
@@ -6428,6 +6448,21 @@ class App:
                 # a badge sits over the thumbnail, so it must not swallow the click that selects the picture
                 badge.bind('<Button-1>', lambda e, q=row['path']: self._on_tile_click(e, q))
                 self._tip(badge, '%s\n%d bytes' % (Path(row['path']).name, bytes_on_disk))
+            # A picture made from another one says at what strength, in the opposite corner: a row of edits then reads at
+            # a glance (asked for 2026-11-02). Grey with black text, so it is not confused with the size band's colours.
+            try:
+                meta_here = read_meta(row['path']) or {}
+            except Exception:
+                meta_here = {}
+            strength_text = strength_badge_text(meta_here)
+            if strength_text:
+                made_from = meta_here.get('base_image')
+                s_badge = tk.Label(cell, text=strength_text, font=PIXEL_FONT,
+                                   background=STRENGTH_BADGE_BG, foreground='#000000', bd=0, padx=2, pady=0)
+                s_badge.place(relx=0.0, rely=1.0, anchor='sw', x=2, y=-2)
+                s_badge.bind('<Button-1>', lambda e, q=row['path']: self._on_tile_click(e, q))
+                self._tip(s_badge, '%s\nmade from %s at %s strength'
+                                   % (Path(row['path']).name, Path(str(made_from)).name, strength_text))
             try:
                 import pair_rank
                 mark = pair_rank.badge(row['path'])
@@ -9432,12 +9467,19 @@ class App:
                                          % Path(path).name)
             if meta.get('seed') is not None:
                 self.seed.set(str(meta['seed']))
+            # Everything the sidecar records, not just the prompt: a click used to bring back the words and the seed while
+            # leaving the model, steps, size, sampler, negative and strength at whatever was last used, so pressing Enter
+            # again re-ran the picture under different settings. Reported 2026-11-02.
+            applied, refused = self._restore_settings(meta, path)
             if restored.strip():
-                self.hint.configure(text='restored prompt and seed %s from %s%s'
-                                    % (meta.get('seed'), Path(path).name,
+                self.hint.configure(text='restored %s and seed %s from %s%s'
+                                    % (', '.join(applied) or 'prompt', meta.get('seed'), Path(path).name,
                                        ('; itself edited %s at strength %s'
                                         % (Path(meta['base_image']).name, meta.get('denoise')))
                                        if meta.get('base_image') else ''))
+            if refused:
+                self.hint.configure(text='%s\n%s was not restored: %s'
+                                         % (self.hint['text'], refused, 'the picker does not offer it any more'))
         else:
             self.hint.configure(text='no prompt recorded for %s (saved before metadata existed)' % Path(path).name)
         self.status.configure(text='viewing %s - Use as Base to edit it at strength %.2f (Enter alone starts fresh)'
@@ -9451,6 +9493,69 @@ class App:
                    or path in (getattr(self, '_content_widgets', {}) or {}))
         if not painted:
             self._idle(lambda p=path: self._refresh_keep_selection(p))
+
+    def _restore_settings(self, meta, path=None):
+        """Apply what the sidecar records; return (what was applied, what was refused).
+
+        Every value is written through the control that owns it, so the boxes and the banner agree with what will be sent.
+        A model the picker no longer offers is *refused* rather than silently typed in: the same rule the 4060 box's own
+        notes state for a saved model, because offering something that cannot run is worse than falling back.
+        """
+        applied, refused = [], None
+        model = meta.get('model')
+        if model and model in zg.MODELS and self.model_var.get() != model:
+            offered = [str(v) for v in self.model_cb.cget('values')]
+            if model in offered:
+                self.model_var.set(model)
+                self._on_model_change()          # brings that profile's own step ceiling and style offset with it
+                applied.append(model)
+            else:
+                refused = model
+        # the size: recorded since 2026-11-02, and for anything older it is the picture's own width - the honest source
+        if meta.get('width') is None and path is not None and hasattr(self, 'size_var'):
+            try:
+                from PIL import Image as _Image
+                with _Image.open(path) as im:
+                    side = int(im.size[0])
+                offered = [str(v) for v in self.size_cb.cget('values')]
+                if str(side) in offered:
+                    self.size_var.set(str(side))
+                    applied.append('%s px' % side)
+            except Exception:
+                pass
+        for key, var, name in (('steps', getattr(self, 'steps_var', None), 'steps'),
+                               ('width', getattr(self, 'size_var', None), 'px')):
+            if var is None or meta.get(key) is None:
+                continue
+            try:
+                var.set(str(int(meta[key])))
+                applied.append('%s %s' % (meta[key], name))
+            except (TypeError, ValueError):
+                pass
+        sampler = meta.get('sampler')
+        if sampler and hasattr(self, 'sampler_var'):
+            try:
+                self.sampler_var.set(sampler)
+                applied.append(sampler)
+            except Exception:
+                pass
+        if meta.get('negative') and hasattr(self, 'negative'):
+            try:
+                self.negative.delete('1.0', 'end')
+                self.negative.insert('1.0', str(meta['negative']))
+                applied.append('negative')
+            except Exception:
+                pass
+        # the strength only means something for an edit, and restoring it is a decision the user then owns - the same
+        # flag a slider drag sets, so a style proposal cannot quietly move it back
+        if meta.get('base_image') and meta.get('denoise') is not None:
+            try:
+                self.set_strength(float(meta['denoise']))
+                self._strength_touched = True
+                applied.append('%d%% strength' % round(float(meta['denoise']) * 100))
+            except (TypeError, ValueError):
+                pass
+        return applied, refused
 
     def _refresh_keep_selection(self, path):
         """Rebuild the grid for a picture that was not among the painted tiles, without losing the click's selection.
