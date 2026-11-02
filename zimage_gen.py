@@ -80,6 +80,16 @@ MODELS = {
                       # labels (0.732 vs 0.736 OCR exact) but traces into 106 paths against 32, so the geometry
                       # is visibly messier for the same text. The distilled-4 claim was inherited, not measured.
                       'vae': VAE, 'steps': 9, 'max_steps': 9, 'cfg': 1.0},
+    # FLUX 3 Image Klein: BFL's 5.6B, distilled to 16 steps at CFG 1, euler/simple (the repo's own checked recipe).
+    # Two things this profile encodes that the model card states and that we paid for once already:
+    #   * the UNET is AtomicChat's AD-Q4_K GGUF through UnetLoaderGGUF, but the *encoder must not* be their GGUF -
+    #     "ComfyUI-GGUF loads a Qwen3-VL GGUF as plain Qwen3-4B, and the sampler stops with a shape error (2560
+    #     against 20480)". Ours is Comfy-Org/Krea-2's fp8_scaled safetensors through the core CLIPLoader, type flux3.
+    #   * their vae/ae.safetensors is a DIFFERENT file from Z-Image's ae.safetensors despite the identical name
+    #     (sha256 868fe7b3... vs afc8e282...), so it is installed as ae-flux3.safetensors and named separately here.
+    'flux3 klein 4b': {'unet': 'FLUX-3-Image-Klein-AD-Q4_K.gguf', 'unet_node': 'UnetLoaderGGUF',
+                       'clip': 'qwen3vl_4b_fp8_scaled.safetensors', 'clip_node': 'CLIPLoader', 'clip_type': 'flux3',
+                       'vae': 'ae-flux3.safetensors', 'steps': 16, 'max_steps': 16, 'cfg': 1.0},
     # The two 4B klein profiles ('flux2 klein' and 'flux2 klein uncensored') were retired on 2026-10-28 by the owner's
     # instruction, which leaves two models in the picker: this 9B and z-image turbo. The 4B weights stay on disk
     # (D:/models/comfyui) - only the profiles are gone - and every 4B measurement stays in PIN-20261021.md and
