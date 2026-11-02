@@ -1178,6 +1178,24 @@ prompts collapse to **238** distinct ones at 0.90 cosine; and **1,899 of 1,905**
 own sidecar. What cannot be answered at all: sampler (never recorded), wins, rejections, per-render wall time and VRAM
 (clips only).
 
+## Measured cards (`deployments.py`)
+
+Before a new machine is set up the question is "this card has N GiB and compute X.Y — what do I start with, and what will
+it cost?". `deployments.py` is the answer as data, not prose: one row per render that was actually measured, with wall
+time, peak VRAM, date and the command that produced it.
+
+| card | model | size | steps | wall |
+|---|---|---|---|---|
+| desktop RTX 5070 (12,227 MiB, compute 12.0, FP4 **native**) | z-image turbo | 1024 | 9 | **14.3 s** |
+| laptop RTX 4060 (8,188 MiB, compute 8.9, FP4 **emulated**) | z-image turbo | 1024 | 9 | **142.5 s** |
+| laptop RTX 4060 | flux3 klein 4b | 512 | 16 | 109.4 s |
+| laptop RTX 4060 | flux2 klein 9b | 512 | 4 | **does not fit** (8,837 MiB peak) |
+
+The same job is ~10x apart, which is why a per-card table beats a default. `python deployments.py` prints the advice for
+the machine it runs on; an unmeasured card is told to measure a render rather than given a guess.
+`best_for()` prefers the **largest** size that fits and only then the fastest run — its first version offered a 512 px
+render over a 1024 px one on the 8 GiB card because it was quicker.
+
 ## Versioning
 
 One constant, `version.py`, and it is the only place a version is written. The window shows it in the **bottom right corner**
