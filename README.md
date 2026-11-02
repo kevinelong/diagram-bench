@@ -1893,6 +1893,13 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### Planned UX work (2026-11-02)
+
+[PLAN-UX-20261102.md](PLAN-UX-20261102.md) is the reviewed plan for decluttering the window: right-click menus on picture and
+folder tiles, the rare pane and strip buttons moving into them (and being deleted, so no action has two homes), the matrix
+moved into a dialog that states its count and cost before it runs, the hunt warning that fires when a matrix is expensive,
+and the six decisions still open. Nothing in it is implemented yet; owners are marked `[here]` and `[4060]`.
+
 ### Sessions: a folder by when you worked (2026-11-02)
 
 A 500-picture folder is usually a stretch of work, not one subject. Right-click the open folder's title for **Split into
