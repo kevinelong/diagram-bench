@@ -2720,6 +2720,10 @@ class App:
         self.options_btn = ttk.Button(self.title_row, text='\u25b8 options', width=11,
                                       command=self.toggle_options, style='Big.TButton')
         self.options_btn.pack(side='right')
+        # Both header rows wrap now: at a single-column list width the folders switch, dedupe, Open…, the source chip,
+        # subfolders and options cannot sit on one line, and clipping them was the alternative.
+        self._flow(self.source_row)
+        self._flow(self.title_row)
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = self.strip_holder = ttk.Frame(gal)
         holder.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 6))
@@ -2833,6 +2837,9 @@ class App:
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
         self.contents_sel_label.grid(row=2, column=0, columnspan=3, sticky='we', pady=(2, 0))
+        # the pane's own actions (Select all, Delete…, A/B…, Recover…, Gallery…, Caption…) wrap like the prompt column's:
+        # at a single-column pane six buttons on two grid rows were squashed to slivers
+        self._flow(self.contents_btns)
         self._contents_geom = None       # (columns, tile) the pane's cells were last laid out for
         self._contents_job = None        # the debounced reflow, so a mid-layout width cannot rebuild the pane
         self.contents = ttk.Frame(self.contents_canvas)
@@ -4835,6 +4842,9 @@ class App:
                               foreground=self.theme.accent, font=('Segoe UI', 8))
             label.pack(side='left', padx=(4, 0))
             self._tip(label, 'The prompt as typed would land in this folder, so the next render appears there.')
+        # the folder picker, A/B… and the prediction wrap: this bar is rebuilt on every plan, and at a narrow gallery
+        # column they were clipped rather than wrapped
+        self._flow(self.folder_bar)
 
     # -- the full-screen folder browser -------------------------------------------------------------
     def _raise_main(self, event=None):
@@ -6705,6 +6715,11 @@ class App:
         `_prompt_floor()` collapses to `PROMPT_MIN_W` instead of the width of the widest row. A child that was hidden
         when the row was built (Retry, before a failure) is left out; `_flow_shown` remembers that.
         """
+        if getattr(master, '_flow_arrange', None) is not None:
+            # already flowed (rows such as the folder bar are rebuilt on every render): re-place, do not re-bind
+            master._flow_arrange()
+            return master
+
         def shown(child):
             manager = child.winfo_manager()
             if manager == 'grid':
@@ -6749,6 +6764,7 @@ class App:
                     pass
         master.bind('<Configure>', arrange, add='+')
         master.after_idle(arrange)
+        master._flow_arrange = arrange
         self._flows = getattr(self, '_flows', []) + [(master, arrange)]
         return master
 
