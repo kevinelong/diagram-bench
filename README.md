@@ -1893,6 +1893,15 @@ search field is untouched. A click puts the cursor where the mouse is and hands 
 only when the cell under the cursor is actually out of view, so it never disturbs the rule that a resize does not move
 the view.
 
+### Sessions: a folder by when you worked (2026-11-02)
+
+A 500-picture folder is usually a stretch of work, not one subject. Right-click the open folder's title for **Split into
+sessions** (every break of 8 h or more becomes a boundary, cut at the middle of the gap) and **Merge the sessions back**.
+The seams are proposed, never applied on their own: the cuts are written to `.zimage-sessions.json` in the gallery, keyed
+by the family's root prompt, and deleting them restores one folder. Periods appear as sibling folders
+(`<family> · Sun 01 Nov 22:00`), so every other view works unchanged. Why gaps and not midnight, measured:
+`STATE-2026-10-31.md` §19.
+
 ### Comparing two machines (2026-11-02)
 
 [MACHINES-2026-11-02.md](MACHINES-2026-11-02.md) is what a comparison between this desktop and the RTX 4060 laptop has

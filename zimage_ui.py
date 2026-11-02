@@ -823,6 +823,8 @@ GAL_FLOOR_W = STRIP_FIT_W                                      # 510
 # the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
 # rail is not one of them - it replaces the gallery column when it is shown, it never sits beside it.
 COLUMNS = ('strip', 'pane', 'prompt', 'picture')
+import sessions as sessions_mod
+
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
 PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
 PICTURE_MIN_W = 283   # the picture column's floor: the width of its action bar, measured 2026-10-30, so the row of
@@ -2856,6 +2858,11 @@ class App:
         self.contents_title = SelectableTitle(self.contents_holder, width_px=CONTENTS_W, plate=plate,
                                               theme=self.theme)
         self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
+        # the session gesture lives on the open folder's own title: "split this folder into sessions", reversible
+        try:
+            self.contents_title.text.bind('<Button-3>', self._title_session_menu, add='+')
+        except Exception:
+            pass
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
         base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
@@ -3797,6 +3804,75 @@ class App:
         widget._copy_menu = menu          # so the wiring can be exercised without a pointer
         return menu
 
+    def _sessions_raw(self, label):
+        """The pre-split folder a segment tile came from: the label before the ` · ` separator."""
+        base = (label or '').split(' \u00b7 ')[0].strip()
+        for group in (getattr(self, '_plan_raw', None) or {}).get('groups') or []:
+            if (group.get('label') or '').strip() == base:
+                return group
+        return None
+
+    def _split_into_sessions(self, label):
+        """Accept every break of at least eight hours in this folder as a session boundary, then redraw.
+
+        Nothing is inferred at load: the cuts are written once, here, and can be removed with one menu item. That is the
+        manual rule the reader asked for - the tool proposes seams, the reader accepts them, and the data is a timestamp.
+        """
+        group = self._sessions_raw(label)
+        if not group:
+            return
+        found = sessions_mod.seams(group.get('items') or [], sessions_mod.DEFAULT_GAP_HOURS)
+        if not found:
+            self.hint.configure(text='no %d-hour break in that folder: nothing to split on'
+                                % int(sessions_mod.DEFAULT_GAP_HOURS))
+            return
+        sessions_mod.save_cuts(getattr(self, '_source', self.args.out),
+                               sessions_mod.key_for(group), [seam[0] for seam in found])
+        self._apply_sessions_now(len(found) + 1)
+
+    def _merge_sessions(self, label):
+        group = self._sessions_raw(label)
+        if not group:
+            return
+        sessions_mod.save_cuts(getattr(self, '_source', self.args.out), sessions_mod.key_for(group), [])
+        self._apply_sessions_now(1)
+
+    def _apply_sessions_now(self, periods):
+        """Re-expand the plan after a cut changed, keeping the reader where they were if that tile still exists."""
+        base = sessions_mod.apply(self._plan_raw, getattr(self, '_source', self.args.out))
+        self._plan = base
+        keep = self._active_folder if self._active_folder is not None else 0
+        self._active_folder = keep if keep < len(base.get('groups') or []) else 0
+        self._render_folder_tiles()
+        self.hint.configure(text='%d session%s in the folders view' % (periods, '' if periods == 1 else 's'))
+
+    def _active_label(self):
+        """The label of the folder the pane is showing, without the ` · session` suffix."""
+        try:
+            group = (self._plan or {}).get('groups')[self._active_folder]
+        except (IndexError, KeyError, TypeError):
+            return ''
+        return (group.get('label') or '').split(' \u00b7 ')[0].strip()
+
+    def _title_session_menu(self, event):
+        label = self._active_label()
+        if not label:
+            return None
+        return self._session_menu(event, label)
+
+    def _session_menu(self, event, label):
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Split into sessions (breaks of %d h or more)'
+                               % int(sessions_mod.DEFAULT_GAP_HOURS),
+                         command=lambda: self._split_into_sessions(label))
+        menu.add_command(label='Merge the sessions back into one folder',
+                         command=lambda: self._merge_sessions(label))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        except Exception:
+            pass
+        return 'break'
+
     def _raise_version(self):
         """Keep the version visible: siblings created after it are drawn above a placed widget."""
         try:
@@ -4678,6 +4754,10 @@ class App:
             # came to be invisible (measured 2026-10-30). They get their own tile, at the head, the way `unfiled` already
             # covers the leftovers at the tail.
             plan = with_synthetic_head(plan)
+            # A folder with accepted session cuts becomes one tile per session (asked 2026-11-02): cut in the gap, not on
+            # the clock. The raw plan is kept, so splitting again recomputes from the families and never nests.
+            self._plan_raw = plan
+            plan = sessions_mod.apply(plan, getattr(self, '_source', self.args.out))
             plan['seconds'] = round(time.time() - started, 2)
             self._plan_save(plan, signature)
             self.ui_events.put(('groups', plan))
