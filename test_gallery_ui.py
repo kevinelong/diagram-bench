@@ -678,6 +678,52 @@ def main():
     app.set_strength(0.70)      # leave the window as it found it: later checks assert the default ...
     app._strength_touched = False   # ... including that a style may still propose its own strength
 
+    print('\n-- base x strength: one render per armed picture per matrix strength')
+    files = [Path(p) for p in app._files[:3]]
+    if files:
+        app._bases = []
+        app._set_base(files[0])
+        one = app.matrix_plan()
+        check('the default ladder is 40 / 60 / 80, three renders for one armed picture',
+              len(one) == 3 and [round(s * 100) for _p, s in one] == [40, 60, 80],
+              (len(one), [round(s * 100) for _p, s in one]))
+        app.matrix_min_var.set('20'); app.matrix_max_var.set('95'); app.matrix_steps_var.set('4')
+        ladder = app.matrix_strengths()
+        check('from/to/n builds the ladder: 20 to 95 in four steps',
+              [round(s * 100) for s in ladder] == [20, 45, 70, 95], [round(s * 100) for s in ladder])
+        app.matrix_steps_var.set('2')
+        check('two steps are the ends themselves', [round(s * 100) for s in app.matrix_strengths()] == [20, 95],
+              app.matrix_strengths())
+        app.matrix_min_var.set('80'); app.matrix_max_var.set('40'); app.matrix_steps_var.set('3')
+        check('a ladder that cannot be walked falls back to the default instead of rendering one picture',
+              [round(s * 100) for s in app.matrix_strengths()] == [40, 60, 80], app.matrix_strengths())
+        app.matrix_min_var.set('-50'); app.matrix_max_var.set('900'); app.matrix_steps_var.set('3')
+        check('and values outside the slider are clamped, not taken literally',
+              all(zui.STRENGTH_MIN <= s <= zui.STRENGTH_MAX for s in app.matrix_strengths()), app.matrix_strengths())
+        app.matrix_min_var.set('40'); app.matrix_max_var.set('80'); app.matrix_steps_var.set('3')
+        check('the button is enabled once something is armed', 'disabled' not in app.matrix_btn.state(),
+              app.matrix_btn.state())
+        app._bases = [str(p) for p in files]
+        three = app.matrix_plan()
+        check('three armed pictures give nine - three each, not a layout', len(three) == 9, len(three))
+        check('and every pair names a real armed picture and a matrix strength',
+              all(Path(p).exists() and s in zui.MATRIX_STRENGTHS for p, s in three), three[:2])
+        # the confirmation is the one thing between a click and minutes of rendering: answer it here
+        import unittest.mock as _mock
+        with _mock.patch('tkinter.messagebox.askokcancel', return_value=False):
+            check('cancelling the confirmation queues nothing', app.start_matrix() == []
+                  and not getattr(app, '_matrix_queue', None), getattr(app, '_matrix_queue', None))
+        with _mock.patch('tkinter.messagebox.askokcancel', return_value=True):
+            queued = app.start_matrix()
+        check('accepting queues every pair', len(queued) == 9 and len(app._matrix_queue) == 8,
+              (len(queued), len(getattr(app, '_matrix_queue', []))))
+        check('and it says the matrix overrides the layout, by setting it to single',
+              app.layout_var.get() == 'single', app.layout_var.get())
+        app._matrix_queue = []
+        app.clear_base()
+        check('with nothing armed the plan is empty and the button is off',
+              app.matrix_plan() == [] and 'disabled' in app.matrix_btn.state(), app.matrix_btn.state())
+
     print('\n-- View base lists every picture that will be sent, and can drop one')
     # Armed from the gallery's own files: a base outside it is deliberately cleared by the next refresh ("a deleted or
     # moved file must not stay selected"), which is what made the first version of this test arm and lose three pictures.

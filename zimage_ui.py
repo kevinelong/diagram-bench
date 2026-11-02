@@ -160,6 +160,8 @@ STRENGTH_EXPLAINED = ('How much of the base picture survives.  Low end (20 %): k
                       'the pose).  High end (95 %): replaces it - the prompt decides everything and above about 0.85 the '
                       'subject of the base is usually gone.')
 STRENGTH_DETENT = 0.05  # the slider: it settles on these, so a drag is repeatable
+#: the strengths a base-strength matrix renders each armed picture at: light, medium, strong
+MATRIX_STRENGTHS = (0.40, 0.60, 0.80)
 ZOOM_MARGIN = 6        # the gap between the picture and the canvas edge; the top-right pin has always used it
 ZOOM_STEP = 48         # canvas pixels per wheel notch and per arrow press
 ZOOM_SLOP = 4          # a press that moves less than this is a click, not a pan
@@ -3127,6 +3129,27 @@ class App:
         self.strength_entry.bind('<End>', lambda e: (self.set_strength(STRENGTH_MAX), 'break')[1])
         self.denoise_text = ttk.Label(head, text='%d%%' % round(self.denoise.get() * 100))
         self.denoise_text.pack(side='right')
+        # A matrix is a different axis from a layout: the layout says how the tiles of ONE press are arranged, the matrix
+        # says how many presses and at what strengths (one armed picture -> 3 renders, two -> 6, one per strength).
+        # Putting it in the layout dropdown would make "16-up x matrix" ambiguous and would redefine four existing
+        # entries, so it is a button that states its own arithmetic.
+        # The matrix controls share the precision row - the same row as the arrows and the value box - because a row of
+        # their own pushed the whole column past its height budget (measured: the prompt box 707 px in a 700 px window).
+        self.matrix_min_var = tk.StringVar(value='40')
+        self.matrix_max_var = tk.StringVar(value='80')
+        self.matrix_steps_var = tk.StringVar(value='3')
+        for label, var, width in (('\u00b7', self.matrix_min_var, 3), ('\u2013', self.matrix_max_var, 3),
+                                  ('\u00d7', self.matrix_steps_var, 2)):
+            ttk.Label(head, text=label, foreground=self.theme.muted,
+                      font=('Segoe UI', 8)).pack(side='left', padx=(3, 1))
+            ttk.Entry(head, textvariable=var, width=width).pack(side='left')
+        self.matrix_btn = ttk.Button(head, text='matrix', command=self.start_matrix, state='disabled', width=7)
+        self.matrix_btn.pack(side='left', padx=(4, 0))
+        self._tip(self.matrix_btn,
+                  'Render the prompt once per armed picture at each strength from "from" to "to", in "n" even steps - '
+                  'one base and three strengths is three renders, two bases are six, three are nine. '
+                  'Ignores the layout choice (each render is one picture).')
+
         # The slider does **not** own the value: a `resolution` on a scale quantises the variable it is bound to, so a
         # typed 0.73 would become 0.75 the moment the bar drew itself. It reads the value in `_render_strength` and snaps
         # its own drags to the 5 % detents, which leaves the number exact.
@@ -9616,7 +9639,7 @@ class App:
         self._base_from_gallery = from_gallery
         self.base_path = Path(path)
         self.base_label.configure(text=self._short_name(self.base_path.name))
-        for name in ('clear_base_btn', 'view_base_btn'):
+        for name in ('clear_base_btn', 'view_base_btn', 'matrix_btn'):
             if hasattr(self, name):
                 getattr(self, name).state(['!disabled'])
         if self._base_tip is None:
@@ -9827,6 +9850,174 @@ class App:
         self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
                                                    text='generated image appears here')
 
+    def previous_prompt(self):
+        """The last prompt that was actually rendered, or '' - what "restore the previous prompt" puts back."""
+        for candidate in reversed(list(getattr(self, '_history', []) or [])):
+            text = (candidate or '').strip()
+            if text:
+                return text
+        return ''
+
+    def ask_empty_prompt(self):
+        """Generate was pressed with nothing to render: offer the previous prompt back, or the caret in the box.
+
+        An alert, not a status line: the corner message can be missed entirely, and the click otherwise does nothing at
+        all. Returning to the previous prompt is the same idea as undo, but it offers the *last rendered* one, which is
+        what someone who emptied the box by accident usually wants.
+        """
+        previous = self.previous_prompt()
+        win = self._closing_raises_main(tk.Toplevel(self.root))
+        win.title('Nothing to render')
+        win.transient(self.root)
+        win.geometry('460x150')
+        # deliberately not modal and not a `wait_window`: a modal dialog blocks the event loop (and the suite), while the
+        # thing this offers is "your caret back in the box", which is only useful if the box keeps the keyboard
+        win.resizable(False, False)
+        body = ttk.Frame(win, padding=12)
+        body.pack(fill='both', expand=True)
+        ttk.Label(body, text='The prompt is empty - there is nothing to render.', font=('Segoe UI', 10, 'bold'),
+                  wraplength=420, justify='left').pack(anchor='w')
+        ttk.Label(body, text=('Restore the previous prompt, or cancel and type a new one.'
+                              if previous else 'There is no previous prompt yet: type one and press Enter.'),
+                  foreground=self.theme.muted, wraplength=420, justify='left').pack(anchor='w', pady=(4, 10))
+        row = ttk.Frame(body)
+        row.pack(fill='x', side='bottom')
+        answer = {'value': 'cancel'}
+
+        def choose(value):
+            answer['value'] = value
+            win.destroy()
+
+        restore = ttk.Button(row, text='Restore previous prompt', state=('!disabled' if previous else 'disabled'),
+                             command=lambda: choose('restore'))
+        restore.pack(side='left')
+        cancel = ttk.Button(row, text='Cancel and type', command=lambda: choose('cancel'))
+        cancel.pack(side='left', padx=(6, 0))
+        win.bind('<Escape>', lambda e: choose('cancel'))
+        win.bind('<Return>', lambda e: choose('restore' if previous else 'cancel'))
+
+        def apply_choice():
+            if answer['value'] == 'restore' and previous:
+                self.text.delete('1.0', 'end')
+                self.text.insert('1.0', previous)
+                self.hint.configure(text='restored the previous prompt - Enter renders it')
+            else:
+                self.hint.configure(text='nothing to render - the prompt is empty')
+            self._focus_prompt()
+
+        win.bind('<Destroy>', lambda e: apply_choice())
+        # a Toplevel takes the keyboard when it maps, not when it is created: hand it back afterwards, or the caret is in
+        # a dialog nobody is reading while the box they want to type in is empty
+        win.bind('<Map>', lambda e: self._later(10, self._focus_prompt), add='+')
+        self._later(30, self._retitle, win)
+        # the caret goes back to the prompt now: the dialog waits for a click, and typing works either way
+        self._focus_prompt()
+        self.hint.configure(text='the prompt is empty - restore the previous one or type a new one')
+        return answer['value']
+
+    def _focus_prompt(self):
+        """Put the caret in the prompt, and record it: `_focus_target` is the convention the rest of the window uses."""
+        try:
+            self.text.focus_set()
+            self.text.mark_set('insert', 'end-1c')
+            self._focus_target = self.text
+        except Exception:
+            pass
+
+    def matrix_strengths(self):
+        """The strengths a matrix will render at, from the `from` / `to` / `n` boxes above the button.
+
+        From, to and a count rather than three fixed values: "40 60 80" is one ladder, "20 95 4" is another, and the number
+        of renders follows from what is asked for. Values outside the slider's usable range are clamped, and a ladder that
+        cannot be walked falls back to the default rather than silently rendering one picture.
+        """
+        def number(var, default):
+            try:
+                return float(str(var.get()).strip().replace('%', '').replace(',', '.'))
+            except (AttributeError, TypeError, ValueError):
+                return default
+        low = max(STRENGTH_MIN, min(STRENGTH_MAX, number(self.matrix_min_var, 40) / 100.0))
+        high = max(STRENGTH_MIN, min(STRENGTH_MAX, number(self.matrix_max_var, 80) / 100.0))
+        try:
+            count = int(number(self.matrix_steps_var, 3))
+        except (TypeError, ValueError):
+            count = 3
+        if high <= low or count < 2:
+            return list(MATRIX_STRENGTHS)
+        if count == 2:
+            return [round(low, 2), round(high, 2)]
+        step = (high - low) / (count - 1)
+        return [round(low + step * i, 2) for i in range(count)]
+
+    def matrix_plan(self):
+        """[(base path, strength)] for a base-strength matrix: every armed picture at every strength in the ladder.
+
+        One armed picture at three strengths gives three renders, two give six, three give nine - the arithmetic the
+        confirmation states, so the count is never a surprise before a run that costs minutes.
+        """
+        ladder = self.matrix_strengths()
+        return [(str(path), strength) for role, path in self.base_items() for strength in ladder]
+
+    def start_matrix(self):
+        """Run the prompt once per armed picture per matrix strength, as single pictures rather than N-up tiles."""
+        plan = self.matrix_plan()
+        if not plan:
+            self.hint.configure(text='arm a base first: the matrix renders each armed picture at three strengths')
+            return []
+        bases = len(self.base_items())
+        from tkinter import messagebox
+        # a rough clock, not a promise: the real per-picture cost is measured by the run itself
+        try:
+            per_picture = float(getattr(self, '_seconds_per_picture_value', None) or 20.0)
+        except (TypeError, ValueError):
+            per_picture = 20.0
+        estimate = len(plan) * max(1.0, per_picture)
+        ladder = self.matrix_strengths()
+        if not messagebox.askokcancel(
+                'Base x strength',
+                '%d armed picture%s x %d strengths (%s) = %d renders\n\n'
+                'Each is a separate %s px render, so it ignores the layout choice. Ordering: the current size and '
+                'prompt, one picture per strength.\n\nApproximate time: %.0f min.'
+                % (bases, '' if bases == 1 else 's', len(ladder),
+                   ', '.join('%d%%' % round(s * 100) for s in ladder), len(plan), self.size_var.get(),
+                   max(1.0, estimate) / 60.0),
+                parent=self.root):
+            self.hint.configure(text='matrix cancelled')
+            return []
+        self._matrix_queue = list(plan)
+        self._matrix_last_base = None
+        self.layout_var.set('single')            # one picture per press, which is what the matrix counts
+        self.hint.configure(text='matrix: %d renders queued' % len(plan))
+        self._matrix_next()
+        return plan
+
+    def _matrix_next(self):
+        """Arm the next (base, strength) pair and press Generate; the queue advances on each finished picture."""
+        queue = getattr(self, '_matrix_queue', None) or []
+        if not queue:
+            self._matrix_queue = []
+            self.hint.configure(text='matrix finished')
+            return
+        path, strength = queue[0]
+        total = getattr(self, '_matrix_total', None) or len(queue)
+        if getattr(self, 'busy', False):
+            self._later(500, self._matrix_next)     # a render is in flight: wait for its picture
+            return
+        self._matrix_queue = queue[1:]
+        self._matrix_total = total
+        try:
+            self._set_base(Path(path))
+        except Exception as e:
+            self.hint.configure(text='matrix: could not arm %s (%s) - skipping it' % (Path(path).name, e))
+            self._later(50, self._matrix_next)
+            return
+        self.set_strength(strength)
+        self._strength_touched = True                 # the matrix chose it, and it must survive a style proposal
+        done = total - len(self._matrix_queue)
+        self.hint.configure(text='matrix %d of %d: %s at %d%%'
+                                 % (done, total, Path(path).name, round(strength * 100)))
+        self.generate()
+
     def base_items(self):
         """[(role, path)] for every picture the next render will send - the base first, then the references.
 
@@ -9912,7 +10103,7 @@ class App:
         # a strength at all after a variation run.
         self._strength_touched = False
         self._bases = []                 # the other references go with it, or a later render would still combine them
-        for name in ('clear_base_btn', 'view_base_btn'):
+        for name in ('clear_base_btn', 'view_base_btn', 'matrix_btn'):
             if hasattr(self, name):
                 getattr(self, name).state(['disabled'])
         self._base_from_gallery = False
@@ -10425,7 +10616,12 @@ class App:
             return
         prompt = (_prompt if _prompt is not None else self.text.get('1.0', 'end')).strip()
         if not prompt:
-            self.hint.configure(text='enter a prompt first')
+            # Asked for 2026-11-02: an immediate alert rather than a hint in the corner, offering the previous prompt back
+            # or the caret in the box. Only for a Generate someone actually pressed - `_prompt` is a driven run.
+            if _prompt is None:
+                self.ask_empty_prompt()
+            else:
+                self.hint.configure(text='enter a prompt first')
             return
         # a prompt that describes several scenes renders one image per scene; an edit (mask, pad, base) never splits
         if _prompt is None and not _force_single and self.base_path is None and self._mask is None and not any(self._pads):
@@ -10824,6 +11020,8 @@ class App:
                     self._warm_one(path)
                 elif kind == 'image':
                     raw, path = payload
+                    if getattr(self, '_matrix_queue', None):
+                        self._later(200, self._matrix_next)   # the matrix is a sequence, not one press
                     if self._preview:
                         self._preview = False
                         self.busy = False
