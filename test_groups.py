@@ -271,6 +271,18 @@ def main():
     check('an empty list is handled', gp.plan([]) == {'recent': [], 'groups': [], 'ungrouped': [],
                                                       'threshold': gp.DEFAULT_THRESHOLD,
                                                       'recent_n': gp.DEFAULT_RECENT})
+    # The single-root case: every picture shares one lineage root, so the linking block above is skipped and `families`
+    # used to be seeded by index. Any gallery with one distinct root raised KeyError here and drew no folder at all.
+    one_root = [{'path': 'r%d.png' % i, 'prompt': 'a man in a hat', 'created': '2026-10-0%d' % (i + 1)}
+                for i in range(3)]
+    try:
+        single_root_plan = gp.plan(one_root)
+        crashed = None
+    except KeyError as e:
+        single_root_plan, crashed = {}, e
+    check('a gallery with one distinct lineage root does not raise', crashed is None, crashed)
+    check('and it still makes no folder of two pictures, per MIN_GROUP', single_root_plan.get('groups') == [],
+          single_root_plan.get('groups'))
     check('identical prompts form one folder', len(gp.group_texts(['a red bicycle'] * 5)) == 1)
     unicode_text = 'three women on a mountain top — sunrise ☀\n\nnew line'
     lex = gp.fit_lexicon(texts)

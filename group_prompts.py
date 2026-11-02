@@ -788,8 +788,13 @@ def plan(items, threshold=DEFAULT_THRESHOLD, recent=DEFAULT_RECENT, min_group=MI
                         parent[find(text_b)] = find(text_a)
             for text in root_list:
                 families[text] = find(text)
+        # A single root skips the linking block above, so `families` is still empty here and this line has to seed it
+        # keyed by the TEXT - keying by the index wrote {0: 'man'} while the lookup below is by text, so a gallery holding
+        # one distinct lineage root died with KeyError on that prompt and no folder was ever drawn. Two or more roots fill
+        # the dict above and make this line a no-op, which is why it went unnoticed (found 2026-11-02 on a one-picture
+        # gallery on the RTX 4060 box; fixed there in e455f83, still broken here until now).
         for i, text in enumerate(root_list):
-            families.setdefault(i, text)
+            families.setdefault(text, text)
         by_family = {}
         for text in root_list:
             by_family.setdefault(families[text], []).extend(roots[text])
