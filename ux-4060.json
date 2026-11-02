@@ -1,0 +1,125 @@
+{
+  "machine": {
+    "os": "Windows-11-10.0.26340-SP0",
+    "python": "3.12.1",
+    "tk": "8.6",
+    "name": "13th Gen Intel(R) Core(TM) i9-13950HX",
+    "numberofcores": "24",
+    "numberoflogicalprocessors": "32",
+    "maxclockspeed": "2200",
+    "ram_gb": 15.7,
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_mib": 8188,
+    "driver": "595.79",
+    "compute": "8.9"
+  },
+  "app": {
+    "version": "v0.19.1",
+    "window": "1280x800"
+  },
+  "gallery": {
+    "pictures": 7,
+    "folders": 5,
+    "worst_folder": 2
+  },
+  "events": {
+    "apply_strip_resize": {
+      "n": 5,
+      "p50": 0.1,
+      "p90": 0.2,
+      "max": 0.2
+    },
+    "folder_click_ack": {
+      "n": 5,
+      "p50": 0.3,
+      "p90": 1.1,
+      "max": 1.1
+    },
+    "folder_click_to_pane": {
+      "n": 5,
+      "p50": 38.9,
+      "p90": 44.5,
+      "max": 44.5
+    },
+    "refresh_gallery": {
+      "n": 5,
+      "p50": 47.3,
+      "p90": 61.0,
+      "max": 61.0
+    },
+    "render_contents": {
+      "n": 5,
+      "p50": 38.9,
+      "p90": 44.5,
+      "max": 44.5
+    }
+  },
+  "calculated": {
+    "instant_p50_under_100ms": [
+      "apply_strip_resize",
+      "folder_click_ack",
+      "refresh_gallery",
+      "render_contents"
+    ],
+    "in_flow_p90_within_budget": [
+      "apply_strip_resize",
+      "folder_click_ack",
+      "folder_click_to_pane",
+      "refresh_gallery",
+      "render_contents"
+    ],
+    "budget_compliance": "5 of 5",
+    "jitter_p90_over_p50": {
+      "apply_strip_resize": 2.0,
+      "folder_click_ack": 3.67,
+      "folder_click_to_pane": 1.14,
+      "refresh_gallery": 1.29,
+      "render_contents": 1.14
+    },
+    "open_wall_ms": 4428.4,
+    "repeat_count": 5
+  },
+  "cold_pass": {
+    "events": {
+      "apply_strip_resize": {
+        "n": 5,
+        "p50": 0.1,
+        "p90": 1.1,
+        "max": 1.1
+      },
+      "folder_click_ack": {
+        "n": 5,
+        "p50": 0.3,
+        "p90": 0.7,
+        "max": 0.7
+      },
+      "folder_click_to_pane": {
+        "n": 5,
+        "p50": 36.8,
+        "p90": 49.5,
+        "max": 49.5
+      },
+      "refresh_gallery": {
+        "n": 5,
+        "p50": 58.4,
+        "p90": 66.6,
+        "max": 66.6
+      },
+      "render_contents": {
+        "n": 5,
+        "p50": 36.8,
+        "p90": 49.5,
+        "max": 49.5
+      }
+    },
+    "open_wall_ms": 4450.7,
+    "counts": {
+      "app_first_paint": 0,
+      "folder_click_ack": 5,
+      "folder_click_to_pane": 5,
+      "render_contents": 5,
+      "refresh_gallery": 5,
+      "apply_strip_resize": 5
+    }
+  }
+}
