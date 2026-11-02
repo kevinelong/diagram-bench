@@ -83,6 +83,19 @@ def _registry_value(path, name, default=None):
 #: the strength badge's ground: mid grey with black text, as asked on 2026-11-02, so it reads as a
 #: different fact from the size band (which is coloured by file size)
 STRENGTH_BADGE_BG = '#cccccc'
+#: from how many pictures a folder's pane build is slow enough to deserve an animated notice
+BIG_FOLDER = 40
+
+
+def notice_font(bold=False):
+    """The font every pane notice uses: the same *size* as the main "Loading" message (asked 2026-11-02).
+
+    Computed rather than a literal because that message is sized from `TkDefaultFont` doubled, so a machine that scales its
+    base font scales the notices with it instead of leaving them the odd one out.
+    """
+    base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
+    return ('Segoe UI', base * 2, 'bold' if bold else 'normal')
+
 PIXEL_FONT = ('Fixedsys', 8)
 FALLBACK_PIXEL_FONT = ('Consolas', 7)
 SIZE_BANDS = ((64 * 1024, '#ff6347', '#ffffff'),        # tomato red: 64 kB or less
@@ -2481,6 +2494,16 @@ class SelectableText(ttk.Frame):
         text = kw.pop('text', None)
         fg = kw.pop('foreground', None)
         wrap = kw.pop('wraplength', None)
+        justify = kw.pop('justify', None)
+        if justify is not None:
+            self._justify = justify
+            # a `tk.Text` has no `-justify` option: justification is a *tag* setting, which is why this is done with a tag
+            # applied to everything rather than a widget option
+            try:
+                self.text.tag_configure('justify', justify=justify)
+                self.text.tag_add('justify', '1.0', 'end')
+            except Exception:
+                pass
         if wrap is not None:
             self._wraplength = int(wrap)
         if fg is not None:
@@ -2491,6 +2514,10 @@ class SelectableText(ttk.Frame):
             self.text.configure(state='normal')
             self.text.delete('1.0', 'end')
             self.text.insert('1.0', self._text)
+            try:
+                self.text.tag_add('justify', '1.0', 'end')
+            except Exception:
+                pass
             self.text.configure(state='disabled')
             self._fit()
         return self
@@ -2502,6 +2529,8 @@ class SelectableText(ttk.Frame):
             return self._text
         if key in ('foreground', '-foreground'):
             return self._fg
+        if key in ('wraplength', '-wraplength'):
+            return self._wraplength
         return self.text.cget(key)
 
     def __getitem__(self, key):
@@ -2572,6 +2601,37 @@ def with_synthetic_head(plan):
         plan['groups'] = head + list(plan.get('groups') or [])
     return plan
 
+
+class CentreNotice(SelectableText):
+    """A notice centred in its parent, horizontally and vertically, and selectable so it can be pasted elsewhere.
+
+    Asked for 2026-11-02: the per-pane status text - "generated image appears here", "grouping N pictures..." - should be
+    centred both ways, the same size as the main "Loading" message, and copyable like any other text output. A `tk.Text` is
+    the only Tk widget that holds a selection, so the places that used painted text or a plain Label now carry one of these.
+    """
+
+    def __init__(self, master, text='', **kw):
+        kw.setdefault('font', notice_font())
+        super().__init__(master, text=text, wraplength=420, justify='center', width=40, **kw)
+        self.text.configure(cursor='xterm')
+        self.center()
+
+    def center(self):
+        try:
+            self.place(relx=0.5, rely=0.5, anchor='center')
+        except Exception:
+            pass
+
+    def show(self, text=''):
+        self.configure(text=text)
+        if text:
+            self.lift()
+            self.center()
+        else:
+            try:
+                self.place_forget()
+            except Exception:
+                pass
 
 class App:
     def __init__(self, root, engine, args):
@@ -3494,8 +3554,10 @@ class App:
         self.compare_chk.pack(side='left', padx=(4, 0))
 
 
-        self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
-                                                   text='generated image appears here')
+        # a notice over the canvas rather than `create_text`: painted text cannot be selected, and this message was asked
+        # to be copyable. Centred both ways, in the same font as the main Loading message (2026-11-02).
+        self.placeholder = None
+        self.notice = CentreNotice(right, text='generated image appears here')
 
         prefill = self.args.initial
         if getattr(self.args, 'initial_file', ''):
@@ -4723,8 +4785,13 @@ class App:
                                         ' (stopped at %d)' % SCAN_CAP if self._scan_capped else ''))
         return self._recursive
 
-    def _loading_show(self):
-        """Put the large centred notice up while the folders are being worked out."""
+    def _loading_show(self, text='Loading'):
+        """Put the large centred notice up while something long is happening, animated.
+
+        `text` lets the same mechanism say "Loading" while the folders are worked out and "opening 517 pictures"
+        while a big folder's pane is built (asked 2026-11-02), so every wait reads the same way.
+        """
+        self._loading_text = text
         lbl = getattr(self, 'loading_lbl', None)
         if lbl is None or not lbl.winfo_exists():
             return
@@ -4770,7 +4837,7 @@ class App:
         # the text first and on its own: a colour that cannot be mixed (Windows reports system colour *names*, not hex)
         # must not take the animation down with it, which is exactly what one swallowed exception did
         try:
-            lbl.configure(text='Loading' + dots)
+            lbl.configure(text='%s%s' % (getattr(self, '_loading_text', 'Loading'), dots))
         except Exception:
             pass
         phase = (step + 1) / 8.0
@@ -5063,6 +5130,15 @@ class App:
         # build, and that build used to run before a single visible thing changed - which is what made a folder click read
         # as dropped. The cursor, the button's label and a title that says "opening" cost about a millisecond.
         self._acknowledge_folder(index)
+        # hundreds of pictures take a second or more to lay out: say so, centred and animated, rather than leaving the
+        # pane looking like the click did nothing (asked 2026-11-02)
+        try:
+            groups = (self._plan or {}).get('groups') or []
+            count = len(groups[index].get('items') or []) if index is not None and 0 <= index < len(groups) else 0
+            if count >= BIG_FOLDER:
+                self._loading_show('opening %d pictures' % count)
+        except Exception:
+            pass
         # Then let the loop paint that acknowledgement *before* the build starts. Running the build in this same callback
         # meant the paint could only happen afterwards, so the visible response was the build's duration (406 ms p50 on the
         # real gallery). One turn later, the click is on screen first - and any work the startup pass had already queued is
@@ -6252,9 +6328,10 @@ class App:
             self._contents_geom = None
             self._content_order = []
             self.contents_title.set_title('folder')
+            # centred in the pane and the same size as every other notice; the pane keeps its column and its width
             ttk.Label(self.contents, text='No folder open.\nClick a folder to see its pictures here.',
-                      foreground=self.theme.muted, justify='center', anchor='center',
-                      font=('Segoe UI', 11),
+                      anchor='center', justify='center', font=notice_font(),
+                      foreground=self.theme.muted,
                       wraplength=max(120, self._contents_w - 12)).grid(row=0, column=0, sticky='new', pady=(28, 0))
         except Exception:
             pass
@@ -6279,6 +6356,7 @@ class App:
         except Exception as e:
             log_error('folder pane rebuild', e)
         finally:
+            self._loading_hide()
             PROFILE.record('folder_click_to_pane', (time.perf_counter() - started) * 1000.0)
 
     def _acknowledge_folder(self, index):
@@ -9116,9 +9194,7 @@ class App:
             self.clear_base()
         if self._current is not None and any(p.name == self._current.name for p in paths):
             self.canvas.delete('img')
-            self.canvas.delete('placeholder')
-            self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
-                                    text='that image was deleted')
+            self.notice.show('that image was deleted')
             self.copy_btn.state(['disabled'])
             self.info_btn.state(['disabled'])
             self._img = None
@@ -9546,6 +9622,23 @@ class App:
                 applied.append('negative')
             except Exception:
                 pass
+        # The base itself, which is what makes Enter reproduce the picture instead of starting over: a sidecar records the
+        # picture it was made from, and without loading it a restored strength of 42 % would be applied to a text-to-image
+        # run at denoise 1.0 - unrelated to what is on screen (asked 2026-11-02). Loaded only if it still exists, and said
+        # out loud, because arming a base changes what Enter does.
+        base_ref = meta.get('base_image')
+        if base_ref:
+            candidate = Path(str(base_ref))
+            if not candidate.is_absolute():
+                candidate = Path(getattr(self, '_source', None) or self.args.out) / candidate.name
+            if candidate.exists():
+                try:
+                    self._set_base(candidate, from_gallery=True)
+                    applied.append('base %s' % candidate.name)
+                except Exception as e:
+                    applied.append('(base not loaded: %s)' % type(e).__name__)
+            else:
+                applied.append('(its base %s is gone)' % Path(str(base_ref)).name)
         # the strength only means something for an edit, and restoring it is a decision the user then owns - the same
         # flag a slider drag sets, so a style proposal cannot quietly move it back
         if meta.get('base_image') and meta.get('denoise') is not None:
@@ -9737,7 +9830,7 @@ class App:
         self._img = Image.open(io.BytesIO(raw))
         self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
         self._pan_grab = None
-        self.canvas.delete('placeholder')
+        self.notice.show('')
         self._idle(self._redraw)
         self._idle(self._show_resolution)
 
@@ -9758,7 +9851,7 @@ class App:
             return
         self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
         self._pan_grab = None
-        self.canvas.delete('placeholder')
+        self.notice.show('')
         self._idle(self._redraw)
         self._idle(self._show_resolution)
 
@@ -9973,9 +10066,8 @@ class App:
     def _clear_picture(self):
         self._img = None
         self.canvas.delete('img')
-        self.canvas.delete('placeholder')
-        self.placeholder = self.canvas.create_text(14, 14, anchor='nw', fill='#888', tags='placeholder',
-                                                   text='generated image appears here')
+        self.notice.show('')
+        self.notice.show('generated image appears here')
 
     def previous_prompt(self):
         """The last prompt that was actually rendered, or '' - what "restore the previous prompt" puts back."""
@@ -10611,7 +10703,7 @@ class App:
         """Keep the placeholder text inside the canvas however narrow the window gets."""
         w = event.width if event is not None else self.canvas.winfo_width()
         try:
-            self.canvas.itemconfigure('placeholder', width=max(90, w - 28))
+            self.notice.configure(wraplength=max(90, w - 28))
         except Exception:
             pass
 
@@ -11289,7 +11381,7 @@ class App:
         self._img = Image.open(io.BytesIO(raw))
         self._pan_xy = None              # a new picture starts at the pinned corner at the same zoom level
         self._pan_grab = None
-        self.canvas.delete('placeholder')
+        self.notice.show('')
         self.root.update_idletasks()      # let the maximised window settle before measuring the canvas
         self._idle(self._redraw)
 

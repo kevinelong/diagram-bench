@@ -1293,10 +1293,21 @@ def main():
         tops[0].destroy()
     app.clear_base()
 
-    print('\n-- the placeholder wraps instead of being clipped')
+    print('\n-- the placeholder wraps instead of being clipped, is centred, and can be copied')
     app._fit_placeholder(NS(width=300))
-    width = app.canvas.itemcget(app.placeholder, 'width')
-    check('placeholder wraps to the canvas width', width != '' and int(width) == 272, width)
+    # The placeholder is a selectable notice now, not painted canvas text (asked 2026-11-02), so the wrap is its
+    # `wraplength` - the same intent: it must fit the canvas rather than run off it.
+    wrap = int(app.notice.cget('wraplength') or 0)
+    check('placeholder wraps to the canvas width', wrap == 272, wrap)
+    info = app.notice.place_info()
+    check('and it is centred in the picture area, both ways',
+          float(info.get('relx') or 0) == 0.5 and float(info.get('rely') or 0) == 0.5 and info.get('anchor') == 'center',
+          info)
+    check('and it is a text widget, so the message can be selected and pasted elsewhere',
+          isinstance(app.notice.text, tk.Text), type(app.notice).__name__)
+    check('in the same font size as the main Loading message',
+          int(zui.notice_font()[1]) == abs(int(__import__('tkinter.font', fromlist=['font']).nametofont('TkDefaultFont').cget('size'))) * 2,
+          zui.notice_font())
 
     print('\n-- advanced panel, negative prompt, style and model')
     check('advanced is hidden by default', not app.advanced.winfo_ismapped())
