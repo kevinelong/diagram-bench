@@ -909,6 +909,9 @@ FOLDER_SCAN = 240      # how far back through a folder the walk may look for fou
 BATCH_TILES = 21     # strip pictures added per scroll to the bottom
 BATCH_FOLDERS = 12   # folder tiles added per scroll
 BATCH_CONTENTS = 24  # pictures added per scroll inside the open folder
+CONTENT_PAGE_CAP = 96  # most tiles one open builds, whatever the counter says: a 531-picture folder built 552 on open
+                       # (render_contents 2 953 ms, measured 2026-11-02) because the opening page - cols x rows_fit - is
+                       # the whole folder once tiles are small
 FILTER_CAP = 200     # while a search is active the strip is a result list, not a recency window
 
 #  Peaks measured on this box with nvidia-smi at 0.25 s (12,227 MiB total). Steps and hires barely move them; batch
@@ -2610,10 +2613,18 @@ class CentreNotice(SelectableText):
     the only Tk widget that holds a selection, so the places that used painted text or a plain Label now carry one of these.
     """
 
-    def __init__(self, master, text='', **kw):
+    def __init__(self, master, text='', bg=None, **kw):
         kw.setdefault('font', notice_font())
+        self._bg = bg
         super().__init__(master, text=text, wraplength=420, justify='center', width=40, **kw)
         self.text.configure(cursor='xterm')
+        if bg is not None:
+            # over a picture the frame's own colour reads as a black bar; the canvas colour makes it sit on the image
+            try:
+                self.text.configure(background=bg)
+                self.configure(style='TFrame')
+            except Exception:
+                pass
         self.center()
 
     def center(self):
@@ -3425,7 +3436,7 @@ class App:
         # widget so a progress line can be selected and pasted (asked 2026-11-02: "reading the folder..." was neither
         # centred nor selectable). It sits over the canvas, so it costs no layout row.
         self.jobs_panel = None
-        self.jobs_view = CentreNotice(right, text='')
+        self.jobs_view = CentreNotice(right, text='', bg=self.theme.window)
         self.jobs_view.place_forget()
 
         self.canvas.bind('<Configure>', lambda e: self._redraw())
@@ -3557,7 +3568,7 @@ class App:
         # a notice over the canvas rather than `create_text`: painted text cannot be selected, and this message was asked
         # to be copyable. Centred both ways, in the same font as the main Loading message (2026-11-02).
         self.placeholder = None
-        self.notice = CentreNotice(right, text='generated image appears here')
+        self.notice = CentreNotice(right, text='generated image appears here', bg=self.theme.window)
 
         prefill = self.args.initial
         if getattr(self.args, 'initial_file', ''):
@@ -3735,7 +3746,7 @@ class App:
         now = time.time()
         lines, live = [], False
         for key, job in list(getattr(self, '_jobs', {}).items()):
-            if job['end'] is not None and now - job['end'] > 4.0:
+            if job['end'] is not None and now - job['end'] > 2.0:
                 del self._jobs[key]                      # a finished job lingers for a moment, then goes
                 continue
             elapsed = (job['end'] or now) - job['t0']
@@ -3753,8 +3764,13 @@ class App:
                 lines.append('\u25cf %s  %s%0.0fs%s' % (
                     job['label'], ('%d  ' % done) if done else '', elapsed,
                     ('  ' + job['note']) if job['note'] else ''))
+        live_jobs = any(j['end'] is None for j in getattr(self, '_jobs', {}).values())
         try:
-            view.show('\n'.join(lines) if lines else '')
+            if self._img is not None and not live_jobs:
+                # a finished job's ✓ is not worth a bar across the picture: hide the board once it is only history
+                view.show('')
+            else:
+                view.show('\n'.join(lines) if lines else '')
         except Exception:
             pass
         if live:
@@ -6499,7 +6515,10 @@ class App:
         # for many" (reported 2026-10-31). max() so a later render never shrinks what is already on screen.
         try:
             rows_fit = int(self.contents_canvas.winfo_height() // max(1, tile_px)) + 1
-            self._content_shown = max(self._content_shown, cols * rows_fit)
+            # ...but a *screenful* is not licence to build the whole folder. Small tiles make cols x rows_fit enormous -
+            # a 528-picture folder was rendering 528 tiles on open (render_contents 1 399 ms, measured 2026-11-02), which
+            # is precisely what paging exists to avoid. Cap the first page at two batches; scrolling adds the rest.
+            self._content_shown = max(self._content_shown, min(cols * rows_fit, BATCH_CONTENTS * 2))
         except Exception:
             pass
         items = list(group['items'])
@@ -6562,7 +6581,7 @@ class App:
                 log_error('rank order in the contents pane', exc)
                 items.sort(key=lambda r: r.get('created') or '', reverse=True)
         order = []                                  # the pane's own display order, for its keyboard
-        for i, row in enumerate(items[:self._content_shown]):
+        for i, row in enumerate(items[:min(self._content_shown, CONTENT_PAGE_CAP)]):
             tp = self._thumb_of(row['path'])        # cached or nothing: a decode here would empty the column
             photo = self._photo_of(tp, tile_px, key=row['path'])
             waiting = photo is None
@@ -7098,8 +7117,30 @@ class App:
         return True
 
     def _fill_view(self, which='strip', rounds=8):
-        """Keep adding batches until the column is full - then build the next ones' thumbnails in the background."""
+        """Fill the column - then build the next ones' thumbnails in the background.
+
+        The contents pane used to do this by calling `_grow` in a loop, and `_grow` rebuilds the whole page: a 531-picture
+        folder went through 22 full rebuilds inside one `update()` (page 24 -> 552, `render_contents` 2 953 ms, measured
+        2026-11-02), because every Configure started the loop again. One sizing pass instead, bounded by
+        `CONTENT_PAGE_CAP`: the pane fills to the bottom of the view or a page, whichever comes first, and scrolling does
+        the rest.
+        """
         if getattr(self, '_rebuilding', False):
+            return
+        if which != 'strip':
+            items = getattr(self, '_content_items', None) or []
+            if self._active_folder is None or self._content_shown >= len(items):
+                return
+            try:
+                width = self.contents_canvas.winfo_width() or CONTENTS_W
+                cols, tile_px = self._contents_metrics(width)
+                rows = int(self.contents_canvas.winfo_height() // max(1, tile_px)) + 1
+            except Exception:
+                return
+            want = min(len(items), CONTENT_PAGE_CAP, max(self._content_shown, cols * rows))
+            if want > self._content_shown:
+                self._content_shown = want
+                self._render_contents()
             return
         for _ in range(rounds):
             if self._grid_taller_than_view(which):

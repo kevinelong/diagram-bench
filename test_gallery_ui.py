@@ -895,13 +895,24 @@ def main():
           app.jobs_view.cget('text'))
     app.job_end('probe', '2400 pictures')
     text = app.jobs_view.cget('text')
-    check('a finished job says so and how much it did', '\u2713' in text and '2400 pictures' in text, text)
+    # The board hides itself whenever a picture is on screen and nothing is running (reported 2026-11-02: it left a dark
+    # bar across the image). Its wording is therefore checked with no picture displayed, which is the state it is for.
+    keep = app._img
+    app._img = None
+    app._render_jobs()
+    check('a finished job says so and how much it did',
+          '\u2713' in app.jobs_view.cget('text') and '2400 pictures' in app.jobs_view.cget('text'),
+          app.jobs_view.cget('text'))
     app._jobs['probe']['end'] -= 10          # older than the linger window
     app._render_jobs()
     check('and it leaves the board after a moment', '2400 pictures' not in app.jobs_view.cget('text'),
           app.jobs_view.cget('text'))
+    app._img = keep
     # the board is a notice now (2026-11-02): centred over the picture area, so it costs no layout row, and a text widget
     # so a progress line can be selected and pasted
+    app._img = None
+    app.job_start('scan', 'reading the folder')
+    app._render_jobs()
     info = app.jobs_view.place_info()
     check('the board is centred over the picture area and costs no layout row',
           app.jobs_view.master is app.canvas.master
@@ -909,6 +920,27 @@ def main():
           (app.jobs_view.master is app.canvas.master, info))
     check('and its lines can be selected, like every other notice',
           isinstance(app.jobs_view.text, tk.Text), type(app.jobs_view).__name__)
+    app.job_end('scan')
+    app._img = keep
+
+    # --- no stale overlays (reported 2026-11-02: "a black bar centred in front of the main image") ---------------
+    # Every notice over the picture area is opaque: `CentreNotice` paints the theme background where it sits. So one that
+    # outlives its message is not a leftover label, it is a slab across the picture. This is the audit, in the one state
+    # the reader is actually in after a load - a picture on screen, no job running.
+    app.job_start('scan', 'reading the folder')
+    root.update()
+    check('a running job shows the board', app.jobs_view.winfo_ismapped() == 1, app.jobs_view.winfo_ismapped())
+    app.job_progress('scan', done=7, total=24)
+    app.job_end('scan')
+    root.update()
+    check('a finished job leaves no bar across the picture', app.jobs_view.winfo_ismapped() == 0,
+          app.jobs_view.cget('text')[:40])
+    check('the placeholder is gone once a picture is shown', app.notice.winfo_ismapped() == 0,
+          app.notice.cget('text')[:40])
+    check('and the loading label is gone too', app.loading_lbl.winfo_ismapped() == 0,
+          app.loading_lbl.cget('text')[:20])
+    check('grouping badge is gone once grouping has finished', app.grouping_badge.winfo_ismapped() == 0,
+          app.grouping_badge.cget('text')[:30])
 
     print('\n-- the API summary and the explanation can be selected and copied')
     check('the banner is a selectable text, not a label', isinstance(app.banner, zui.SelectableText), type(app.banner))
