@@ -6697,15 +6697,28 @@ class App:
         return max(PROMPT_MIN_W, need)
 
     def _column_floors(self):
-        """The minimum each column may have, in content pixels - no gesture and no window may take one below this."""
-        return {COL_STRIP: GAL_FLOOR_W + self._bar_px(self.gal_bar),   # four columns at the 96 px floor, and its bar
-                COL_PANE: CONTENTS_W_MIN,             # the narrowest the pane's pictures stay readable in
-                COL_PROMPT: self._prompt_floor(),     # its own rows, measured
+        """The minimum each column may have, in content pixels - no gesture and no window may take one below this.
+
+        The strip and the pane keep only a small constant floor now (asked 2026-11-02: "I can't always resize the panes
+        and can't figure out what rules govern when I can ... do we really need to enforce limits?"). The old floors were
+        `GAL_FLOOR_W + bar` (~400 px, four columns at the narrowest tile) and `CONTENTS_W_MIN`, so the boundary stopped
+        hundreds of pixels from anywhere the reader wanted it, and the stop moved with the content. A column at 0 px
+        cannot be found again, so the floor is 120 and the reader decides the rest - the grid reflows to whatever fits.
+
+        The prompt keeps its measured floor, and that one is real rather than arbitrary: a row of comboboxes and buttons
+        cannot reflow (each has a character width), and Tk widens a column rather than clip its children - so a smaller
+        floor would not move the sash, it would snap back. Its floor is the only one still derived from content.
+        """
+        return {COL_STRIP: 120,                       # narrow enough for one column of tiles, and still findable
+                COL_PANE: 120,
+                COL_PROMPT: self._prompt_floor(),     # its own rows, measured - and the one limit that is not arbitrary
                 COL_PICTURE: PICTURE_MIN_W}           # the action bar under the picture
 
     def _column_caps(self):
         """The maximum each column may have: beyond these a window is throwing pixels at a column that stops growing."""
-        return {COL_STRIP: GAL_MAX_W, COL_PANE: CONTENTS_W_MAX, COL_PROMPT: 10 ** 6, COL_PICTURE: 10 ** 6}
+        # no cap where the reader is steering: a column grows until the window stops it, and the tile grid reflows to
+        # show as many as fit at the current detent rather than a pre-agreed maximum
+        return {COL_STRIP: 10 ** 6, COL_PANE: 10 ** 6, COL_PROMPT: 10 ** 6, COL_PICTURE: 10 ** 6}
 
     def _root_w(self, width=None):
         try:
@@ -6899,7 +6912,7 @@ class App:
         """
         grew = int(want) - (strip + pane)
         if grew > 0:
-            add = min(grew, max(0, GAL_MAX_W - strip))
+            add = min(grew, max(0, self._column_caps()[COL_STRIP] - strip))
             strip += add
             pane += min(grew - add, max(0, CONTENTS_W_MAX - pane))
         elif grew < 0:
