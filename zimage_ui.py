@@ -6974,9 +6974,12 @@ class App:
         self._apply_layout(persist=persist)
         return self._contents_w
 
-    @staticmethod
-    def _share_gallery(want, strip, pane, floors):
+    def _share_gallery(self, want, strip, pane, floors):
         """Split a gallery-column interior of `want` px between the strip and the pane.
+
+        Not a staticmethod: it reads `self._column_caps()` for the strip's cap, and as a staticmethod `self` was never
+        bound - every sash drag on the gallery boundary died with `NameError: name 'self' is not defined` (found on the
+        4060 laptop, 2026-11-02, the first time `test_sizing.py` reached its drag step).
 
         A growth goes to the strip first and a shrinkage comes out of the pane first: widening the gallery column is
         widening the list of pictures, while narrowing it is spending the pane - which holds a subset of the same
