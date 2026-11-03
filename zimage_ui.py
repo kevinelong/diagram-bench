@@ -7793,6 +7793,14 @@ class App:
         from the column, so the row always fills it instead of leaving a gutter.
         """
         from PIL import ImageTk
+        # Clear first: the previous pass may have left picture tiles here, and returning before this line is how the recent
+        # image row stayed on screen while the folder grid waited for the plan (reported 2026-11-03).
+        try:
+            for stale in self.recent.winfo_children():
+                stale.destroy()
+            self._tile_widgets = {}
+        except Exception as e:
+            log_error('strip clear', e)
         if not ((getattr(self, '_plan', None) or {}).get('groups')):
             # Nothing to draw yet. Say what is happening instead of leaving an empty area, but only once - a redraw every
             # event was a visible flash (11 in 15 s measured).
