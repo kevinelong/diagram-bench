@@ -2746,6 +2746,8 @@ class App:
         except Exception:
             root.geometry('1180x720')
         self._later(150, self._ensure_maximized)
+        self.view_mode = self._settings.get('view') or 'columns'
+        self._back_btn = self._new_back_button()
         # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
         # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
         # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
@@ -3859,6 +3861,10 @@ class App:
                          command=lambda: self._split_into_sessions(label))
         menu.add_command(label='Merge the sessions back into one folder',
                          command=lambda: self._merge_sessions(label))
+        menu.add_separator()
+        menu.add_command(label='Folders only', command=lambda: self.set_view_mode('folders'))
+        menu.add_command(label='Pictures only', command=lambda: self.set_view_mode('pictures'))
+        menu.add_command(label='All columns', command=lambda: self.set_view_mode('columns'))
         menu.add_separator()
         menu.add_command(label='Session log\u2026', command=self.show_run_log)
         menu.add_command(label='Open pictures folder\u2026', command=self.open_folder)
@@ -5035,6 +5041,73 @@ class App:
                 self.text.focus_set()
         except Exception:
             pass
+
+    # ---------------------------------------------------------------- drill-down view modes
+    # Asked 2026-11-02, after the flicker report: folders alone, then pictures alone, then the split. The three columns are
+    # still the layout; a mode only *hides* cells, so no surface is re-created and nothing new has to be kept consistent.
+    VIEW_MODES = ('folders', 'pictures', 'columns')
+    _VIEW_CELLS = (0, 1, 2, 3, 4)      # gallery, gallery sash, prompt, prompt sash, picture
+
+    def set_view_mode(self, mode, persist=True):
+        """Show one of the three shapes: folders alone, pictures alone, or all three columns."""
+        mode = mode if mode in self.VIEW_MODES else 'columns'
+        self.view_mode = mode
+        show = {0: mode in ('folders', 'columns'),      # the gallery column and its own sash
+                1: mode in ('folders', 'columns'),
+                2: mode in ('pictures', 'columns'),     # prompt, prompt sash, picture
+                3: mode in ('pictures', 'columns'),
+                4: mode in ('pictures', 'columns')}
+        # cached once: `grid_slaves` stops listing a widget as soon as it is removed, so a second call would find an
+        # empty cell and could never put it back (measured: 'pictures' mode showed nothing at all).
+        cells = getattr(self, '_view_cells', None)
+        if not cells:
+            cells = {c: tuple(self.root.grid_slaves(row=0, column=c)) for c in range(5)}
+            self._view_cells = cells
+        for column, visible in show.items():
+            for widget in cells.get(column, ()):
+                try:
+                    widget.grid() if visible else widget.grid_remove()
+                except Exception as e:
+                    log_error('view mode cell', e)
+            try:
+                self.root.columnconfigure(column, weight=1 if (mode == 'folders' and column == 0)
+                                           else (1 if (mode == 'pictures' and column == 4) else
+                                                 self.root.columnconfigure(column)['weight']))
+            except Exception:
+                pass
+        try:
+            if mode == 'columns':
+                self._apply_layout()
+            self._back_btn.place(x=12, y=6) if mode != 'columns' else self._back_btn.place_forget()
+            self._back_btn.lift()
+        except Exception as e:
+            log_error('view mode back button', e)
+        if persist:
+            self._settings['view'] = mode
+            self._save_settings_best_effort()
+        self.hint.configure(text={'folders': 'folders - open one to see its pictures',
+                                  'pictures': 'pictures - the prompt column and its sash are back with "All columns"',
+                                  'columns': 'all columns'}[mode])
+        return mode
+
+    def _drill_click(self, index):
+        """Folders-only -> pictures-only, with the folder actually opened first."""
+        try:
+            self.select_folder(index)
+        except Exception as e:
+            log_error('drill click', e)
+        return self.set_view_mode('pictures')
+
+    def _drill_back(self):
+        """The prominent top-left control: back out one step of the drill-down."""
+        return self.set_view_mode('folders' if self.view_mode == 'pictures' else 'columns')
+
+    def _new_back_button(self):
+        # takefocus=0: a control that appears and disappears would otherwise shift the F6 visit order by one, which is
+        # exactly what the focus tests caught.
+        btn = ttk.Button(self.root, text='\u2039 Folders', command=self._drill_back, style='Big.TButton', takefocus=0)
+        btn.place_forget()            # shown by `set_view_mode`; placed, so it cannot disturb the grid it floats over
+        return btn
 
     def _center_dialog(self, win):
         """Centre a dialog over the main window, then ask for the OS caption (asked 2026-11-02).
@@ -7522,6 +7595,11 @@ class App:
         self._idle(lambda: self._fill_view('strip'))
 
     def _folder_clicked(self, index):
+        # in folders-only mode, opening one is the drill-down step: the pictures take the window and the back button
+        # appears top-left. In all-columns mode a click keeps its old meaning (select + show in the pane).
+        if getattr(self, 'view_mode', 'columns') == 'folders':
+            self._drill_click(index)
+            return
         """A click on a folder tile: open it, park the keyboard cursor on it, and hand the strip the arrows.
 
         `select_folder` is also called by the prediction and by the browser, so the focus belongs to the click, not to
