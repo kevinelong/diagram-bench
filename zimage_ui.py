@@ -646,6 +646,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url', 'view',
+                 'view_schema',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
                  'zoom', 'contents_w', 'strip_w', 'prompt_w')
 
@@ -2750,7 +2751,16 @@ class App:
         self._later(150, self._ensure_maximized)
         # ZIMAGE_VIEW lets a test (or a launcher) fix the shape at construction. Switching modes *after* the window exists
         # left the prompt column's layout stale, so the suite needs to be born in the layout it is testing.
-        self.view_mode = os.environ.get('ZIMAGE_VIEW') or self._settings.get('view') or 'folders'
+        # A stored shape from *before* the screens existed is not a choice about the screens: `columns` was simply the only
+        # option then, so it was written for everyone. Once per schema change the old value is dropped and the new default
+        # applies - otherwise a preference nobody set silently pins the old UI forever (reported 2026-11-03: "I seem to be
+        # seeing the old ui").
+        VIEW_SCHEMA = 2
+        stored_view = self._settings.get('view')
+        if self._settings.get('view_schema') != VIEW_SCHEMA:
+            stored_view = None
+            self._settings['view_schema'] = VIEW_SCHEMA
+        self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_view or 'folders'
         self._back_btn = self._new_back_button()
         self._new_btn = self._new_button()
         self._top = self._top_bar()
