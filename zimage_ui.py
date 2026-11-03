@@ -5349,7 +5349,15 @@ class App:
         except Exception:
             index = None
         if index is not None and self._folders_view_active() and index != self._active_folder:
-            # the folder this picture landed in is the one to look at; its pane puts the newest first
+            # the folder this picture landed in is the one to look at; its pane puts the newest first.
+            # During a driven run, opening a *new* folder per picture rebuilds the strip and the pane each time - so the
+            # switch is remembered and taken once, when the run drains (the coalesced flush).
+            if self._run_in_flight():
+                self._fresh_folder = index
+                self._fresh_pending = path
+                if not getattr(self, '_fresh_job', None):
+                    self._fresh_job = self._later(1200, self._flush_fresh_result)
+                return
             try:
                 self.select_folder(index)
             except Exception:
@@ -5384,6 +5392,12 @@ class App:
         """The coalesced rebuild a driven run deferred: one strip refresh for every picture that landed in the window."""
         self._fresh_job = None
         path, self._fresh_pending = getattr(self, '_fresh_pending', None), None
+        index, self._fresh_folder = getattr(self, '_fresh_folder', None), None
+        if index is not None:
+            try:
+                self.select_folder(index)          # the folder the run was filling, opened once
+            except Exception as e:
+                log_error('fresh open', e)
         try:
             self.refresh_gallery()
         except Exception as e:
