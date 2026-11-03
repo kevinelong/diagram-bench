@@ -126,10 +126,15 @@ def fingerprint_for(threshold, recent, min_group):
 def merge(rows, stored, fingerprint, plan_fn):
     """Reuse the stored folders and cluster only the pictures the store does not know.
 
-    **Not wired into the app yet.** Its arithmetic passes `test_groups_store.py`, but on the suite's gallery it produced a
-    folder labelled `prompt for image 0` holding 21 pictures instead of the shared scene: the anchor->family mapping needs
-    fixing before this can replace the full pass. Kept here with its tests because the approach is right and the failure is
-    specific; `reuse()` is what the app actually calls.
+    **Not wired into the app yet, and the reason is measured.** Its arithmetic passes `test_groups_store.py`, but on the
+    suite's own gallery - 24 pictures, a store holding **26 names** (three pictures since deleted), 21 of them in common - it
+    produced a folder labelled `prompt for image 0` holding 21 pictures instead of the shared scene. So the failure is not
+    hypothetical drift: a store that is *mostly* right plus a few deletions loses a family's identity, and re-clustering a
+    subset cannot recover a label the full pass would have chosen.
+
+    The gate before wiring it: a test that runs the full pass and the merge on the same gallery and requires **identical
+    labels and identical membership**, including after deletions and additions. `reuse()` - exact, no clustering - is what the
+    app actually calls.
 
     One unknown picture used to cost the whole pass, because the store was refused outright. Instead: cluster the unknown
     pictures **together with one anchor from each stored folder**. A candidate that lands with an anchor joins that folder; a
