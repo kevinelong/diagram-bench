@@ -2748,6 +2748,9 @@ class App:
         self._later(150, self._ensure_maximized)
         self.view_mode = self._settings.get('view') or 'columns'
         self._back_btn = self._new_back_button()
+        # ...and actually applied: the mode was restored into a variable and never used, so the window always opened on all
+        # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").
+        self._later(120, lambda: self.set_view_mode(self.view_mode, persist=False))
         # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
         # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
         # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
@@ -2996,6 +2999,12 @@ class App:
         self.more_btn.pack(side='left', fill='x', expand=True)
         self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked, style='Big.TButton')
         self.folders_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        # The view control: one visible button that cycles folders-only -> all columns -> pictures-only. Without it the mode
+        # was reachable only from a right-click menu, which is not discoverable (reported 2026-11-03).
+        self.view_btn = ttk.Button(toprow, text='\u25a4', width=3, command=self._cycle_view, style='Big.TButton',
+                                   takefocus=0)
+        self.view_btn.pack(side='left', padx=(3, 0))
+        self._tip(self.view_btn, 'View: folders only \u2192 all columns \u2192 pictures only.')
 
         toolrow = ttk.Frame(btns)
         toolrow.pack(fill='x', pady=(3, 0))
@@ -4742,6 +4751,12 @@ class App:
             pass
         threading.Thread(target=self._compute_groups, daemon=True).start()
 
+    def _cycle_view(self):
+        """The visible way to change shape: folders only, all columns, pictures only, and round again."""
+        order = ('folders', 'columns', 'pictures')
+        current = getattr(self, 'view_mode', 'folders')
+        return self.set_view_mode(order[(order.index(current) + 1) % 3] if current in order else 'folders')
+
     def _folders_clicked(self):
         """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
         if self._plan:
@@ -5082,6 +5097,10 @@ class App:
             self._back_btn.lift()
         except Exception as e:
             log_error('view mode back button', e)
+        try:
+            self.view_btn.configure(text={'folders': '\u25a4', 'columns': '\u25a6', 'pictures': '\u25a3'}[mode])
+        except Exception:
+            pass
         if persist:
             self._settings['view'] = mode
             self._save_settings_best_effort()
