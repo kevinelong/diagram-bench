@@ -2785,10 +2785,7 @@ class App:
         # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").
         # Applied *now*, not after 120 ms: the window painted the default four-column shape first and the chosen screen
         # replaced it a moment later, which is the flash of a "folderless view" seen on startup (reported 2026-11-03).
-        try:
-            self.set_view_mode(self.view_mode, persist=False)
-        except Exception as e:
-            log_error('initial screen', e)
+        self._later(0, lambda: self.set_view_mode(self.view_mode, persist=False))
         # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
         # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
         # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
@@ -5257,10 +5254,11 @@ class App:
         pane = mode in ('images', 'columns')           # one open folder's pictures
         # cached once: `grid_slaves` stops listing a widget as soon as it is removed, so a later call would find an empty
         # cell and could never put it back.
-        cells = getattr(self, '_view_cells', None)
-        if not cells:
-            cells = {c: tuple(self.root.grid_slaves(row=0, column=c)) for c in range(5)}
-            self._view_cells = cells
+        cells = dict(getattr(self, '_view_cells', None) or {})
+        for column in range(5):
+            found = tuple(self.root.grid_slaves(row=0, column=column))
+            cells[column] = tuple(dict.fromkeys(tuple(cells.get(column) or ()) + found))
+        self._view_cells = cells
         # The sashes are a *columns* idea and nothing else needs them: the third screen is two halves, 50/50, and a boundary
         # you can drag there is a control nobody asked for (2026-11-03).
         for column, visible in {0: whole or mode == 'columns', 1: whole or mode == 'columns',
