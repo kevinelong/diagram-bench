@@ -2751,9 +2751,16 @@ class App:
         # left the prompt column's layout stale, so the suite needs to be born in the layout it is testing.
         self.view_mode = os.environ.get('ZIMAGE_VIEW') or self._settings.get('view') or 'folders'
         self._back_btn = self._new_back_button()
+        self._new_btn = self._new_button()
+        self._new_target_folder = None
         # ...and actually applied: the mode was restored into a variable and never used, so the window always opened on all
         # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").
-        self._later(120, lambda: self.set_view_mode(self.view_mode, persist=False))
+        # Applied *now*, not after 120 ms: the window painted the default four-column shape first and the chosen screen
+        # replaced it a moment later, which is the flash of a "folderless view" seen on startup (reported 2026-11-03).
+        try:
+            self.set_view_mode(self.view_mode, persist=False)
+        except Exception as e:
+            log_error('initial screen', e)
         # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
         # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
         # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
@@ -4635,6 +4642,46 @@ class App:
         self._anchor = keys[0] if keys else None
         self._paint()
 
+    def start_new(self):
+        """The prominent New button on the folder and image-list screens: go to the controls with nothing selected.
+
+        Asked 2026-11-03. Nothing is armed and no picture is chosen, so the next render is text-to-image - except that when
+        this is pressed from a folder's image list, that folder is remembered as the target, so a picture generated here lands
+        there when it is categorised instead of dropping into `unfiled`.
+        """
+        self._new_target_folder = self._active_folder if self.view_mode == 'images' else None
+        try:
+            self._clear_picture_selection()
+        except Exception as e:
+            log_error('new button', e)
+        where = (' for "%s"' % (self._active_label() or '')) if self._new_target_folder is not None else ''
+        self.hint.configure(text='new picture' + where)
+        return self.set_view_mode('image')
+
+    def _clear_picture_selection(self):
+        """Drop the current selection so the next render is not an edit of it."""
+        for name in ('clear_selection', 'select_none', 'clear_all_selection'):
+            fn = getattr(self, name, None)
+            if callable(fn):
+                try:
+                    fn()
+                    return True
+                except Exception:
+                    pass
+        try:
+            self._pane_cur = None
+            self._selected = set()
+        except Exception:
+            pass
+        return False
+
+    def _new_button(self):
+        """Placed rather than gridded: it belongs to the drill-down screens, not to a column that can be hidden."""
+        btn = ttk.Button(self.root, text='\uff0b New', command=self.start_new, style='Big.TButton', takefocus=0)
+        self._tip(btn, 'Start a new picture: the controls without a selection. From a folder, what you make lands there.')
+        btn.place_forget()
+        return btn
+
     def regroup_everything(self):
         """Throw the remembered folders away and cluster from scratch - the one action that distrusts the store.
 
@@ -5168,6 +5215,10 @@ class App:
             self.view_btn.configure(text={'folders': '\u25a4', 'images': '\u25a6', 'image': '\u25a3',
                                           'columns': '\u25a9'}[mode])
             self._back_btn.place(x=12, y=6) if mode != 'columns' else self._back_btn.place_forget()
+            # New belongs to the two list screens - the primary action there - in the same top-left spot the back button uses
+            # on the image screens, so the two never compete for it.
+            self._new_btn.place(x=12, y=6) if mode in ('folders', 'images') else self._new_btn.place_forget()
+            self._new_btn.lift()
             self._back_btn.lift()
         except Exception as e:
             log_error('screen button', e)
@@ -7388,7 +7439,9 @@ class App:
         """
         self._pane_shown = True
         try:
-            if not self.contents_holder.winfo_manager():
+            # ...but only on a screen that has it: this helper re-gridded the pane unconditionally, which silently undid
+            # folders-only and put the image list back beside the folder grid (reported 2026-11-03).
+            if getattr(self, 'view_mode', 'columns') in ('images', 'columns') and not self.contents_holder.winfo_manager():
                 self.contents_holder.grid()
         except Exception:
             pass
