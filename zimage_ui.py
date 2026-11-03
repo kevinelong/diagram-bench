@@ -5284,6 +5284,11 @@ class App:
                 self.root.columnconfigure(2, weight=1, minsize=0)
                 self.root.columnconfigure(3, weight=0, minsize=0)
                 self.root.columnconfigure(4, weight=1, minsize=0)
+            # The third screen is exactly two halves: controls one, picture the other, and the sash column between them holds
+            # nothing - its 8 px were still being reserved (measured 1035 / 1115 with the sash unmapped).
+            if mode == 'image':
+                for column, weight in ((2, 1), (3, 0), (4, 1)):
+                    self.root.columnconfigure(column, weight=weight, minsize=0)
             # The whole window goes to whichever half of the gallery column is on screen.
             self.gal.columnconfigure(0, weight=1 if strip else 0, minsize=0 if not strip else self.gal.columnconfigure(0)['minsize'])
             self.gal.columnconfigure(2, weight=1 if (pane and not strip) else 0)
