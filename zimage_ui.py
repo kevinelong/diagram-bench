@@ -2861,10 +2861,12 @@ class App:
                                               theme=self.theme)
         self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
         # the session gesture lives on the open folder's own title: "split this folder into sessions", reversible
+        # `SelectableTitle` *is* a `tk.Text`, so the binding belongs on it - attaching it to `.text` raised, and the bare
+        # except swallowed it, which is why right-clicking the folder did nothing (reported 2026-11-02).
         try:
-            self.contents_title.text.bind('<Button-3>', self._title_session_menu, add='+')
-        except Exception:
-            pass
+            self.contents_title.bind('<Button-3>', self._title_session_menu, add='+')
+        except Exception as e:
+            log_error('title menu bind', e)
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
         base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
@@ -3836,6 +3838,48 @@ class App:
         self._render_folder_tiles()
         self.hint.configure(text='%d session%s in the folders view' % (periods, '' if periods == 1 else 's'))
 
+    def _popup_menu(self, menu, event):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        except Exception as e:
+            log_error('popup', e)
+        return 'break'
+
+    def _folder_tile_menu(self, event, index):
+        """Right-click on a folder tile: the folder-level actions that used to be buttons elsewhere."""
+        try:
+            label = ((self._plan or {}).get('groups') or [])[index].get('label') or ''
+        except (IndexError, AttributeError):
+            return None
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Open', command=lambda: self._folder_clicked(index))
+        menu.add_separator()
+        menu.add_command(label='Matrix\u2026  (strengths \u00d7 bases, with a cost estimate)',
+                         command=self.open_matrix_dialog)
+        menu.add_command(label='Split into sessions (breaks of %d h or more)'
+                               % int(sessions_mod.DEFAULT_GAP_HOURS),
+                         command=lambda: self._split_into_sessions(label))
+        menu.add_command(label='Merge the sessions back into one folder',
+                         command=lambda: self._merge_sessions(label))
+        menu.add_separator()
+        menu.add_command(label='Copy folder name', command=lambda: (self.root.clipboard_clear(),
+                                                                    self.root.clipboard_append(label)))
+        return self._popup_menu(menu, event)
+
+    def _picture_tile_menu(self, event, path):
+        """Right-click on a picture: arm it, or take its path. Only actions that already exist are offered."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Use as base for the next edit', command=lambda: self._set_base(Path(path)))
+        menu.add_separator()
+
+        def copy_path():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(path))
+            self.hint.configure(text='copied %s' % Path(path).name)
+
+        menu.add_command(label='Copy path', command=copy_path)
+        return self._popup_menu(menu, event)
+
     def _active_label(self):
         """The label of the folder the pane is showing, without the ` · session` suffix."""
         try:
@@ -3860,11 +3904,7 @@ class App:
                          command=lambda: self._split_into_sessions(label))
         menu.add_command(label='Merge the sessions back into one folder',
                          command=lambda: self._merge_sessions(label))
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        except Exception:
-            pass
-        return 'break'
+        return self._popup_menu(menu, event)
 
     def _raise_version(self):
         """Keep the version visible: siblings created after it are drawn above a placed widget."""
@@ -4199,6 +4239,7 @@ class App:
             bad.bind('<Button-1>', lambda e, p=path, b=browser, n=pane: self._on_tile_click(e, p, browser=b, pane=n))
             self._tip(bad, '%s\nno prompt: this picture is unfiled and cannot join a family' % Path(path).name)
         lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser, pane=pane))
+        lab.bind('<Button-3>', lambda e, p=path: self._picture_tile_menu(e, p), add='+')
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
             lab.bind(seq, fn)
@@ -7379,6 +7420,7 @@ class App:
             self._tip(title, full_title)
             for w in (tile, body, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self._folder_clicked(i))
+                w.bind('<Button-3>', lambda e, i=index: self._folder_tile_menu(e, i), add='+')
             # One tab stop per folder, on the frame that already carries the "this folder is open" border: the four
             # labels inside it are mouse targets too, and four stops per folder would be four stops too many. The ring
             # itself is the cursor ring `_paint_folder_cursor` draws, so focusing a tile costs no extra geometry.
