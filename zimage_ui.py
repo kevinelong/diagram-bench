@@ -4914,10 +4914,14 @@ class App:
             rows = []
             scan = self._scan()
             total_files = max(1, len(scan))
+            _reading_from = time.time()
             for i, (path, stamp) in enumerate(scan):  # (path, mtime); the prompt lives in the sidecar
                 if (i & 63) == 0:
-                    self.ui_events.put(('load', (0.10 * i / total_files, 'reading the gallery',
-                                                 '%d of %d pictures' % (i, total_files))))
+                    # The percentage is intentionally 0-10 % here (this is the first tenth of the whole job), which used to read
+                    # as a frozen "0 %" for the whole scan. The line now carries how far it is and how long it has taken, so a
+                    # stage that cannot move its bar still reports movement.
+                    self.ui_events.put(('load', (0.10 * i / total_files, 'reading the gallery \u00b7 %.0f s' % (time.time() - _reading_from),
+                                                 '%d of %d pictures read' % (i, total_files))))
                 meta = read_meta(path) or {}
                 prompt = meta.get('prompt') or ''
                 topic = ''
