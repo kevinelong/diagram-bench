@@ -4794,10 +4794,13 @@ class App:
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
                              'root': meta.get('lineage_root'), 'lineage': meta.get('lineage'),
                              'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
+            self._plan_started_at = time.time()
+
             def _say(frac, stage, _rows=rows):
                 # 0.10 is the sidecar read above; the grouping pass owns the rest
+                waited = time.time() - getattr(self, '_plan_started_at', time.time())
                 self.ui_events.put(('load', (0.10 + 0.90 * frac, stage,
-                                             '%d pictures in the gallery' % len(_rows))))
+                                             '%d pictures in the gallery \u00b7 %.0f s' % (len(_rows), waited))))
             signature = self._plan_signature()      # before the work: the pictures this plan describes
             plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
@@ -7561,6 +7564,8 @@ class App:
         from the column, so the row always fills it instead of leaving a gutter.
         """
         from PIL import ImageTk
+        if not ((getattr(self, '_plan', None) or {}).get('groups')):
+            return                      # nothing to draw yet; repainting an empty grid is a visible flash (11 in 15 s, measured)
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
