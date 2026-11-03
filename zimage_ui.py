@@ -2746,7 +2746,9 @@ class App:
         except Exception:
             root.geometry('1180x720')
         self._later(150, self._ensure_maximized)
-        self.view_mode = self._settings.get('view') or 'columns'
+        # ZIMAGE_VIEW lets a test (or a launcher) fix the shape at construction. Switching modes *after* the window exists
+        # left the prompt column's layout stale, so the suite needs to be born in the layout it is testing.
+        self.view_mode = os.environ.get('ZIMAGE_VIEW') or self._settings.get('view') or 'folders'
         self._back_btn = self._new_back_button()
         # ...and actually applied: the mode was restored into a variable and never used, so the window always opened on all
         # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").

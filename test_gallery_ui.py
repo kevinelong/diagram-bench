@@ -179,6 +179,9 @@ def main():
 
     tmp = Path(tempfile.mkdtemp(prefix='gal-test-'))
     os.environ['LOCALAPPDATA'] = str(tmp / 'appdata')   # settings must not touch the real profile
+    # This suite is about the all-columns layout; the app now opens on folders-only, so the shape is fixed at construction
+    # (ZIMAGE_VIEW) rather than switched afterwards, which left the prompt column's layout stale.
+    os.environ['ZIMAGE_VIEW'] = 'columns'
 
     # NO TEST IN THIS FILE MAY LAUNCH AN APPLICATION (2026-10-31). A media player opening on the desktop in the middle
     # of a suite is not something a test should ever produce, and it was reported while the clip tests ran. The clip
@@ -4915,7 +4918,11 @@ def main():
     root2 = tk.Tk()
     app2 = zui.App(root2, StubEngine(), args2)
     root2.update()
-    check('starters appear when nothing has been made', bool(app2.starters.winfo_ismapped()))
+    # Guidance for an empty gallery, in whichever shape the window is showing: the prompt column's starters in all-columns
+    # mode, the pane's own notice in folders-only mode (where that column is hidden by design).
+    check('the window tells you it is empty when nothing has been made',
+          bool(app2.starters.winfo_ismapped()) or bool(app2.notice.winfo_ismapped()),
+          (app2.view_mode, app2.starters.winfo_ismapped(), app2.notice.winfo_ismapped()))
     app2.use_starter(zui.STARTER_PROMPTS[0][1])
     check('a starter fills the prompt box', 'fox' in app2.text.get('1.0', 'end'))
     check('and the strip stays empty', len(app2._tile_widgets) == 0)
@@ -4942,7 +4949,9 @@ def main():
     check('... the sampler', app3.sampler_var.get() == 'euler_ancestral', app3.sampler_var.get())
     check('... the layout', app3.layout_var.get() == '4-up (2x2)', app3.layout_var.get())
     check('but the chain box is still off for this window', app3.chain_var.get() is False)
-    check('starters still shown for the still-empty folder', bool(app3.starters.winfo_ismapped()))
+    check('and still says so on the next launch, in the shape that is showing',
+          bool(app3.starters.winfo_ismapped()) or bool(app3.notice.winfo_ismapped()),
+          (app3.view_mode, app3.starters.winfo_ismapped(), app3.notice.winfo_ismapped()))
     print('\n-- a clip: the motion line is what gets sent, and two selections mean first -> last frame')
     gal_clip = tmp / 'clipgal'
     make_gallery(gal_clip, 4)
