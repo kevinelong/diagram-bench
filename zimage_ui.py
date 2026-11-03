@@ -3000,11 +3000,9 @@ class App:
         self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery,
                                       style='Big.TButton')
         self.refresh_btn.pack(side='left')
-        self.log_btn = ttk.Button(toolrow, text='Session log\u2026', command=self.show_run_log, style='Big.TButton')
-        self.log_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.folder_btn = ttk.Button(toolrow, text='Open pictures folder\u2026', command=self.open_folder,
-                                     style='Big.TButton')
-        self.folder_btn.pack(side='left', fill='x', expand=True)
+        # `Session log…` and `Open pictures folder…` are on the folder title menu now: they are diagnostics and OS-level
+        # actions, opened perhaps once a session, and they were taking a third of a toolbar row that also holds the
+        # refresh button. One action, one home - the buttons are gone, not hidden (PLAN-UX-20261102 §3).
         self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False),
                                        style='Big.TButton')
         self.collapse_btn.pack(side='left', padx=(3, 0))
@@ -3861,6 +3859,9 @@ class App:
                          command=lambda: self._split_into_sessions(label))
         menu.add_command(label='Merge the sessions back into one folder',
                          command=lambda: self._merge_sessions(label))
+        menu.add_separator()
+        menu.add_command(label='Session log\u2026', command=self.show_run_log)
+        menu.add_command(label='Open pictures folder\u2026', command=self.open_folder)
         menu.add_separator()
         menu.add_command(label='Copy folder name', command=lambda: (self.root.clipboard_clear(),
                                                                     self.root.clipboard_append(label)))
@@ -10873,7 +10874,7 @@ class App:
         t(self.more_btn, 'Browse every saved image. The selection is shared with the strip.')
         t(self.clear_base_btn, 'Forget the base image; the next run is text to image.')
         t(self.refresh_btn, 'Re-read the folder, for example after files changed outside the window.')
-        t(self.folder_btn, 'Open the output folder in Explorer.')
+        # the folder button lives on the folder menus now; its tip went with it
         t(self.sel_all_btn, 'Select every tile in the strip; press again to clear.')
         t(self.del_btn, 'Send the selected images, their metadata and thumbnails to the Recycle Bin.')
 
