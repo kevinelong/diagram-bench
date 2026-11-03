@@ -827,6 +827,7 @@ import sessions as sessions_mod
 import matrix as matrix_module
 import deployments
 import groups_store
+import usage
 
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
 PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
@@ -2925,33 +2926,40 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=1, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(3):
-            self.contents_btns.columnconfigure(col, weight=1)
+        # One line, ordered by how often it is travelled: Select all and Gallery are the main path, A/B is the alternate that
+        # still earns a visible slot, and Recover/Caption/Delete move behind the menu (asked 2026-11-03).
+        for col in range(5):
+            self.contents_btns.columnconfigure(col, weight=0)
+        self.contents_btns.columnconfigure(2, weight=1)      # the spacer takes the slack, buttons keep their size
         self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
         self.contents_del_btn = ttk.Button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
                                            state='disabled')
-        self.contents_del_btn.grid(row=0, column=1, sticky='we', padx=3)
+        # gridded by `_pane_button_row` (inline or in the menu, depending on the screen)
         # the pane could show pairs but not start a review: the A/B entry point lived only on the strip and in the folder
         # header, so a folder open in the second column had no way in from there
         self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
                                           state='disabled')
-        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=(3, 0))
+        self.contents_ab_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
         # a picture can carry its own provenance (a ComfyUI graph or an A1111 block), so a folder imported from another
         # pipeline can regain its categories without a human retyping prompts
         self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
-        self.contents_rec_btn.grid(row=1, column=0, sticky='we', padx=(0, 3), pady=(3, 0))
         self.contents_gal_btn = ttk.Button(self.contents_btns, text='Gallery\u2026',
                                            command=self.gallery_start)
-        self.contents_gal_btn.grid(row=1, column=1, sticky='we', padx=3, pady=(3, 0))
+        self.contents_gal_btn.grid(row=0, column=1, sticky='we', padx=3)
         self._tip(self.contents_gal_btn, 'Walk this folder one picture at a time, numbered, wrapping, nothing deleted. '
                                          'Arrows: right/down forward, left/up back, Esc stops.')
         self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
-        self.contents_cap_btn.grid(row=1, column=2, sticky='we', padx=(3, 0), pady=(3, 0))
         self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=2, column=0, columnspan=3, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=5, sticky='we', pady=(2, 0))
+        # The rare three live in a menu, but they are still the same widgets, so their enabled state and their commands keep
+        # working (and the checks that assert it keep passing).
+        self.more_btn2 = ttk.Button(self.contents_btns, text='\u22ef', width=3, takefocus=0,
+                                    command=self._pane_more_menu)
+        self.more_btn2.grid(row=0, column=4, sticky='e', padx=(3, 0))
+        self._tip(self.more_btn2, 'Recover, Caption and Delete - the rarer paths on this folder.')
         self._contents_geom = None       # (columns, tile) the pane's cells were last laid out for
         self._contents_job = None        # the debounced reflow, so a mid-layout width cannot rebuild the pane
         self.contents = ttk.Frame(self.contents_canvas)
@@ -4634,6 +4642,7 @@ class App:
         return 'break'
 
     def _select_all_pane(self):
+        usage.record('pane.select_all')
         """Select every picture in the open folder - pressing it again clears, the way the strip's button behaves."""
         keys = list(self._pane_cells()[0])
         if keys and len(self.selected) == len(keys) and all(k in self.selected for k in keys):
@@ -4650,6 +4659,7 @@ class App:
         this is pressed from a folder's image list, that folder is remembered as the target, so a picture generated here lands
         there when it is categorised instead of dropping into `unfiled`.
         """
+        usage.record('new', screen=self.view_mode, folder=self._active_label() or '')
         self._new_target_folder = self._active_folder if self.view_mode == 'images' else None
         try:
             self._clear_picture_selection()
@@ -4700,7 +4710,25 @@ class App:
         btn.place_forget()
         return btn
 
+    def _pane_more_menu(self):
+        usage.record('pane.more')
+        """The rarer folder actions, behind one button: the pane's row stays a line of the paths actually travelled."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Gallery\u2026 walk one picture at a time', command=self.gallery_start)
+        menu.add_command(label='Recover\u2026 provenance from sidecars', command=self.recover_pane_sidecars)
+        menu.add_command(label='Caption\u2026 with the local vision model', command=self.caption_folder)
+        menu.add_separator()
+        menu.add_command(label='Delete\u2026 the selected pictures', command=self.delete_selected)
+        try:
+            x = self.more_btn2.winfo_rootx()
+            y = self.more_btn2.winfo_rooty() + self.more_btn2.winfo_height()
+            menu.tk_popup(x, y)
+        except Exception as e:
+            log_error('pane more menu', e)
+        return 'break'
+
     def regroup_everything(self):
+        usage.record('grouping.regroup')
         """Throw the remembered folders away and cluster from scratch - the one action that distrusts the store.
 
         The store is reused until the rule changes, which is what makes a launch 6 s instead of 74 s; it also means a stale
@@ -5197,6 +5225,7 @@ class App:
         mode = self.SCREEN_ALIASES.get(mode, mode)
         mode = mode if mode in self.SCREENS else 'folders'
         self.view_mode = mode
+        usage.record('view', mode=mode)
         whole = mode in ('folders', 'images')          # the gallery column takes the whole window
         strip = mode in ('folders', 'columns')         # the folder grid / recent thumbnails
         pane = mode in ('images', 'columns')           # one open folder's pictures
@@ -5262,6 +5291,7 @@ class App:
 
     def _drill_click(self, index):
         """Folders-only -> pictures-only, with the folder actually opened first."""
+        usage.record('folder.open', index=index)
         try:
             self.select_folder(index)
         except Exception as e:
@@ -5270,6 +5300,7 @@ class App:
 
     def _drill_back(self):
         """The prominent top-left control: back out one step of the drill-down."""
+        usage.record('view.back', was=self.view_mode)
         return self.set_view_mode({'image': 'images', 'images': 'folders'}.get(self.view_mode, 'columns'))
 
     def _new_back_button(self):
@@ -5701,6 +5732,7 @@ class App:
         return label, paths, False
 
     def review_pane(self):
+        usage.record('pane.ab')
         """A/B review the pane's selection, or the whole open folder when nothing is selected."""
         cells = list(getattr(self, '_content_order', []) or [])
         chosen = [p for p in (self.selected or []) if p in set(cells)]
@@ -5854,6 +5886,7 @@ class App:
         return '%d / %d%s' % (index + 1, total, '  FIN' if index == total - 1 else '')
 
     def gallery_start(self):
+        usage.record('pane.gallery')
         """Walk the open folder (or the whole source) one picture at a time."""
         cells = list(getattr(self, '_content_order', []) or []) or list(self._files)
         if len(cells) < 2:
@@ -9517,6 +9550,7 @@ class App:
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
         path = Path(path)
+        usage.record('picture.select', pane=bool(pane), name=Path(path).name)
         # In folders-only there is no picture column to look at, so a click is the drill-down step: the picture takes the
         # window (reported 2026-11-03 as "selecting an image does nothing" - it was loading into a hidden column).
         if getattr(self, 'view_mode', 'columns') in ('folders', 'images'):
@@ -10875,6 +10909,7 @@ class App:
         return [max(STRENGTH_MIN, min(STRENGTH_MAX, v)) for v in ladder] or list(MATRIX_STRENGTHS)
 
     def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None, descending=False):
+        usage.record('matrix.start', lo=lo, hi=hi, step=step, sheet=bool(sheet), descending=bool(descending))
         """Queue the matrix for explicit parameters; the dialog's Start calls this, and so can a test.
 
         `ask` is the confirmation the hunt warning uses, injected so the decision can be exercised without a pointer.
