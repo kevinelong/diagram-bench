@@ -5321,9 +5321,9 @@ class App:
                     self._render_folder_tiles()
                 else:
                     self.toggle_groups(True)
-                # ...and repaint: the tiles drawn before the folder view was forced stayed on screen, because turning the
-                # variable on does not by itself redraw the strip (the wait state showed a row of pictures above it).
-                self.refresh_gallery()
+                # ...and repaint, but WITHOUT walking the folder again: this runs on every screen switch, and a rescan there
+                # blocked the event loop long enough for Windows to mark the window "Not Responding" (seen at v0.27.9).
+                self.refresh_gallery(rescan=False)
             except Exception as e:
                 log_error('folders screen toggle', e)
         try:
