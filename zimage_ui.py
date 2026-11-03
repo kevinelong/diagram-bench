@@ -6769,7 +6769,7 @@ class App:
             need = 0
         return max(PROMPT_MIN_W, need)
 
-    def _column_floors(self):
+    def _column_floors(self, width=None):
         """The minimum each column may have, in content pixels - no gesture and no window may take one below this.
 
         The strip and the pane keep only a small constant floor now (asked 2026-11-02: "I can't always resize the panes
@@ -6782,10 +6782,21 @@ class App:
         cannot reflow (each has a character width), and Tk widens a column rather than clip its children - so a smaller
         floor would not move the sash, it would snap back. Its floor is the only one still derived from content.
         """
-        return {COL_STRIP: 120,                       # narrow enough for one column of tiles, and still findable
-                COL_PANE: 120,
-                COL_PROMPT: self._prompt_floor(),     # its own rows, measured - and the one limit that is not arbitrary
-                COL_PICTURE: PICTURE_MIN_W}           # the action bar under the picture
+        raw = {COL_STRIP: 0,                          # a column may be taken to nothing; its sash stays grabbable, and
+               COL_PANE: 0,                           # double-click / Home / End restore a boundary without a magnifier
+               COL_PROMPT: self._prompt_floor(),      # its own rows, measured - the one limit that is not arbitrary
+               COL_PICTURE: PICTURE_MIN_W}            # the action bar's measured width: below it the row is clipped,
+                                                     # which the suite caught when this said 160 - so the sliver comes
+                                                     # from the scaling below, not from a second hard number here
+        # Floors that together exceed the window are the other way a drag jams: every boundary computes low == high and the
+        # pointer stops moving with nothing to explain it. So the floors are scaled to fit the width available - the
+        # ordering is preserved, nothing can be taken below zero, and a narrow window becomes tight instead of stuck.
+        total = self._content_w(width)
+        wanted = sum(raw.values())
+        if total and wanted > total:
+            scale = total / float(wanted)
+            raw = {key: max(0, int(value * scale)) for key, value in raw.items()}
+        return raw
 
     def _column_caps(self):
         """The maximum each column may have: beyond these a window is throwing pixels at a column that stops growing."""
@@ -6880,7 +6891,7 @@ class App:
         floors = self._column_floors()
         return sum(floors[c] for c in COLUMNS) + self._layout_chrome()
 
-    def _apply_layout(self, width=None, persist=False):
+    def _apply_layout(self, width=None, persist=False, light=False):
         """Put the four widths into the grid, and each column's interior with them.
 
         Only the picture column has a weight: it is the column that takes what a wider window offers, so a resize can
@@ -6903,6 +6914,12 @@ class App:
                 self.root.columnconfigure(4, minsize=widths[COL_PICTURE] + PICTURE_PAD)
             except Exception:
                 pass
+        if light:
+            # A drag moves the boundary every motion event; the *interiors* - the title's reflow, the prompt's wrap, the
+            # window minimum - are what cost, and each can bounce back as a Configure that triggers another pass. So the
+            # grid moves now and those three wait for the coalescer, which is the split asked for 2026-11-02.
+            self._layout_w = self._root_w(width)
+            return widths
         self._apply_prompt_wrap()
         self._apply_window_min()
         self._layout_w = self._root_w(width)
@@ -6971,7 +6988,11 @@ class App:
         value = max(floors[COL_PANE], min(CONTENTS_W_MAX, value, max(floors[COL_PANE], total - floors[COL_STRIP])))
         self._layout_user = True                 # the reader moved a boundary: these widths are theirs now
         self._contents_w = value
-        self._apply_layout(persist=persist)
+        self._apply_layout(persist=persist, light=True)
+        if persist:
+            self._apply_layout(persist=True)
+        elif not getattr(self, '_sash_extras_pending', None):
+            self._sash_extras_pending = self._later(16, self._sash_flush_extras)
         return self._contents_w
 
     def _share_gallery(self, want, strip, pane, floors):
@@ -6998,17 +7019,55 @@ class App:
         return strip, pane
 
     def _sash_move(self, name, dx, persist=False):
-        """The pointer moved `dx` px from where it went down: the column left of the boundary grows by it, its
-        neighbour gives it up, and nothing else on the window moves - which is what dragging 1:1 has to mean.
+        """The pointer moved `dx` px: remember the target and apply it at most once per frame.
 
-        The three boundaries trade different pairs: `strip` trades the strip with the pane inside the gallery column,
-        `gallery` trades the gallery column with the prompt (the pane paying before the strip does), and `prompt`
-        trades the prompt with the picture column.
+        Windows delivers motion events faster than a relayout can run, and `_apply_layout` is not free - it recomputes
+        the prompt's wrap, the window minimum and three grid minsizes, each of which can bounce back as a Configure. So
+        a drag coalesces to the latest target (16 ms), and a keyboard step (`persist=True`) applies at once because there
+        is no stream to coalesce. The expensive half - rebuilding the strip and the pane - was already deferred to the
+        release (`_strip_dirty` / `_contents_dirty` in `_sash_commit`).
         """
         if self._sash_from is None:
             self._sash_drag = name
             self._sash_from = (self._strip_w, self._contents_w, self._prompt_w)
+            self._sash_first = True        # the first motion after a press is applied now, not next frame: dragging is 1:1
         self._layout_user = True          # a drag is the reader taking the layout over from `split_evenly`
+        self._sash_target = (name, dx, persist)
+        if persist or getattr(self, '_sash_first', False):
+            self._sash_first = False
+            return self._sash_flush()
+        if not getattr(self, '_sash_pending', None):
+            self._sash_pending = self._later(16, self._sash_flush)
+        return None
+
+    def _sash_flush_extras(self):
+        """Re-run the interior pass that the drag deferred: title reflow, prompt wrap, window minimum."""
+        pending, self._sash_extras_pending = getattr(self, '_sash_extras_pending', None), None
+        if pending is not None:
+            try:
+                self.root.after_cancel(pending)
+            except Exception:
+                pass
+        try:
+            self._apply_layout()
+        except Exception as e:
+            log_error('sash extras', e)
+
+    def _sash_flush(self):
+        """Apply the latest drag target; called by the frame timer, by a keyboard step, and at release."""
+        pending, self._sash_pending = getattr(self, '_sash_pending', None), None
+        if pending is not None:
+            try:
+                self.root.after_cancel(pending)
+            except Exception:
+                pass
+        target, self._sash_target = getattr(self, '_sash_target', None), None
+        if target is None:
+            return None
+        return self._sash_apply(*target)
+
+    def _sash_apply(self, name, dx, persist=False):
+        """The arithmetic of one drag: which columns trade what, and by how much."""
         strip0, pane0, prompt0 = self._sash_from
         floors = self._column_floors()
         if name == COL_STRIP:                     # strip | pane: they trade inside the gallery column
@@ -7035,7 +7094,9 @@ class App:
         self._apply_layout(persist=persist)
 
     def _sash_commit(self, name):
-        """The gesture is over: remember it, and let the one reflow the drag deferred run."""
+        """The gesture is over: apply the final position, remember it, and let the deferred reflow run."""
+        self._sash_flush()
+        self._sash_flush_extras()
         self._sash_drag = None
         self._sash_from = None
         self._save_layout()

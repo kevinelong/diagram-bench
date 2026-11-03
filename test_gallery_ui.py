@@ -922,6 +922,14 @@ def main():
     app.job_end('scan')
     app._img = keep
 
+    # --- sash floors: zero is allowed, and floors scale instead of jamming (asked 2026-11-02) ---------------
+    wide = app._column_floors()
+    check('the strip and the pane may be taken to nothing', wide[zui.COL_STRIP] == 0 and wide[zui.COL_PANE] == 0, wide)
+    check('the picture column keeps a sliver so the image cannot vanish', wide[zui.COL_PICTURE] > 0, wide)
+    narrow = app._column_floors(width=600)
+    check('floors shrink to fit a narrow window instead of exceeding it',
+          sum(narrow.values()) <= app._content_w(600), (narrow, app._content_w(600)))
+    check('and none of them goes negative', all(v >= 0 for v in narrow.values()), narrow)
     # --- no stale overlays (reported 2026-11-02: "a black bar centred in front of the main image") ---------------
     # Every notice over the picture area is opaque: `CentreNotice` paints the theme background where it sits. So one that
     # outlives its message is not a leftover label, it is a slab across the picture. This is the audit, in the one state
