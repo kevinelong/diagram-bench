@@ -13,3 +13,6 @@ pose-probe-smoke/
 variety/*/
 
 logs/
+
+# scratch dirs from tools/merge_equivalence.py
+.merge-equivalence*/
