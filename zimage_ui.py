@@ -5256,6 +5256,15 @@ class App:
             # The whole window goes to whichever half of the gallery column is on screen.
             self.gal.columnconfigure(0, weight=1 if strip else 0, minsize=0 if not strip else self.gal.columnconfigure(0)['minsize'])
             self.gal.columnconfigure(2, weight=1 if (pane and not strip) else 0)
+            # The strip lived in the two strip columns and left the pane's third empty - the dead space beside and below the
+            # folder grid once the pane is hidden (2026-11-03). With no pane, it takes all three.
+            span = 3 if mode in ('folders', 'images') else 2
+            for widget in (getattr(self, 'title_row', None), getattr(self, 'btns', None),
+                           getattr(self, 'strip_holder', None)):
+                if widget is not None:
+                    widget.grid_configure(columnspan=span)
+            if span == 3:
+                self.search_box.grid_configure(columnspan=2)
         except Exception as e:
             log_error('screen widths', e)
         try:
