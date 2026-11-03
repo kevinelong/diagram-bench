@@ -198,6 +198,12 @@ def main():
 
     files = make_gallery(tmp, 26)   # more than the strip holds, so the cap is exercised
     root = tk.Tk()
+    # Off-screen, so a test run does not take the focus from whatever the reader is doing: the checks only need the window to be
+    # *mapped*, not visible, and Windows will happily map one at negative coordinates (2026-11-03).
+    try:
+        root.geometry('%dx%d+%d+%d' % (1600, 950, -3000, -1200))
+    except Exception:
+        pass
     try:
         ttk.Style().theme_use('vista')
     except Exception:
@@ -4923,6 +4929,10 @@ def main():
     args2 = argparse.Namespace(**vars(args))
     args2.out = str(empty)
     root2 = tk.Tk()
+    try:
+        root2.geometry('1600x950-3000-1200')
+    except Exception:
+        pass
     app2 = zui.App(root2, StubEngine(), args2)
     root2.update()
     # Guidance for an empty gallery, in whichever shape the window is showing: the prompt column's starters in all-columns
@@ -4949,6 +4959,10 @@ def main():
     root2.destroy()
 
     root3 = tk.Tk()
+    try:
+        root3.geometry('1600x950-3000-1200')
+    except Exception:
+        pass
     app3 = zui.App(root3, StubEngine(), args2)
     root3.update()
     check('a new window restores the size', app3.size_var.get() == '768', app3.size_var.get())
@@ -5006,7 +5020,7 @@ def main():
     print('\n-- the first screen after launch')
     _saved_view = os.environ.pop('ZIMAGE_VIEW', None)
     root5 = tk.Tk()
-    root5.geometry('1600x950')
+    root5.geometry('1600x950-3000-1200')
     app5 = zui.App(root5, StubEngine(), args)
     end = time.time() + 10.0
     while time.time() < end:
