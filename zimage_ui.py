@@ -2759,7 +2759,10 @@ class App:
         # may still be in a settings file somewhere, so a new name is the only way to be sure the default applies. Nothing
         # old can pin the layout now.
         stored_screen = self._settings.get('screen')
-        if stored_screen not in self.SCREENS:
+        # `columns` is still in the code for A/B review, but it is no longer a *screen* anyone can land on: a stored choice of
+        # it was exactly how a build that "removed the columns" still opened on them (2026-11-03). Only the three drill-down
+        # shapes are remembered and reachable; the workshop view is asked for explicitly, in code, and nothing else.
+        if stored_screen not in ('folders', 'images', 'image'):
             stored_screen = None
         self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_screen or 'folders'
         # Recorded so a "why am I seeing the old layout" question can be answered from the app's own log rather than by
@@ -4895,9 +4898,9 @@ class App:
 
     def _cycle_view(self):
         """The visible way to change shape: folders only, all columns, pictures only, and round again."""
-        order = ('folders', 'images', 'image', 'columns')
+        order = ('folders', 'images', 'image')
         current = getattr(self, 'view_mode', 'folders')
-        return self.set_view_mode(order[(order.index(current) + 1) % 4] if current in order else 'folders')
+        return self.set_view_mode(order[(order.index(current) + 1) % len(order)] if current in order else 'folders')
 
     def _folders_clicked(self):
         """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
