@@ -5258,8 +5258,10 @@ class App:
         if not cells:
             cells = {c: tuple(self.root.grid_slaves(row=0, column=c)) for c in range(5)}
             self._view_cells = cells
+        # The sashes are a *columns* idea and nothing else needs them: the third screen is two halves, 50/50, and a boundary
+        # you can drag there is a control nobody asked for (2026-11-03).
         for column, visible in {0: whole or mode == 'columns', 1: whole or mode == 'columns',
-                                2: mode in ('image', 'columns'), 3: mode in ('image', 'columns'),
+                                2: mode in ('image', 'columns'), 3: mode == 'columns',
                                 4: mode in ('image', 'columns')}.items():
             for widget in cells.get(column, ()):
                 try:
@@ -5276,6 +5278,12 @@ class App:
             log_error('screen panes', e)
         try:
             self._apply_layout()
+            # The third screen is exactly two halves: the controls take one, the picture the other, and the sash column
+            # between them holds nothing.
+            if mode == 'image':
+                self.root.columnconfigure(2, weight=1, minsize=0)
+                self.root.columnconfigure(3, weight=0, minsize=0)
+                self.root.columnconfigure(4, weight=1, minsize=0)
             # The whole window goes to whichever half of the gallery column is on screen.
             self.gal.columnconfigure(0, weight=1 if strip else 0, minsize=0 if not strip else self.gal.columnconfigure(0)['minsize'])
             self.gal.columnconfigure(2, weight=1 if (pane and not strip) else 0)
@@ -10920,7 +10928,7 @@ class App:
             return None
 
     def _save_settings_best_effort(self):
-        for name in ('_save_settings', 'save_settings', '_persist_settings'):
+        for name in ('_persist', '_save_settings', 'save_settings'):
             fn = getattr(self, name, None)
             if callable(fn):
                 try:
@@ -11393,7 +11401,8 @@ class App:
                 self._steps_by_model[self._model_now] = str(int(self.steps_var.get()))
         except (TypeError, ValueError):
             pass
-        self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
+        self._settings = {'screen': getattr(self, 'view_mode', 'folders'),   # the layout choice has to survive a save
+                          'size': self.size_var.get(), 'steps': self.steps_var.get(),
                           'steps_by_model': dict(getattr(self, '_steps_by_model', {})),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),
