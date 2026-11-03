@@ -3874,6 +3874,9 @@ class App:
         menu.add_command(label='Merge the sessions back into one folder',
                          command=lambda: self._merge_sessions(label))
         menu.add_separator()
+        menu.add_command(label='Regroup everything (ignore the remembered folders)',
+                         command=self.regroup_everything)
+        menu.add_separator()
         menu.add_command(label='Folders only', command=lambda: self.set_view_mode('folders'))
         menu.add_command(label='Pictures only', command=lambda: self.set_view_mode('pictures'))
         menu.add_command(label='All columns', command=lambda: self.set_view_mode('columns'))
@@ -4631,6 +4634,26 @@ class App:
             self.selected = keys
         self._anchor = keys[0] if keys else None
         self._paint()
+
+    def regroup_everything(self):
+        """Throw the remembered folders away and cluster from scratch - the one action that distrusts the store.
+
+        The store is reused until the rule changes, which is what makes a launch 6 s instead of 74 s; it also means a stale
+        plan would drift silently. This is the visible way out: delete the record, drop the plan, group again.
+        """
+        gallery = getattr(self, '_source', self.args.out)
+        try:
+            groups_store.store_path(gallery).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log_error('regroup store', e)
+        self._plan = None
+        self._plan_raw = None
+        self._active_folder = None
+        self.hint.configure(text='clustering every picture again - this takes a while on a large gallery')
+        self._regroup_soon()
+        return True
 
     def _regroup_soon(self):
         """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
