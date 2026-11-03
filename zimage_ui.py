@@ -7444,6 +7444,7 @@ class App:
         # what these tiles were composed for: `_apply_strip_resize` compares it with the canvas's current width and
         # re-lays them out when it moved, because a folder tile is not one of `_tile_widgets` and nothing else did
         self._folder_geom = (width, cols, sheet_px)
+        self._folder_photos = getattr(self, '_folder_photos', None) or {}
         heads_wanted = False
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
@@ -7464,8 +7465,19 @@ class App:
                 head = self._sheet_paths(group)          # paid once, then written into the plan cache
                 group['head'] = head
                 heads_wanted = True
-            photo = self._photo(self._folder_sheet(group, sheet_px,
-                                                   gutter=plate if selected else None, head=head))
+            # The composed sheet and its PhotoImage are the cost of this loop (102 folders x ~12 ms = 1.26 s measured,
+            # STATE 25) and a refresh redraws the *same* sheets with the same size and the same selected state, so they
+            # are memoised. Keyed by the head, the size and whether the tile is the open one, because those are the only
+            # inputs that change the pixels; the cache is dropped whenever the tile geometry changes.
+            if getattr(self, '_folder_photo_geom', None) != (sheet_px, width):
+                self._folder_photos = {}
+                self._folder_photo_geom = (sheet_px, width)
+            photo_key = (tuple(head) if isinstance(head, list) else head, sheet_px, bool(selected))
+            photo = self._folder_photos.get(photo_key)
+            if photo is None:
+                photo = self._photo(self._folder_sheet(group, sheet_px,
+                                                       gutter=plate if selected else None, head=head))
+                self._folder_photos[photo_key] = photo
             pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
