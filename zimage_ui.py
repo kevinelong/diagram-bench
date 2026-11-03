@@ -5309,6 +5309,10 @@ class App:
         if mode == 'folders' and not self.group_var.get():
             try:
                 self.group_var.set(True)
+                # Stored, not just set: the toggle is reloaded from settings on the next refresh, so a settings file saying
+                # folders: false turned the folder view off again and the strip painted recent pictures under the wait message
+                # (seen at v0.27.7).
+                self._settings['folders'] = True
                 if (getattr(self, '_plan', None) or {}).get('groups'):
                     self._render_folder_tiles()
                 else:
@@ -8106,11 +8110,18 @@ class App:
         if hasattr(self, 'grouping_badge'):
             self.grouping_badge.place_forget()
         if self._folders_view_active():
-            total = len(self._plan['groups'])
+            # `_folders_view_active` can be true before a plan exists (the folders *screen* is the folder view by definition),
+            # and this line assumed it could not - which crashed the refresh on every launch during grouping.
+            groups_now = (self._plan or {}).get('groups') or []
+            if not groups_now:
+                self.gal_title.configure(text='Grouping pictures by prompt\u2026')
+                self._render_folder_tiles()
+                return
+            total = len(groups_now)
             shown = min(total, self._folder_shown)
             self.gal_title.configure(text='Folders (%d%s)  \u00b7  %d pictures'
                                      % (shown, '' if shown >= total else ' of %d' % total,
-                                        sum(len(g['items']) for g in self._plan['groups'])))
+                                        sum(len(g['items']) for g in groups_now)))
             self._render_folder_tiles()
             self._paint()          # the folders branch used to return without painting, so a pane click left the
             return                 # action row disabled while `selected` held the path
