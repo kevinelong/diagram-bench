@@ -21,6 +21,16 @@ from pathlib import Path
 MAX_DAYS = 30          # keep a month; older files are ignored by the report rather than deleted silently
 
 
+def source():
+    """Who wrote this line: `user` by default, `test` when the suite (or any harness) asks for it.
+
+    Test traffic must never be counted with real use - the whole point of the log is to answer "what does the reader do", and
+    a suite that opens 200 folders would drown that. `ZIMAGE_USAGE_SOURCE` sets it; the suite also points the log at a temp
+    directory so the real file is not even touched.
+    """
+    return (os.environ.get('ZIMAGE_USAGE_SOURCE') or 'user').strip().lower()[:20] or 'user'
+
+
 def log_dir():
     base = os.environ.get('ZIMAGE_USAGE_DIR')
     if base:
@@ -32,7 +42,7 @@ def record(action, **fields):
     """Append one interaction. Never raises: a usage log must not be able to break a click."""
     try:
         stamp = datetime.now()
-        line = {'t': stamp.isoformat(timespec='seconds'), 'action': str(action)[:60]}
+        line = {'t': stamp.isoformat(timespec='seconds'), 'action': str(action)[:60], 'src': source()}
         for key, value in fields.items():
             if value is None:
                 continue
@@ -49,8 +59,8 @@ def record(action, **fields):
         return None
 
 
-def lines(days=MAX_DAYS):
-    """Every recorded interaction from the last `days` files, oldest first - for the report."""
+def lines(days=MAX_DAYS, source_wanted=None):
+    """Every recorded interaction from the last `days` files, oldest first. `source_wanted` filters by writer."""
     try:
         files = sorted(log_dir().glob('usage-*.jsonl'))[-days:]
     except OSError:
@@ -60,7 +70,10 @@ def lines(days=MAX_DAYS):
         try:
             for raw in path.read_text(encoding='utf-8').splitlines():
                 if raw.strip():
-                    out.append(json.loads(raw))
+                    row = json.loads(raw)
+                    if source_wanted and (row.get('src') or 'user') != source_wanted:
+                        continue
+                    out.append(row)
         except (OSError, ValueError):
             continue
     return out

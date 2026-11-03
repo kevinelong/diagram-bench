@@ -182,6 +182,9 @@ def main():
     # This suite is about the all-columns layout; the app now opens on folders-only, so the shape is fixed at construction
     # (ZIMAGE_VIEW) rather than switched afterwards, which left the prompt column's layout stale.
     os.environ['ZIMAGE_VIEW'] = 'columns'
+    # Usage from a suite is not usage: tag it and keep it out of the real file entirely.
+    os.environ['ZIMAGE_USAGE_SOURCE'] = 'test'
+    os.environ['ZIMAGE_USAGE_DIR'] = str(tmp / 'usage')
 
     # NO TEST IN THIS FILE MAY LAUNCH AN APPLICATION (2026-10-31). A media player opening on the desktop in the middle
     # of a suite is not something a test should ever produce, and it was reported while the clip tests ran. The clip
