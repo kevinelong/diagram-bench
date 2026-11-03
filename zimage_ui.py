@@ -5086,15 +5086,8 @@ class App:
                     widget.grid() if visible else widget.grid_remove()
                 except Exception as e:
                     log_error('view mode cell', e)
-            try:
-                self.root.columnconfigure(column, weight=1 if (mode == 'folders' and column == 0)
-                                           else (1 if (mode == 'pictures' and column == 4) else
-                                                 self.root.columnconfigure(column)['weight']))
-            except Exception:
-                pass
         try:
-            if mode == 'columns':
-                self._apply_layout()
+            self._apply_layout()               # minsizes and the slack column follow the shape
             self._back_btn.place(x=12, y=6) if mode != 'columns' else self._back_btn.place_forget()
             self._back_btn.lift()
         except Exception as e:
@@ -7102,6 +7095,19 @@ class App:
                 self.root.columnconfigure(4, minsize=widths[COL_PICTURE] + PICTURE_PAD)
             except Exception:
                 pass
+        # Which column takes the slack is decided by the shape: folders-only gives it to the gallery, everything else to
+        # the picture (the historical rule). Without this the gallery kept its old width and the freed space stayed empty,
+        # which is exactly what a screenshot showed on 2026-11-03.
+        mode = getattr(self, 'view_mode', 'columns')
+        try:
+            self.root.columnconfigure(0, weight=1 if mode == 'folders' else 0)
+            self.root.columnconfigure(4, weight=0 if mode == 'folders' else 1)
+            # A hidden column still reserves its minsize - grids do not shrink for an empty cell - which left the gallery at
+            # 1278 px of a 2560 px window instead of taking the whole width (seen in a screenshot 2026-11-03).
+            for column in ((0, 1) if mode == 'pictures' else (2, 3, 4) if mode == 'folders' else ()):
+                self.root.columnconfigure(column, minsize=0)
+        except Exception:
+            pass
         self._apply_prompt_wrap()
         self._apply_window_min()
         self._layout_w = self._root_w(width)
@@ -9346,6 +9352,10 @@ class App:
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
         path = Path(path)
+        # In folders-only there is no picture column to look at, so a click is the drill-down step: the picture takes the
+        # window (reported 2026-11-03 as "selecting an image does nothing" - it was loading into a hidden column).
+        if getattr(self, 'view_mode', 'columns') == 'folders':
+            self._later(10, lambda: self.set_view_mode('pictures'))
         if pane:
             # the pane keeps its own cursor and its own keyboard: a click here must not hand the arrows to the strip
             self._pane_cur = path
