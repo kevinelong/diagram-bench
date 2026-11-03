@@ -6638,6 +6638,10 @@ class App:
         nowhere to appear - "show the images in the list as each one is generated". While `busy`, the strip lists the
         pictures; the folders come back when the run ends and the plan is recomputed.
         """
+        # The folders *screen* is the folder view by definition: without this, the seconds spent grouping at startup were spent
+        # drawing the recent pictures, so the first screen looked like an image list (reported 2026-11-03).
+        if getattr(self, 'view_mode', '') == 'folders' and not self._plan:
+            return not self.search_var.get().strip() and not self.starred_only.get()
         return (bool(self._plan)
                 and not self.search_var.get().strip() and not self.starred_only.get()
                 and not (getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get())
@@ -7790,7 +7794,18 @@ class App:
         """
         from PIL import ImageTk
         if not ((getattr(self, '_plan', None) or {}).get('groups')):
-            return                      # nothing to draw yet; repainting an empty grid is a visible flash (11 in 15 s, measured)
+            # Nothing to draw yet. Say what is happening instead of leaving an empty area, but only once - a redraw every
+            # event was a visible flash (11 in 15 s measured).
+            if not getattr(self, '_grouping_notice', None):
+                try:
+                    self._grouping_notice = ttk.Label(self.recent, text='grouping pictures\u2026',
+                                                      font=('Segoe UI', 11), foreground=self.theme.muted,
+                                                      background=plate if 'plate' in dir() else None)
+                    self._grouping_notice.grid(row=0, column=0, padx=18, pady=24)
+                except Exception as e:
+                    log_error('grouping notice', e)
+                    self._grouping_notice = True
+            return
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
