@@ -5036,6 +5036,28 @@ class App:
         except Exception:
             pass
 
+    def _center_dialog(self, win):
+        """Centre a dialog over the main window, then ask for the OS caption (asked 2026-11-02).
+
+        Tk puts a Toplevel where the window manager feels like it, which on Windows is the top-left of the screen - far
+        from the button that opened it. Every dialog already goes through `_closing_raises_main`, so the centring is
+        scheduled there once instead of being repeated at each of the nine construction sites.
+        """
+        try:
+            if not win.winfo_exists():
+                return
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+            if w <= 1 or h <= 1:                      # not mapped yet: use what it asked for
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            rw, rh = max(1, self.root.winfo_width()), max(1, self.root.winfo_height())
+            x = self.root.winfo_rootx() + max(0, (rw - w) // 2)
+            y = self.root.winfo_rooty() + max(0, (rh - h) // 2)
+            win.geometry('+%d+%d' % (x, y))
+        except Exception as e:
+            log_error('centre dialog', e)
+        self._retitle(win)
+
     def _closing_raises_main(self, win):
         """Prepare a child window: open it maximised, and hand the front back when it goes away.
 
@@ -5052,6 +5074,7 @@ class App:
             win.bind('<Destroy>', self._raise_main, add='+')
         except Exception:
             pass
+        self._later(20, self._center_dialog, win)
         return win
 
     def open_folder_browser(self):
@@ -10392,7 +10415,8 @@ class App:
             lo, hi = matrix_module.window(current, low=int(round(STRENGTH_MIN * 100)),
                                           high=int(round(STRENGTH_MAX * 100)))
         return {'from': int(raw.get('from', lo)), 'to': int(raw.get('to', hi)),
-                'step': int(raw.get('step', 1)), 'sheet': bool(raw.get('sheet', False))}
+                'step': int(raw.get('step', 1)), 'sheet': bool(raw.get('sheet', False)),
+                'descending': bool(raw.get('descending', False))}
 
     def _matrix_card(self):
         """This machine's card key, so the estimate and the warning use its own measurements."""
@@ -10401,11 +10425,13 @@ class App:
         except Exception:
             return None
 
-    def matrix_plan_from(self, lo, hi, step, bases):
+    def matrix_plan_from(self, lo, hi, step, bases, descending=False):
         """[(base path, strength fraction)] from dialog percentages - the shape `_matrix_next` already consumes."""
         # matrix.plan() speaks in whole percentages (it is also the form the sheet labels use); the render queue wants
         # the 0.20-0.95 fraction the strength control uses, so the division happens here and in exactly one place.
         values = matrix_module.values(lo, hi, step)
+        if descending:
+            values = list(reversed(values))     # the ladder read from the top: highest strength first
         return [(path, value / 100.0) for path, value in matrix_module.plan(values, bases)]
 
     def open_matrix_dialog(self):
@@ -10413,7 +10439,7 @@ class App:
         import estimate as estimate_module
         from tkinter import Toplevel, StringVar, BooleanVar
         settings = self.matrix_settings()
-        window = Toplevel(self.root)
+        window = self._closing_raises_main(Toplevel(self.root))
         window.title('Strength × base matrix')
         window.transient(self.root)
         body = ttk.Frame(window, padding=12)
@@ -10421,6 +10447,7 @@ class App:
 
         lo_var, hi_var, step_var = StringVar(value=str(settings['from'])), StringVar(value=str(settings['to'])), StringVar(value=str(settings['step']))
         sheet_var = BooleanVar(value=settings['sheet'])
+        order_var = BooleanVar(value=settings['descending'])
         summary = ttk.Label(body, text='', font=('Segoe UI', 9, 'bold'), justify='left')
         summary.grid(row=0, column=0, columnspan=6, sticky='w', pady=(0, 8))
         cost = ttk.Label(body, text='', justify='left', wraplength=460)
@@ -10433,6 +10460,8 @@ class App:
             ttk.Entry(body, textvariable=var, width=5).grid(row=3, column=column * 2 + 1, sticky='w', padx=(0, 12))
         ttk.Checkbutton(body, text='also compose a contact sheet', variable=sheet_var).grid(
             row=3, column=6, columnspan=2, sticky='w')
+        ttk.Checkbutton(body, text='descending (highest first)', variable=order_var).grid(
+            row=4, column=6, columnspan=2, sticky='w')
 
         def numbers():
             def one(var, default):
@@ -10451,9 +10480,10 @@ class App:
             per = estimate_module.wall_seconds(self._matrix_card(), self.model_var.get(), self._size_px())
             total = estimate_module.total(len(values) * max(1, len(bases)), per)
             cells = matrix_module.sheet_cells(len(values) * max(1, len(bases)))
-            summary.configure(text='%d strengths × %d base%s = %d renders · %d→%d by %d%s'
+            summary.configure(text='%d strengths × %d base%s = %d renders · %d→%d by %d%s%s'
                                    % (len(values), max(1, len(bases)), '' if len(bases) == 1 else 's',
                                       len(values) * max(1, len(bases)), lo, hi, step,
+                                      ' (descending)' if order_var.get() else '',
                                       '' if not bases else ' · base: %s' % Path(bases[0]).name))
             if per is None:
                 cost.configure(text='cost unknown on this machine (no measurement for this card, model and size)')
@@ -10467,10 +10497,12 @@ class App:
 
         for var in (lo_var, hi_var, step_var):
             var.trace_add('write', refresh)
+        order_var.trace_add('write', refresh)
 
         def start():
             (lo, hi), step = numbers()
-            plan = self.matrix_start(lo, hi, step, sheet=bool(sheet_var.get()), parent=window)
+            plan = self.matrix_start(lo, hi, step, sheet=bool(sheet_var.get()), parent=window,
+                                     descending=bool(order_var.get()))
             if plan:
                 window.destroy()
             else:
@@ -10516,7 +10548,7 @@ class App:
         ladder = [v / 100.0 for v in matrix_module.values(lo, hi, step)]
         return [max(STRENGTH_MIN, min(STRENGTH_MAX, v)) for v in ladder] or list(MATRIX_STRENGTHS)
 
-    def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None):
+    def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None, descending=False):
         """Queue the matrix for explicit parameters; the dialog's Start calls this, and so can a test.
 
         `ask` is the confirmation the hunt warning uses, injected so the decision can be exercised without a pointer.
@@ -10528,7 +10560,7 @@ class App:
             self.hint.configure(text='arm a base first: the matrix renders each armed picture through the ladder')
             return []
         values = matrix_module.values(lo, hi, step)
-        plan = self.matrix_plan_from(lo, hi, step, bases)
+        plan = self.matrix_plan_from(lo, hi, step, bases, descending=descending)
         advice = estimate_module.hunt_advice(self._matrix_card(), self.model_var.get(), self._size_px(), self.steps_now(),
                                              len(plan), largest_size=self.MATRIX_FULL_SIZE)
         if advice.get('warn'):
@@ -10546,7 +10578,8 @@ class App:
             if not confirm(question, parent=parent):
                 self.hint.configure(text='matrix cancelled')
                 return []
-        self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet)}
+        self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet),
+                                    'descending': bool(descending)}
         self._save_settings_best_effort()
         self._matrix_queue = list(plan)
         self._matrix_last_base = None
