@@ -2752,6 +2752,7 @@ class App:
         self.view_mode = os.environ.get('ZIMAGE_VIEW') or self._settings.get('view') or 'folders'
         self._back_btn = self._new_back_button()
         self._new_btn = self._new_button()
+        self._top = self._top_bar()
         self._new_target_folder = None
         # ...and actually applied: the mode was restored into a variable and never used, so the window always opened on all
         # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").
@@ -4675,6 +4676,23 @@ class App:
             pass
         return False
 
+    def _inverse_button(self, master, text, command):
+        """Inverse video, on its own line: the back/New controls are the primary actions of a drill-down screen."""
+        return tk.Button(master, text=text, command=command, bd=0, relief='flat', highlightthickness=0,
+                         background=self.theme.text, foreground=self.theme.window, activebackground=self.theme.accent,
+                         activeforeground=self.theme.window, font=('Segoe UI', 12, 'bold'), padx=14, pady=6,
+                         cursor='hand2', takefocus=0)
+
+    def _top_bar(self):
+        """One dedicated line above the screen: back on the left, New on the right (asked 2026-11-03)."""
+        bar = tk.Frame(self.root, background=self.theme.window)
+        self._bar_back = self._inverse_button(bar, '\u2039 Folders', self._drill_back)
+        self._bar_back.pack(side='left')
+        self._bar_new = self._inverse_button(bar, '\uff0b New', self.start_new)
+        self._bar_new.pack(side='right')
+        bar.place_forget()
+        return bar
+
     def _new_button(self):
         """Placed rather than gridded: it belongs to the drill-down screens, not to a column that can be hidden."""
         btn = ttk.Button(self.root, text='\uff0b New', command=self.start_new, style='Big.TButton', takefocus=0)
@@ -5214,11 +5232,22 @@ class App:
         try:
             self.view_btn.configure(text={'folders': '\u25a4', 'images': '\u25a6', 'image': '\u25a3',
                                           'columns': '\u25a9'}[mode])
-            self._back_btn.place(x=12, y=6) if mode != 'columns' else self._back_btn.place_forget()
+            self._back_btn.place_forget()          # the bar carries the back control now
+            # The bar is a line of its own, so a big inverse back button never sits on top of the picture.
+            if mode in ('folders', 'images', 'image'):
+                self._top.place(x=0, y=0, relwidth=1.0)
+                self._bar_back.configure(text={'folders': '\u2039 Folders', 'images': '\u2039 Folders',
+                                               'image': '\u2039 Pictures'}[mode])
+                self._bar_back.pack_forget()
+                self._bar_back.pack(side='left') if mode != 'folders' else None
+                self._bar_new.pack_forget()
+                self._bar_new.pack(side='right') if mode in ('folders', 'images') else None
+                self._top.lift()
+            else:
+                self._top.place_forget()
             # New belongs to the two list screens - the primary action there - in the same top-left spot the back button uses
             # on the image screens, so the two never compete for it.
-            self._new_btn.place(x=12, y=6) if mode in ('folders', 'images') else self._new_btn.place_forget()
-            self._new_btn.lift()
+            self._new_btn.place_forget()
             self._back_btn.lift()
         except Exception as e:
             log_error('screen button', e)
