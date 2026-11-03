@@ -826,6 +826,7 @@ COLUMNS = ('strip', 'pane', 'prompt', 'picture')
 import sessions as sessions_mod
 import matrix as matrix_module
 import deployments
+import groups_store
 
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
 PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
@@ -4802,7 +4803,26 @@ class App:
                 self.ui_events.put(('load', (0.10 + 0.90 * frac, stage,
                                              '%d pictures in the gallery \u00b7 %.0f s' % (len(_rows), waited))))
             signature = self._plan_signature()      # before the work: the pictures this plan describes
-            plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
+            # Incremental grouping (asked 2026-11-03): a picture already in a folder keeps it, so the ~75 s pass runs only
+            # when something is new or the rule changed. `reuse` returns None in exactly those cases, so this cannot serve a
+            # stale plan silently - and the store is written from the plan that was actually computed.
+            gallery_root = getattr(self, '_source', self.args.out)
+            rule = groups_store.fingerprint_for(group_prompts.DEFAULT_THRESHOLD, RECENT_POLICY, group_prompts.MIN_GROUP)
+            reused = groups_store.reuse(rows, groups_store.load(gallery_root), rule)
+            self._plan_reused = bool(reused)
+            if reused:
+                plan = dict(reused, recent=list(rows)[:RECENT_POLICY])
+                # `predict` (which drives "type a prompt, the matching folder opens") needs the vocabulary, and a reused plan
+                # has no lexicon of its own. Fitting it costs a fraction of the clustering pass.
+                try:
+                    plan['_lexicon'] = group_prompts.fit_lexicon([r.get('prompt') or '' for r in rows])
+                except Exception as e:
+                    log_error('reuse lexicon', e)
+                self.ui_events.put(('load', (1.0, 'reusing the folders from last time',
+                                             '%d pictures, %d folders' % (len(rows), len(plan['groups'])))))
+            else:
+                plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
+                self._plan_needs_save = (gallery_root, rule)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
             for group in plan.get('groups') or []:
@@ -4815,6 +4835,16 @@ class App:
             # came to be invisible (measured 2026-10-30). They get their own tile, at the head, the way `unfiled` already
             # covers the leftovers at the tail.
             plan = with_synthetic_head(plan)
+            # Saved *after* the synthetic buckets exist: the recent and unfiled pictures are in no family, and a store that
+            # omitted them made every launch look like it had new pictures and forced the full pass (measured: 72.5 s on the
+            # second boot of the real gallery, reuse never taken).
+            pending_save = getattr(self, '_plan_needs_save', None)
+            self._plan_needs_save = None
+            if pending_save:
+                try:
+                    groups_store.save(pending_save[0], plan, pending_save[1])
+                except Exception as e:
+                    log_error('group store', e)
             # A folder with accepted session cuts becomes one tile per session (asked 2026-11-02): cut in the gap, not on
             # the clock. The raw plan is kept, so splitting again recomputes from the families and never nests.
             self._plan_raw = plan

@@ -3004,7 +3004,11 @@ def main():
           'hint=%r grouping=%s' % (app.hint['text'][:120], app._grouping))
     after = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*')
                    if not f.is_dir())          # the .thumbs cache is written by rendering, not by grouping
-    check('and writes nothing to disk', listing == after)
+    # Grouping writes no picture data - the one deliberate exception is its own plan store, which exists so a launch can
+    # reuse the folders instead of re-clustering 75 s worth of pictures (2026-11-03).
+    check('and writes nothing to disk except its own plan store',
+          [x for x in listing if x[0] != '.zimage-groups.json'] == [x for x in after if x[0] != '.zimage-groups.json'],
+          (listing, after))
     if app._plan:
         real = [g for g in app._plan['groups'] if not g.get('synthetic')]
         labels = [g['label'] for g in real]
