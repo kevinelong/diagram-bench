@@ -52,5 +52,35 @@ back2 = G.reuse(only_sea, G.load(tmp), fp)
 check('folders whose pictures are all gone are dropped', back2 is not None and len(back2['groups']) == 1,
       back2 and [g['label'] for g in back2['groups']])
 
+# ---------------------------------------------------------------- candidate-only clustering
+cls = []
+def fake_plan(items):
+    """Groups by prompt, the way the real planner would for a handful of pictures."""
+    cls.append(len(items))
+    buckets = {}
+    for r in items:
+        buckets.setdefault(r['prompt'], []).append(r)
+    return {'groups': [{'label': k, 'items': v} for k, v in buckets.items()]}
+
+# the store above knows a.png/b.png (man) and c.png (sea). One new picture that belongs to 'man':
+new_row = row('e.png', 'a man in a hat', 'a man in a hat', '2026-11-03T09:00:00')
+plan3, reused3, clustered3 = G.merge(rows + [new_row], G.load(tmp), fp, fake_plan)
+check('a new picture does not force the whole gallery', clustered3 < len(rows) + 1, clustered3)
+check('...only the candidates plus one anchor per family are clustered', clustered3 == 1 + 2, clustered3)
+check('the new picture joins the family it belongs to',
+      any(sorted(r['path'] for r in g['items']) == sorted([str(Path('C:/g') / n) for n in ('a.png', 'b.png', 'e.png')])
+          for g in plan3['groups']), [g['label'] for g in plan3['groups']])
+check('the untouched family is still there', any(g['label'] == 'sea' for g in plan3['groups']))
+
+# a picture of a genuinely new subject becomes its own folder
+brand = row('f.png', 'a dragon over a lake', 'a dragon over a lake', '2026-11-03T10:00:00')
+plan4, _, clustered4 = G.merge(rows + [brand, new_row], G.load(tmp), fp, fake_plan)
+check('a new subject makes a new folder', any('dragon' in (g['label'] or '') for g in plan4['groups']),
+      [g['label'] for g in plan4['groups']])
+check('and the clustered set stays small on a big gallery', clustered4 <= 2 + 2, clustered4)
+
+back5, reused5, clustered5 = G.merge(rows, G.load(tmp), fp, fake_plan)
+check('nothing new means no clustering at all', reused5 is True and clustered5 == 0, (reused5, clustered5))
+
 print('FAILURES: %d' % FAILS[0] if FAILS[0] else 'ALL PASS')
 raise SystemExit(1 if FAILS[0] else 0)

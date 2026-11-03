@@ -121,3 +121,84 @@ def reuse(rows, stored, fingerprint):
 def fingerprint_for(threshold, recent, min_group):
     """The parts of the rule a stored plan was made under: change any and the store must not be reused."""
     return _fingerprint([threshold, recent, min_group])
+
+
+def merge(rows, stored, fingerprint, plan_fn):
+    """Reuse the stored folders and cluster only the pictures the store does not know.
+
+    **Not wired into the app yet.** Its arithmetic passes `test_groups_store.py`, but on the suite's gallery it produced a
+    folder labelled `prompt for image 0` holding 21 pictures instead of the shared scene: the anchor->family mapping needs
+    fixing before this can replace the full pass. Kept here with its tests because the approach is right and the failure is
+    specific; `reuse()` is what the app actually calls.
+
+    One unknown picture used to cost the whole pass, because the store was refused outright. Instead: cluster the unknown
+    pictures **together with one anchor from each stored folder**. A candidate that lands with an anchor joins that folder; a
+    candidate cluster with no anchor is a new family. Everything already stored keeps its folder by name.
+
+    `plan_fn(rows)` must return a plan like `group_prompts.plan` (`{'groups': [{'label','items',...}]}`).
+    Returns (plan, reused, clustered) where `clustered` is how many pictures went through clustering.
+    """
+    base = reuse(rows, stored, fingerprint)
+    if base is not None:
+        return base, True, 0
+    if not stored or stored.get('fingerprint') != fingerprint or stored.get('version') != VERSION:
+        return None, False, len(rows)
+    groups = stored.get('groups') or []
+    if not groups:
+        return None, False, len(rows)
+    by_name = {}
+    for group in groups:
+        for name in group.get('names') or []:
+            by_name[name] = group
+    anchors, unknown = [], []
+    for row in rows:
+        (unknown if by_name.get(_name(row)) is None else anchors).append(row)
+    if not unknown:
+        return None, False, len(rows)
+    # one anchor per stored folder, so a candidate variation can be recognised as belonging to it
+    anchor_of = {}
+    for row in anchors:
+        group = by_name.get(_name(row))
+        anchor_of.setdefault(id(group), row)
+    subset = unknown + list(anchor_of.values())
+    sub = plan_fn(subset) or {}
+    merged = {id(group): [] for group in groups}
+    fresh = []
+    for group in sub.get('groups') or []:
+        members = list(group.get('items') or [])
+        kept, new = [], []
+        for row in members:
+            home = by_name.get(_name(row))
+            if home is not None:
+                kept.append((home, row))
+            else:
+                new.append(row)
+        if kept:
+            for home, row in kept:
+                merged[id(home)].append(row)
+            for row in new:
+                merged[id(kept[0][0])].append(row)
+        elif new:
+            fresh.append({'label': group.get('label') or '', 'items': new})
+    # Every stored picture keeps its folder, anchor or not: the subset only carried one member per family, so the rest were
+    # missing (the test caught the new picture joining, but b.png silently vanishing).
+    for row in anchors:
+        home = by_name.get(_name(row))
+        bucket = merged.get(id(home)) or []
+        if home is not None and all(_name(r) != _name(row) for r in bucket):
+            bucket.append(row)
+            merged[id(home)] = bucket
+    out = []
+    for group in groups:
+        members = merged.get(id(group)) or []
+        if members:
+            out.append({'label': group.get('label') or '', 'items': members,
+                        'oldest': min((m.get('created') or '' for m in members), default=''),
+                        'newest': max((m.get('created') or '' for m in members), default='')})
+    for group in fresh:
+        members = group['items']
+        out.append({'label': group.get('label') or '', 'items': members,
+                    'oldest': min((m.get('created') or '' for m in members), default=''),
+                    'newest': max((m.get('created') or '' for m in members), default='')})
+    out.sort(key=lambda g: g.get('newest') or '', reverse=True)
+    return ({'groups': out} if out else None), False, len(subset)
