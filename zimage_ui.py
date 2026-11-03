@@ -645,7 +645,7 @@ def copy_png_to_clipboard(path):
         return False, '%s: %s' % (type(e).__name__, e)
 
 
-SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
+SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url', 'view',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
                  'zoom', 'contents_w', 'strip_w', 'prompt_w')
 
