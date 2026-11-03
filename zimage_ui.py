@@ -2761,6 +2761,10 @@ class App:
             stored_view = None
             self._settings['view_schema'] = VIEW_SCHEMA
         self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_view or 'folders'
+        # ...and the settings dict itself must carry the new value too: leaving the old `view` in place meant the next save
+        # wrote `columns` back *together with* the schema marker, which made it look like a deliberate choice for ever (seen
+        # on v0.27.1: the migration ran, then the save undid it).
+        self._settings['view'] = self.view_mode
         self._back_btn = self._new_back_button()
         self._new_btn = self._new_button()
         self._top = self._top_bar()
