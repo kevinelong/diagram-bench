@@ -5317,6 +5317,9 @@ class App:
                     self._render_folder_tiles()
                 else:
                     self.toggle_groups(True)
+                # ...and repaint: the tiles drawn before the folder view was forced stayed on screen, because turning the
+                # variable on does not by itself redraw the strip (the wait state showed a row of pictures above it).
+                self.refresh_gallery()
             except Exception as e:
                 log_error('folders screen toggle', e)
         try:
