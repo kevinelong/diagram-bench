@@ -5355,7 +5355,15 @@ class App:
             except Exception:
                 pass
         else:
-            self.refresh_gallery()
+            # A driven run (matrix, scenes) calls this once per finished picture, and `refresh_gallery` rebuilds the whole
+            # strip - 476 ms measured - on the UI thread. Twenty-one of those is the window not drawing while a matrix
+            # runs. One rebuild per 1.2 s still shows progress as it happens and leaves the thread free to paint.
+            if self._run_in_flight():
+                self._fresh_pending = path
+                if not getattr(self, '_fresh_job', None):
+                    self._fresh_job = self._later(1200, self._flush_fresh_result)
+            else:
+                self.refresh_gallery()
         try:
             self._warm_one(path)          # so the tile that just appeared is a picture, not a placeholder
         except Exception:
@@ -5365,6 +5373,24 @@ class App:
             # so the next item in the series lands in the right folder instead of staying unfiled
             try:
                 self._regroup_soon()
+            except Exception:
+                pass
+
+    def _run_in_flight(self):
+        """True while a driven run owns the UI's attention: a matrix queue or a scene run still has items to render."""
+        return bool(getattr(self, '_matrix_queue', None)) or bool(getattr(self, '_scenes_left', None))
+
+    def _flush_fresh_result(self):
+        """The coalesced rebuild a driven run deferred: one strip refresh for every picture that landed in the window."""
+        self._fresh_job = None
+        path, self._fresh_pending = getattr(self, '_fresh_pending', None), None
+        try:
+            self.refresh_gallery()
+        except Exception as e:
+            log_error('fresh refresh', e)
+        if path:
+            try:
+                self._warm_one(path)
             except Exception:
                 pass
 
