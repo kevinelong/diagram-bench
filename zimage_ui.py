@@ -646,7 +646,7 @@ def copy_png_to_clipboard(path):
 
 
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url', 'view',
-                 'view_schema',
+                 'screen', 'view_schema',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
                  'zoom', 'contents_w', 'strip_w', 'prompt_w')
 
@@ -2755,16 +2755,25 @@ class App:
         # option then, so it was written for everyone. Once per schema change the old value is dropped and the new default
         # applies - otherwise a preference nobody set silently pins the old UI forever (reported 2026-11-03: "I seem to be
         # seeing the old ui").
-        VIEW_SCHEMA = 2
-        stored_view = self._settings.get('view')
-        if self._settings.get('view_schema') != VIEW_SCHEMA:
-            stored_view = None
-            self._settings['view_schema'] = VIEW_SCHEMA
-        self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_view or 'folders'
+        # The key is `screen`, not `view`: `view` was written by builds where `columns` was the only shape, and one of them
+        # may still be in a settings file somewhere, so a new name is the only way to be sure the default applies. Nothing
+        # old can pin the layout now.
+        stored_screen = self._settings.get('screen')
+        if stored_screen not in self.SCREENS:
+            stored_screen = None
+        self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_screen or 'folders'
+        # Recorded so a "why am I seeing the old layout" question can be answered from the app's own log rather than by
+        # guessing at settings files: what was stored, what schema, and what was chosen.
+        try:
+            usage.record('view.start', mode=self.view_mode, stored=str(self._settings.get('view')),
+                         screen=str(self._settings.get('screen')),
+                         env=str(os.environ.get('ZIMAGE_VIEW')), version=str(getattr(self, 'APP_VERSION', '')))
+        except Exception:
+            pass
         # ...and the settings dict itself must carry the new value too: leaving the old `view` in place meant the next save
         # wrote `columns` back *together with* the schema marker, which made it look like a deliberate choice for ever (seen
         # on v0.27.1: the migration ran, then the save undid it).
-        self._settings['view'] = self.view_mode
+        self._settings['screen'] = self.view_mode
         self._back_btn = self._new_back_button()
         self._new_btn = self._new_button()
         self._top = self._top_bar()
@@ -5304,7 +5313,7 @@ class App:
         except Exception as e:
             log_error('screen button', e)
         if persist:
-            self._settings['view'] = mode
+            self._settings['screen'] = mode
             self._save_settings_best_effort()
         self.hint.configure(text={'folders': 'folders - open one to see its pictures',
                                   'images': 'pictures in this folder - click one to work on it',
