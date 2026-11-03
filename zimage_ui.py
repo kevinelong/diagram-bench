@@ -7793,17 +7793,17 @@ class App:
         from the column, so the row always fills it instead of leaving a gutter.
         """
         from PIL import ImageTk
-        # Clear first: the previous pass may have left picture tiles here, and returning before this line is how the recent
-        # image row stayed on screen while the folder grid waited for the plan (reported 2026-11-03).
-        try:
-            for stale in self.recent.winfo_children():
-                stale.destroy()
-            self._tile_widgets = {}
-        except Exception as e:
-            log_error('strip clear', e)
         if not ((getattr(self, '_plan', None) or {}).get('groups')):
             # Nothing to draw yet. Say what is happening instead of leaving an empty area, but only once - a redraw every
             # event was a visible flash (11 in 15 s measured).
+            # Only here: while there is no plan, the strip holds either the previous picture tiles or nothing, and either way
+            # they must go before the notice - clearing unconditionally destroyed the picture tiles the thumbnail warming was
+            # still filling (two suite checks caught it).
+            try:
+                for stale in self.recent.winfo_children():
+                    stale.destroy()
+            except Exception as e:
+                log_error('strip clear', e)
             if not getattr(self, '_grouping_notice', None):
                 try:
                     self._grouping_notice = ttk.Label(self.recent, text='grouping pictures\u2026',
