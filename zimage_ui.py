@@ -4755,9 +4755,9 @@ class App:
 
     def _cycle_view(self):
         """The visible way to change shape: folders only, all columns, pictures only, and round again."""
-        order = ('folders', 'columns', 'pictures')
+        order = ('folders', 'images', 'image', 'columns')
         current = getattr(self, 'view_mode', 'folders')
-        return self.set_view_mode(order[(order.index(current) + 1) % 3] if current in order else 'folders')
+        return self.set_view_mode(order[(order.index(current) + 1) % 4] if current in order else 'folders')
 
     def _folders_clicked(self):
         """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
@@ -5065,42 +5065,62 @@ class App:
     VIEW_MODES = ('folders', 'pictures', 'columns')
     _VIEW_CELLS = (0, 1, 2, 3, 4)      # gallery, gallery sash, prompt, prompt sash, picture
 
+    # The three screens (asked 2026-11-03): folders only, then the images of ONE folder, then the split. Only the last has
+    # a sash, and the first two are whole windows - the earlier "modes" hid root columns but left the folder grid and the
+    # pane sharing one screen, which is not what a drill-down is.
+    SCREENS = ('folders', 'images', 'image', 'columns')
+    SCREEN_ALIASES = {'pictures': 'image'}
+
     def set_view_mode(self, mode, persist=True):
-        """Show one of the three shapes: folders alone, pictures alone, or all three columns."""
-        mode = mode if mode in self.VIEW_MODES else 'columns'
+        """Show one screen: folders only, one folder's images, the image with its controls, or the old four columns."""
+        mode = self.SCREEN_ALIASES.get(mode, mode)
+        mode = mode if mode in self.SCREENS else 'folders'
         self.view_mode = mode
-        show = {0: mode in ('folders', 'columns'),      # the gallery column and its own sash
-                1: mode in ('folders', 'columns'),
-                2: mode in ('pictures', 'columns'),     # prompt, prompt sash, picture
-                3: mode in ('pictures', 'columns'),
-                4: mode in ('pictures', 'columns')}
-        # cached once: `grid_slaves` stops listing a widget as soon as it is removed, so a second call would find an
-        # empty cell and could never put it back (measured: 'pictures' mode showed nothing at all).
+        whole = mode in ('folders', 'images')          # the gallery column takes the whole window
+        strip = mode in ('folders', 'columns')         # the folder grid / recent thumbnails
+        pane = mode in ('images', 'columns')           # one open folder's pictures
+        # cached once: `grid_slaves` stops listing a widget as soon as it is removed, so a later call would find an empty
+        # cell and could never put it back.
         cells = getattr(self, '_view_cells', None)
         if not cells:
             cells = {c: tuple(self.root.grid_slaves(row=0, column=c)) for c in range(5)}
             self._view_cells = cells
-        for column, visible in show.items():
+        for column, visible in {0: whole or mode == 'columns', 1: whole or mode == 'columns',
+                                2: mode in ('image', 'columns'), 3: mode in ('image', 'columns'),
+                                4: mode in ('image', 'columns')}.items():
             for widget in cells.get(column, ()):
                 try:
                     widget.grid() if visible else widget.grid_remove()
                 except Exception as e:
-                    log_error('view mode cell', e)
+                    log_error('screen cell', e)
+        # Inside the gallery column: the strip and the pane are different screens, never both in a drill-down screen.
         try:
-            self._apply_layout()               # minsizes and the slack column follow the shape
+            self.contents_holder.grid() if pane else self.contents_holder.grid_remove()
+            for widget in (getattr(self, 'gal_canvas', None), getattr(self, 'gal_bar', None)):
+                if widget is not None:
+                    widget.grid() if strip else widget.grid_remove()
+        except Exception as e:
+            log_error('screen panes', e)
+        try:
+            self._apply_layout()
+            # The whole window goes to whichever half of the gallery column is on screen.
+            self.gal.columnconfigure(0, weight=1 if strip else 0, minsize=0 if not strip else self.gal.columnconfigure(0)['minsize'])
+            self.gal.columnconfigure(2, weight=1 if (pane and not strip) else 0)
+        except Exception as e:
+            log_error('screen widths', e)
+        try:
+            self.view_btn.configure(text={'folders': '\u25a4', 'images': '\u25a6', 'image': '\u25a3',
+                                          'columns': '\u25a9'}[mode])
             self._back_btn.place(x=12, y=6) if mode != 'columns' else self._back_btn.place_forget()
             self._back_btn.lift()
         except Exception as e:
-            log_error('view mode back button', e)
-        try:
-            self.view_btn.configure(text={'folders': '\u25a4', 'columns': '\u25a6', 'pictures': '\u25a3'}[mode])
-        except Exception:
-            pass
+            log_error('screen button', e)
         if persist:
             self._settings['view'] = mode
             self._save_settings_best_effort()
         self.hint.configure(text={'folders': 'folders - open one to see its pictures',
-                                  'pictures': 'pictures - the prompt column and its sash are back with "All columns"',
+                                  'images': 'pictures in this folder - click one to work on it',
+                                  'image': 'the picture and its controls',
                                   'columns': 'all columns'}[mode])
         return mode
 
@@ -5110,11 +5130,11 @@ class App:
             self.select_folder(index)
         except Exception as e:
             log_error('drill click', e)
-        return self.set_view_mode('pictures')
+        return self.set_view_mode('images')
 
     def _drill_back(self):
         """The prominent top-left control: back out one step of the drill-down."""
-        return self.set_view_mode('folders' if self.view_mode == 'pictures' else 'columns')
+        return self.set_view_mode({'image': 'images', 'images': 'folders'}.get(self.view_mode, 'columns'))
 
     def _new_back_button(self):
         # takefocus=0: a control that appears and disappears would otherwise shift the F6 visit order by one, which is
@@ -7099,13 +7119,18 @@ class App:
         # the picture (the historical rule). Without this the gallery kept its old width and the freed space stayed empty,
         # which is exactly what a screenshot showed on 2026-11-03.
         mode = getattr(self, 'view_mode', 'columns')
+        whole = mode in ('folders', 'images')      # the gallery column owns the window
         try:
-            self.root.columnconfigure(0, weight=1 if mode == 'folders' else 0)
-            self.root.columnconfigure(4, weight=0 if mode == 'folders' else 1)
+            self.root.columnconfigure(0, weight=1 if whole else 0)
+            self.root.columnconfigure(4, weight=0 if whole else 1)
             # A hidden column still reserves its minsize - grids do not shrink for an empty cell - which left the gallery at
             # 1278 px of a 2560 px window instead of taking the whole width (seen in a screenshot 2026-11-03).
-            for column in ((0, 1) if mode == 'pictures' else (2, 3, 4) if mode == 'folders' else ()):
+            for column in ((2, 3, 4) if whole else (0, 1) if mode == 'image' else ()):
                 self.root.columnconfigure(column, minsize=0)
+            # ...and inside the gallery column the *pane* takes the slack on the images screen, the strip on the folders one.
+            if mode == 'images':
+                self.gal.columnconfigure(0, weight=0, minsize=0)
+                self.gal.columnconfigure(2, weight=1)
         except Exception:
             pass
         self._apply_prompt_wrap()
@@ -9354,8 +9379,8 @@ class App:
         path = Path(path)
         # In folders-only there is no picture column to look at, so a click is the drill-down step: the picture takes the
         # window (reported 2026-11-03 as "selecting an image does nothing" - it was loading into a hidden column).
-        if getattr(self, 'view_mode', 'columns') == 'folders':
-            self._later(10, lambda: self.set_view_mode('pictures'))
+        if getattr(self, 'view_mode', 'columns') in ('folders', 'images'):
+            self._later(10, lambda: self.set_view_mode('image'))
         if pane:
             # the pane keeps its own cursor and its own keyboard: a click here must not hand the arrows to the strip
             self._pane_cur = path
