@@ -4999,6 +4999,35 @@ def main():
     root3.destroy()
 
 
+    # --- the startup screen, which six reports were about ------------------------------------------------
+    # Nothing above tested what the app shows a second after launch: the suite pins ZIMAGE_VIEW=columns for the layout checks,
+    # so every startup bug (screen applied too late, a stale preference honoured, the folder view reloaded off, a crash while
+    # grouping) was invisible here and visible to the user. This launches the real default and asserts the first screen.
+    print('\n-- the first screen after launch')
+    _saved_view = os.environ.pop('ZIMAGE_VIEW', None)
+    root5 = tk.Tk()
+    root5.geometry('1600x950')
+    app5 = zui.App(root5, StubEngine(), args)
+    end = time.time() + 10.0
+    while time.time() < end:
+        app5._poll()
+        root5.update()
+        time.sleep(0.02)
+        if getattr(app5, '_view_cells', None) or app5.group_var.get():
+            if app5._plan or len(getattr(app5, '_view_cells', {}) or {}) >= 5:
+                break
+    mapped = {c: any(w.winfo_ismapped() for w in app5._view_cells.get(c, ())) for c in range(5)}
+    check('a plain launch opens on the folders screen', app5.view_mode == 'folders', app5.view_mode)
+    check('and the prompt and picture columns are not on screen', not mapped.get(2) and not mapped.get(3) and not mapped.get(4),
+          mapped)
+    check('the folder view is on, not the picture list', app5.group_var.get() is True, app5.group_var.get())
+    picture_tiles = [w for w in app5.recent.winfo_children() if getattr(w, 'winfo_class', lambda: '')() == 'Frame']
+    check('nothing painted picture tiles on it', not picture_tiles or bool(app5._plan),
+          (len(picture_tiles), bool(app5._plan)))
+    root5.destroy()
+    if _saved_view is not None:
+        os.environ['ZIMAGE_VIEW'] = _saved_view
+
     _wp_backstop.launch = _REAL_LAUNCH          # leave the module as we found it
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
     print('gallery was %s' % tmp)
