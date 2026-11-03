@@ -5304,6 +5304,17 @@ class App:
                 self.search_box.grid_configure(columnspan=2)
         except Exception as e:
             log_error('screen widths', e)
+        # The folders screen exists to pick a folder, so the folders view must be on there: with the toggle off the strip drew
+        # the all-pictures list and the screen looked like an image list (reported 2026-11-03).
+        if mode == 'folders' and not self.group_var.get():
+            try:
+                self.group_var.set(True)
+                if (getattr(self, '_plan', None) or {}).get('groups'):
+                    self._render_folder_tiles()
+                else:
+                    self.toggle_groups(True)
+            except Exception as e:
+                log_error('folders screen toggle', e)
         try:
             self.view_btn.configure(text={'folders': '\u25a4', 'images': '\u25a6', 'image': '\u25a3',
                                           'columns': '\u25a9'}[mode])
