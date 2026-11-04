@@ -6069,14 +6069,15 @@ class App:
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
         # gallery-only keys: z cycles zoom, a cycles the slideshow, +/- step it, F11 is the full screen. Each handler
         # checks the mode itself, so the comparison window's keys are exactly what they were.
-        for seq, fn in (('<F11>', lambda e: self._gallery_fullscreen()),
-                        ('z', lambda e: self._gallery_cycle_zoom()),
-                        ('Z', lambda e: self._gallery_cycle_zoom()),
-                        ('a', lambda e: self._gallery_cycle_auto()),
-                        ('A', lambda e: self._gallery_cycle_auto()),
-                        ('<plus>', lambda e: self._gallery_slide(+1)),
-                        ('<minus>', lambda e: self._gallery_slide(-1)),
-                        ('<Motion>', lambda e: self._gallery_touch())):
+        for seq, fn in (('<F11>', self._gallery_fullscreen),
+                        ('z', self._gallery_cycle_zoom),
+                        ('Z', self._gallery_cycle_zoom),
+                        ('a', self._gallery_cycle_auto),
+                        ('A', self._gallery_cycle_auto),
+                        ('<plus>', lambda: self._gallery_slide(+1)),
+                        ('<minus>', lambda: self._gallery_slide(-1)),
+                        ('<Motion>', self._gallery_touch)):
+            # every handler takes an optional event and is called with none, so the same tuple serves Tk and a test
             win.bind(seq, lambda e, f=fn: (f(), 'break')[1], add='+')
         # dragging a zoomed picture: the label is the picture's own surface in gallery mode
         left_lbl.bind('<ButtonPress-1>', self._gallery_press, add='+')
