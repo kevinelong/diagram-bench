@@ -6034,22 +6034,54 @@ class App:
         # gallery mode: Prev/Next live where the three decisions were, and the count sits on the picture
         b_prev = ttk.Button(bar, text='\u25c0  Prev  (\u2190 or \u2191)', command=lambda: self.gallery_step(-1))
         b_next = ttk.Button(bar, text='Next  (\u2192 or \u2193)  \u25b6', command=lambda: self.gallery_step(+1))
+        # the gallery's own furniture: zoom, slideshow, fullscreen. Gridded only in gallery mode, so the comparison
+        # window keeps exactly the controls it had.
+        chips = ttk.Frame(bar)
+        chips.grid(row=3, column=0, columnspan=4, sticky='ew', pady=(6, 2))
+        g_zoom = ttk.Button(chips, text='zoom: fit', command=self._gallery_cycle_zoom)
+        g_zoom.pack(side='left', padx=(0, 4))
+        g_auto = ttk.Button(chips, text='slideshow: off', command=self._gallery_cycle_auto)
+        g_auto.pack(side='left', padx=4)
+        g_full = ttk.Button(chips, text='full screen  (F11)', command=lambda: self._gallery_fullscreen())
+        g_full.pack(side='left', padx=4)
+        g_hint = ttk.Label(chips, text='z zoom \u00b7 a slideshow \u00b7 drag a zoomed picture to pan',
+                           foreground=self.theme.muted)
+        g_hint.pack(side='left', padx=(10, 0))
+        chips.grid_remove()
         badge = tk.Label(win, text='', background='#101010', foreground='#e8e8e8', font=('Segoe UI', 16, 'bold'),
                          padx=12, pady=4)
         self._review = {'win': win, 'state': state, 'left_lbl': left_lbl, 'right_lbl': right_lbl, 'info': info,
                         'pair': None, 'deleted': 0, 'queue': None, 'path': None,
                         'buttons': (b_left, b_keep, b_right), 'badge': badge, 'cur': 0,
-                        'gallery_buttons': (b_prev, b_next, b_stop)}
+                        'gallery_buttons': (b_prev, b_next, b_stop),
+                        'bar': bar, 'chips': (chips, g_zoom, g_auto, g_full, g_hint),
+                        'gzoom': 'fit', 'gauto': 0, 'gpan': (0, 0), 'gfull': False,
+                        'hide_job': None, 'auto_job': None, 'gdrag': None, 'src': None, 'gdraw': None}
         for key, fn in (('1', lambda: self.review_decide('left')),
                         ('2', lambda: self.review_decide('middle')),
                         ('3', lambda: self.review_decide('right')),
-                        ('<Escape>', self.review_stop),
+                        ('<Escape>', self._gallery_escape),
                         ('<Left>', lambda: self._review_arrow('left')),
                         ('<Right>', lambda: self._review_arrow('right')),
                         ('<Down>', lambda: self._review_arrow('down')),
                         ('<Up>', lambda: self._review_arrow('up')),
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
+        # gallery-only keys: z cycles zoom, a cycles the slideshow, +/- step it, F11 is the full screen. Each handler
+        # checks the mode itself, so the comparison window's keys are exactly what they were.
+        for seq, fn in (('<F11>', lambda e: self._gallery_fullscreen()),
+                        ('z', lambda e: self._gallery_cycle_zoom()),
+                        ('Z', lambda e: self._gallery_cycle_zoom()),
+                        ('a', lambda e: self._gallery_cycle_auto()),
+                        ('A', lambda e: self._gallery_cycle_auto()),
+                        ('<plus>', lambda e: self._gallery_slide(+1)),
+                        ('<minus>', lambda e: self._gallery_slide(-1)),
+                        ('<Motion>', lambda e: self._gallery_touch())):
+            win.bind(seq, lambda e, f=fn: (f(), 'break')[1], add='+')
+        # dragging a zoomed picture: the label is the picture's own surface in gallery mode
+        left_lbl.bind('<ButtonPress-1>', self._gallery_press, add='+')
+        left_lbl.bind('<B1-Motion>', self._gallery_drag, add='+')
+        left_lbl.bind('<ButtonRelease-1>', self._gallery_release, add='+')
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
         # B2: the finish screen lays twelve tiles out at once, so the thumbnails it will want are built now, on the
         # background thread - a review lasts longer than the first completion does.
@@ -6062,6 +6094,312 @@ class App:
         else:
             self._review_show_next()
 
+
+    # ---- gallery: full screen, zoom, pan, slideshow, chrome that hides ------------------------------------
+    # Asked for 2026-11-03, after the Rust gallery: a real full-screen picture window. That app paints pixels, so its
+    # gallery is chrome-less by construction; here the picture is a Tk label, so the same effect comes from a
+    # borderless window, a cell-sized PhotoImage the picture is drawn into, and furniture that hides itself. Every
+    # handler below checks the mode, because this window also hosts the A/B comparison and rank/delete must not change.
+
+    GALLERY_ZOOMS = (('fit', 'fit'), ('centred', 'centred'), ('original', 'original'), ('2x', '2\u00d7'),
+                     ('4x', '4\u00d7'))
+    GALLERY_AUTO = (0, 1, 2, 3, 5, 10, 15, 20, 30, 60)
+    OVERLAY_MS = 2500          # the Rust gallery fades its chrome at ~2.5 s; the same interval reads the same way
+
+    def _gallery_mode(self):
+        """True only in the gallery tab - the one gate every new handler passes through."""
+        mode = getattr(self, '_review_mode', None)
+        r = getattr(self, '_review', None)
+        if r is None or mode is None:
+            return False
+        try:
+            return str(mode.get()) == 'gallery' and bool(r.get('win') and r['win'].winfo_exists())
+        except Exception:
+            return False
+
+    def _gallery_load(self, path):
+        """Open the picture once and paint it; called on every step, so the decode is cached against path+size."""
+        r = self._review
+        try:
+            r['src'] = Image.open(path).convert('RGB')
+            r['src_path'] = str(path)
+        except Exception as e:
+            r['src'] = None
+            r['left_lbl'].configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+            log_error('gallery load %s' % Path(path).name, e)
+            return
+        r['left_lbl'].source = path
+        r['gpan'] = (0, 0)                       # a new picture starts centred, not inheriting the last pan
+        self._gallery_paint()
+
+    def _gallery_paint(self):
+        """Draw the picture into a cell-sized image at the chosen zoom, offset by the pan, and show one PhotoImage.
+
+        Composing into the cell rather than resizing the label is what keeps the window from reflowing: the label never
+        changes size, so nothing beside it moves when the zoom changes, and the pan is a paste offset, not a scroll.
+        """
+        r = getattr(self, '_review', None)
+        if not r or r.get('src') is None or not self._gallery_mode():
+            return
+        lbl = r['left_lbl']
+        try:
+            cell_w = max(160, lbl.winfo_width() - 8)
+            cell_h = max(120, lbl.winfo_height() - 8)
+        except Exception:
+            return
+        im = r['src']
+        sw, sh = im.size
+        mode = r.get('gzoom') or 'fit'
+        if mode == 'fit':
+            scale = min(cell_w / float(sw), cell_h / float(sh))
+        elif mode == 'centred':
+            scale = 1.0
+        elif mode == 'original':
+            scale = 1.0
+        elif mode == '2x':
+            scale = 2.0
+        else:
+            scale = 4.0
+        tw, th = max(1, int(round(sw * scale))), max(1, int(round(sh * scale)))
+        try:
+            if (tw, th) != (sw, sh):
+                # one integer box reduction before the smooth step when shrinking a lot: the same pipeline the main
+                # canvas uses, and the difference between a 4x view that appears at once and one that lags the key
+                draw = im
+                if tw < sw and int(sw / float(tw)) >= 2:
+                    draw = draw.reduce(int(sw / float(tw)))
+                draw = draw.resize((tw, th), Image.BILINEAR if tw < sw else Image.LANCZOS)
+            else:
+                draw = im
+            bg = r['win']['background']
+            px, py = r.get('gpan') or (0, 0)
+            ox = (cell_w - tw) // 2 + px
+            oy = (cell_h - th) // 2 + py
+            ox = (cell_w - tw) // 2 if tw <= cell_w else min(0, max(cell_w - tw, ox))
+            oy = (cell_h - th) // 2 if th <= cell_h else min(0, max(cell_h - th, oy))
+            board = Image.new('RGB', (cell_w, cell_h), bg)
+            board.paste(draw, (ox, oy))
+            photo = self._photo(board)
+            lbl.configure(image=photo, text='')
+            lbl.image = photo                        # Tk drops a PhotoImage nothing references
+            r['gdraw'] = (ox, oy, tw, th, cell_w, cell_h)
+        except Exception as e:
+            log_error('gallery paint', e)
+
+    def _gallery_cycle_zoom(self, event=None):
+        """z, or the chip: fit -> centred -> original -> 2x -> 4x -> fit."""
+        if not self._gallery_mode():
+            return 'break'
+        r = self._review
+        names = [name for name, _label in self.GALLERY_ZOOMS]
+        try:
+            i = names.index(r.get('gzoom') or 'fit')
+        except ValueError:
+            i = 0
+        r['gzoom'] = names[(i + 1) % len(names)]
+        r['gpan'] = (0, 0)
+        self._gallery_chrome()
+        self._gallery_paint()
+        return 'break'
+
+    def _gallery_chrome(self):
+        """Keep the chips' wording in step with the state they describe."""
+        r = getattr(self, '_review', None)
+        if not r or not r.get('chips'):
+            return
+        _frame, zoom_btn, auto_btn, full_btn, _hint = r['chips']
+        label = dict(self.GALLERY_ZOOMS).get(r.get('gzoom') or 'fit', 'fit')
+        zoom_btn.configure(text='zoom: %s' % label)
+        auto = int(r.get('gauto') or 0)
+        auto_btn.configure(text='slideshow: %s' % ('off' if not auto else ('%d s' % auto)))
+        full_btn.configure(text='windowed  (F11)' if r.get('gfull') else 'full screen  (F11)')
+
+    def _gallery_fullscreen(self, event=None):
+        """F11: drop the caption and cover the screen, or put the maximised window back.
+
+        `overrideredirect` is the only way to get a Windows frame out of the way from Tk, and it has two prices worth
+        naming: the window must be re-positioned by hand, and it no longer gets a taskbar entry, so Escape and F11 are
+        the way back. Both are bound.
+        """
+        if not self._gallery_mode():
+            return 'break'
+        r = self._review
+        win = r['win']
+        try:
+            if r.get('gfull'):
+                win.overrideredirect(False)
+                win.state('zoomed')
+                r['gfull'] = False
+            else:
+                sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+                win.overrideredirect(True)
+                win.geometry('%dx%d+0+0' % (sw, sh))
+                win.focus_force()
+                win.bind('<Map>', lambda e: win.focus_force(), add='+')
+                r['gfull'] = True
+            self._gallery_chrome()
+            self._later(120, self._gallery_paint)      # the cell has no size until the frame has been laid out
+        except Exception as e:
+            log_error('gallery fullscreen', e)
+        return 'break'
+
+    def _gallery_escape(self, event=None):
+        """Escape leaves the full screen first and the window second, so one key never loses the place twice."""
+        if self._gallery_mode() and self._review.get('gfull'):
+            return self._gallery_fullscreen()
+        return self.review_stop()
+
+    def _gallery_cycle_auto(self, event=None):
+        """a, or the chip: off -> 1 s -> 2 -> 3 -> 5 -> 10 -> 15 -> 20 -> 30 -> 60 -> off."""
+        if not self._gallery_mode():
+            return 'break'
+        self._gallery_slide(+1)
+        return 'break'
+
+    def _gallery_slide(self, step):
+        """Step through the slideshow intervals, and start or stop the timer to match."""
+        r = self._review
+        intervals = self.GALLERY_AUTO
+        try:
+            i = intervals.index(int(r.get('gauto') or 0))
+        except ValueError:
+            i = 0
+        seconds = intervals[(i + step) % len(intervals)]
+        if step < 0 and seconds == 0:
+            seconds = intervals[-1]
+        r['gauto'] = seconds
+        self._gallery_auto_arm()
+        self._gallery_chrome()
+        self.hint.configure(text='slideshow off' if not seconds
+                            else 'slideshow every %d s \u00b7 any key or click stops it' % seconds)
+        return 'break'
+
+    def _gallery_auto_arm(self):
+        """(Re)start the slideshow timer. Cancelled on any manual step, so a walk never fights the reader."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        job = r.get('auto_job')
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            r['auto_job'] = None
+        seconds = int(r.get('gauto') or 0)
+        if seconds <= 0 or not self._gallery_mode():
+            return
+
+        def tick():
+            r = getattr(self, '_review', None)
+            if not r or not self._gallery_mode():
+                return
+            r['auto_job'] = None
+            self.gallery_step(+1)
+            self._gallery_auto_arm()
+
+        r['auto_job'] = self._later(seconds * 1000, tick)
+
+    def _gallery_touch(self, event=None):
+        """Mouse moved: bring the chrome back and restart the 2.5 s clock that hides it."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        self._gallery_show_chrome(True)
+        job = r.get('hide_job')
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            r['hide_job'] = None
+        r['hide_job'] = self._later(self.OVERLAY_MS, self._gallery_hide_chrome)
+        return None
+
+    def _gallery_show_chrome(self, show):
+        """The bar and the badge are the chrome; the picture is never resized to make room for them."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        try:
+            bar = r.get('bar')
+            if bar is not None:
+                bar.grid() if show else bar.grid_remove()
+            badge = r.get('badge')
+            if badge is None:
+                return
+            if show:
+                badge.place(relx=1.0, rely=1.0, anchor='se', x=-24, y=-112)
+            else:
+                badge.place_forget()
+        except Exception:
+            pass
+
+    def _gallery_hide_chrome(self):
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        r['hide_job'] = None
+        if self._gallery_mode():
+            self._gallery_show_chrome(False)
+
+    def _gallery_press(self, event):
+        """Press on the picture: remember where the drag started, if there is anything to drag."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        self._gallery_touch()
+        gdraw = r.get('gdraw')
+        if not gdraw:
+            return None
+        _ox, _oy, tw, th, cw, ch = gdraw
+        if tw <= cw and th <= ch:
+            return None                      # it fits: there is nothing to pan, and a press is just a press
+        r['gdrag'] = (event.x, event.y, r.get('gpan') or (0, 0))
+        try:
+            r['left_lbl'].configure(cursor='fleur')
+        except Exception:
+            pass
+        return None
+
+    def _gallery_drag(self, event):
+        """Drag a picture larger than its cell. Pan is clamped by `_gallery_paint`, so no blank edge is reachable."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        grab = r.get('gdrag')
+        if not grab:
+            return None
+        x0, y0, pan = grab
+        r['gpan'] = (pan[0] + event.x - x0, pan[1] + event.y - y0)
+        self._gallery_paint()
+        self._gallery_touch()
+        return 'break'
+
+    def _gallery_release(self, event):
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        r['gdrag'] = None
+        try:
+            r['left_lbl'].configure(cursor='')
+        except Exception:
+            pass
+        return None
+
+    def _gallery_stop_timers(self):
+        """Drop both gallery timers before the window goes: a pending tick would fire into a destroyed Toplevel."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        for key in ('hide_job', 'auto_job'):
+            job = r.get(key)
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except Exception:
+                    pass
+                r[key] = None
 
     def _review_fit(self, lbl, path=None, redraw_only=False):
         """Size a picture to the label's own cell, not to the screen.
@@ -6139,8 +6477,7 @@ class App:
         r['cur'] = index
         path = series[index]
         r['pair'] = None
-        r['left_lbl'].source = path
-        self._review_fit(r['left_lbl'], path)
+        self._gallery_load(path)
         last = index == len(series) - 1
         badge = r.get('badge')
         if badge is not None:
@@ -6217,7 +6554,14 @@ class App:
                 prev_btn, next_btn, _stop = r['gallery_buttons']
                 prev_btn.grid(row=2, column=0, columnspan=2, sticky='ew', padx=4)
                 next_btn.grid(row=2, column=2, columnspan=2, sticky='ew', padx=4)
+                if r.get('chips'):
+                    r['chips'][0].grid()
+                    self._gallery_chrome()
             else:
+                if r.get('chips'):
+                    r['chips'][0].grid_remove()
+                self._gallery_stop_timers()
+                self._gallery_show_chrome(True)
                 r['left_lbl'].grid_configure(columnspan=1, padx=(6, 3))
                 r['right_lbl'].grid()
                 for b in r.get('gallery_buttons', ())[:2]:
@@ -6232,6 +6576,7 @@ class App:
             except Exception:
                 pass
             self.gallery_show()
+            self._gallery_touch()          # chrome visible now, hidden 2.5 s after the pointer stops
             return
         if r.get('badge') is not None:
             r['badge'].place_forget()
@@ -6330,6 +6675,9 @@ class App:
         if not r:
             return
         r['_resize_job'] = None
+        if self._gallery_mode():
+            self._gallery_paint()          # the cell changed size: re-compose at the same zoom and pan
+            return
         for lbl in (r['left_lbl'], r['right_lbl']):
             if getattr(lbl, 'source', None):
                 self._review_fit(lbl)
@@ -6642,6 +6990,7 @@ class App:
             return 'break'
         pair_review.save_state(r['state'])
         decided, total, deletes = pair_review.progress(r['state'])
+        self._gallery_stop_timers()
         try:
             r['win'].destroy()
         except Exception:

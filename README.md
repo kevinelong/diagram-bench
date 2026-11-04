@@ -654,6 +654,27 @@ and the last one carries **`FIN`** beside its number so the end of the series is
 Rank or Delete restores the pair layout, and `review_decide` refuses outright in gallery mode, so a stray key press in a
 gallery cannot rank or delete anything.
 
+**Gallery mode is a real picture window now** - four things added 2026-11-03 after reading the Rust gallery, all of them
+gated on the mode so the comparison window keeps exactly the keys and furniture it had:
+
+| control | does |
+|---|---|
+| **F11** (or the chip) | borderless full screen - `overrideredirect` plus the screen geometry. The chip says *windowed (F11)* while it is on, and the picture is re-composed **120 ms** later, because the cell has no size until the frame is laid out |
+| **z** | zoom ladder **fit → centred → original → 2× → 4×**, with the chip naming the current rung. Fit scales **up** as well as down, the same rule the picture column follows |
+| **drag** | pans a picture larger than its cell. The pan is clamped to the drawn size, so no blank edge is reachable, and a picture that fits refuses the drag rather than pretending |
+| **a** / **±** | slideshow: off → 1 → 2 → 3 → 5 → 10 → 15 → 20 → 30 → 60 s, wrapping, cancelled by any manual step |
+| any motion or key | the bar and the badge come back, and hide again **2.5 s** after the pointer stops - the interval the Rust gallery uses |
+
+Two things make that cheap rather than a second renderer: the picture is drawn **into a cell-sized image** (so the label
+never changes size and nothing beside it reflows when the zoom changes), and a shrink of 2× or more takes one integer box
+reduction before the smooth step, which is the pipeline the main canvas already uses. The decode is per picture, and the
+pan is a paste offset. **Esc leaves full screen first** and the window second, so one key never loses the place twice;
+both timers are cancelled in `review_stop`, because a pending tick would fire into a destroyed Toplevel.
+
+Verified by a 20-check harness against a fixture gallery: the chips, the zoom ladder and the drawn sizes, full screen on
+and off, the slideshow advancing by itself and stopping, the chrome hiding and returning, the drag panning only when the
+picture overflows, and both timers gone after Stop.
+
 **Keys, in ranking mode only:** `←` left is better, `→` right is better, `↓` tie, `↑` back. In delete mode the arrows are
 inert and say so - `←` used to recycle a file, which is too much power for a key you press while looking at pictures. `1`,
 `2`, `3` and `Space` work in both modes, and Esc stops with the progress saved.
