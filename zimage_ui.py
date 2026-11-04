@@ -648,7 +648,11 @@ def copy_png_to_clipboard(path):
 SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url', 'view',
                  'screen', 'view_schema',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
-                 'zoom', 'contents_w', 'strip_w', 'prompt_w')
+                 'zoom', 'contents_w', 'strip_w', 'prompt_w',
+                 # `_persist` has always written these six and `save_settings` has always filtered them out, so the
+                 # steps-per-model map, both rephrase settings, the sort order and the folder last read died at exit.
+                 # A key that is written and not whitelisted is a setting the window forgets every time it closes.
+                 'steps_by_model', 'rephrase_intensity', 'rephrase_matching', 'sort', 'last_folder')
 
 # An image prompt describes a still; an image-to-video model obeys motion language. Sending the still's description
 # with a clip asks for motion while describing stillness, which is exactly what "unusable" looked like.
@@ -1296,7 +1300,7 @@ class _Profile:
         def pct(q):
             return ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))]
         return {'n': len(ordered), 'p50': round(pct(.5), 2), 'p90': round(pct(.9), 2),
-                'max': round(ordered[-1], 2), 'total': round(sum(ordered), 1)}
+                'p95': round(pct(.95), 2), 'max': round(ordered[-1], 2), 'total': round(sum(ordered), 1)}
 
     def summary(self):
         return {ev: self._stats(list(v)) for ev, v in sorted(self.samples.items())}
@@ -1408,6 +1412,20 @@ def tile_plan(batch, seed, seed_step, has_base=False):
     total = max(1, int(batch or 1))
     step = max(1, int(seed_step or 1))
     return total, [seed + i * step for i in range(total)]
+
+
+def restored_folder(plan, was_open=None, saved=None):
+    """Which folder a plan should open: the one already open, else the one the last session was reading.
+
+    Pure so it can be tested without a window: the label must still exist in the plan, because a folder can be renamed
+    by a re-group and a stale name would open nothing while looking like it should have.
+    """
+    labels = [g.get('label') for g in (plan or {}).get('groups') or []]
+    if was_open and was_open in labels:
+        return was_open
+    if saved and saved in labels:
+        return saved
+    return None
 
 
 class Engine:
@@ -3068,6 +3086,11 @@ class App:
         # away in the picker, and with no bouts recorded every win count is 0, so the order falls back to newest-first
         # and a gallery nobody has reviewed looks exactly as it did before.
         self.sort_var = tk.StringVar(value='Wins')
+        # The picker is a control the reader sets on purpose, so it survives a restart - but only a value the picker
+        # actually offers, or a stale profile would put a word in the box that paints a list nothing can re-sort.
+        _saved_sort = (self._settings or {}).get('sort')
+        if _saved_sort in ('Recent', 'Wins', 'Sequence'):
+            self.sort_var.set(_saved_sort)
         # Sequence reads a storyboard in film order (the scene numbers a multi-scene prompt records in its sidecars);
         # it falls back to recency for pictures that have none, so an ordinary gallery is unchanged
         self.sort_cb = ttk.Combobox(selrow, state='readonly', width=8, values=['Recent', 'Wins', 'Sequence'],
@@ -3656,6 +3679,9 @@ class App:
         # Ctrl+F finds inside the prompt from anywhere in the window - it is the one find a prompt box needs, and
         # Alt+F is already the folders switch. Nothing else in the app claims Control-f.
         root.bind('<Control-f>', lambda e: (self.find_open(), 'break')[1])
+        # Ctrl+D is the Rust gallery's habit and a good one: one paste-ready block, no dialog to fill in. Nothing else
+        # in the app claims Control-d, and it is not a text-editing key on Windows (that is Delete).
+        root.bind('<Control-d>', lambda e: (self.copy_diagnostics(), 'break')[1])
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
         # the pan is appended after the three modes that already own a press on this canvas - compare, mask and crop -
         # and refuses to move unless the picture overflows the canvas and none of them is armed. A wheel notch or an
@@ -3729,6 +3755,111 @@ class App:
             }
         except Exception:
             pass
+
+    # ---- diagnostics: one paste-ready block ---------------------------------------------------------------
+    def diagnostics_text(self):
+        """Everything a bug report needs, in one block, from state the window already holds.
+
+        The same idea as the Rust gallery's Ctrl+D: one string that says which build, which screen, what is being
+        filtered, which folder is open, what the server is doing, what it last measured and where the files are. It
+        costs nothing until pressed - the profile samples are already in memory.
+        """
+        out, w = [], 10
+
+        def add(label, value):
+            out.append('%-*s %s' % (w, label + ':', value))
+
+        try:
+            import platform
+            add('app', '%s  pid %d  python %s  tk %s' % (
+                version.display, os.getpid(), platform.python_version(), self.root.tk.call('info', 'patchlevel')))
+            add('os', platform.platform(terse=True))
+        except Exception as e:
+            add('app', '%s (could not describe the build: %s)' % (version.display, e))
+        try:
+            dpi = self.root.winfo_fpixels('1i')
+            add('window', '%dx%d  dpi %.0f (%.0f%%)  theme %s  sidebar %s' % (
+                self.root.winfo_width(), self.root.winfo_height(), dpi, 100.0 * dpi / 96.0,
+                'dark' if getattr(self.theme, 'dark', False) else 'light', 'on' if self._sidebar else 'off'))
+        except Exception:
+            pass
+        try:
+            add('source', '%s  files=%d  folders=%d  recent=%d  selected=%d' % (
+                getattr(self, '_source', None) or self.args.out,
+                len(getattr(self, '_files', ()) or ()),
+                len(((getattr(self, '_plan', None) or {}).get('groups') or [])),
+                len(getattr(self, '_content_order', ()) or ()),
+                len(getattr(self, 'selected', ()) or ())))
+        except Exception:
+            pass
+        try:
+            add('view', 'mode=%s  sort=%s  filter=%r  star-only=%s  no-prompt=%s  layout=%s  zoom=%s' % (
+                getattr(self, 'view_mode', ''), self.sort_var.get(), self.search_var.get(),
+                bool(self.starred_only.get()), bool(getattr(self, 'noprompt_only', None).get()) if getattr(
+                    self, 'noprompt_only', None) is not None else False,
+                self.layout_var.get(), self.zoom_var.get() if hasattr(self, 'zoom_var') else ''))
+        except Exception:
+            pass
+        try:
+            plan = getattr(self, '_plan', None) or {}
+            groups = plan.get('groups') or []
+            index = getattr(self, '_active_folder', None)
+            if index is not None and index < len(groups):
+                add('folder', '%s  (%d pictures)' % (groups[index].get('label'), len(groups[index].get('images') or [])))
+            else:
+                add('folder', 'none open')
+        except Exception:
+            pass
+        try:
+            engine = self.engine
+            add('server', 'port %s  ready=%s  %s' % (
+                getattr(engine, 'port', '?'), getattr(engine, 'ready', '?'),
+                'owned by this window' if getattr(engine, 'owned', False) else 'was already running'))
+        except Exception:
+            pass
+        jobs = getattr(self, '_jobs', None) or {}
+        if jobs:
+            now = time.time()
+            add('jobs', '')
+            for key, job in jobs.items():
+                out.append('           %-8s %-24s %5.1fs%s' % (
+                    key, job.get('label', ''), (job.get('end') or now) - job.get('t0', now),
+                    '' if job.get('total') is None else '  %s/%s' % (job.get('done'), job.get('total'))))
+        try:
+            summary = PROFILE.summary()
+            by_total = sorted(summary.items(), key=lambda kv: -kv[1].get('total', 0))[:8]
+            if by_total:
+                add('timings', 'p50/p90/p95/max ms, n')
+                for ev, st in by_total:
+                    out.append('           %-34s %7.1f %7.1f %7.1f %8.1f  n=%d' % (
+                        ev, st.get('p50', 0), st.get('p90', 0), st.get('p95', 0), st.get('max', 0), st.get('n', 0)))
+        except Exception:
+            pass
+        for label, path in (('settings', settings_path()), ('errors', ERROR_LOG), ('timings-log', _TIMING_LOG)):
+            try:
+                add(label, str(path))
+            except Exception:
+                pass
+        return '\n'.join(out) + '\n'
+
+    def copy_diagnostics(self):
+        """Ctrl+D: put that block on the clipboard and say so in the hint line."""
+        try:
+            text = self.diagnostics_text()
+        except Exception as e:
+            log_error('diagnostics', e)
+            try:
+                self.hint.configure(text='could not build diagnostics: %s' % e)
+            except Exception:
+                pass
+            return ''
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.hint.configure(text='diagnostics copied (%d lines)' % len(text.splitlines()))
+        except Exception as e:
+            self.hint.configure(text='diagnostics built but not copied: %s' % e)
+        return text
 
     def save_profile(self, path=None):
         """Write what has been measured so far and say where: real use must record something."""
@@ -5007,6 +5138,14 @@ class App:
         was_open = None
         if self._plan and self._active_folder is not None and self._active_folder < len(self._plan['groups']):
             was_open = self._plan['groups'][self._active_folder].get('label')
+        # The first plan of a session has no open folder of its own, so the folder the last session was reading is
+        # reopened by name - the same rule a re-group uses, which is why it lands here rather than in a second path.
+        # One shot: the key is taken out of the settings dict so a later re-group cannot drag the reader back.
+        saved = self._settings.pop('last_folder', None) if self._settings else None
+        chosen = restored_folder(plan, was_open, saved)
+        if chosen and chosen != was_open:
+            folder_event('restore', label=chosen)
+        was_open = chosen
         self._folder_shown = BATCH_FOLDERS
         self._shown = RECENT_N
         self._sheets = {}
@@ -6617,6 +6756,10 @@ class App:
         # `_refresh_gallery` has usually just walked the source; a second identical walk here was half of the 1.1 s a
         # folder click used to cost (measured: refresh 1 103 ms inside a 1 104 ms click handler).
         rows = rows if rows is not None else self._scan_cached(False)
+        # The walk hands back (path, mtime) pairs; the mtime used to be thrown away here and fetched again with
+        # `f.stat()` inside the sort key - one syscall per picture per refresh, on 2 160-3 216 pictures, for a value
+        # the walk had just read. The map keeps the picture list identical and removes the syscalls.
+        stamps = dict(rows)
         files = [p for p, _m in rows]
         # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
         # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
@@ -6626,7 +6769,6 @@ class App:
         # timeline of the whole gallery.
         needle = self.search_var.get().strip().lower()
         if needle:
-            stamps = dict(rows)
             files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
         if getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get():
             files = [f for f in files if not ((read_meta(f) or {}).get('prompt') or '').strip()]
@@ -6634,7 +6776,12 @@ class App:
             files = [f for f in files if f.name in self._favorites]
         if self._sort_sequence():
             return [Path(p) for p in self._sequence_order(files)]
-        files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
+        def _newest(f):
+            """Sort key: newest first, and no syscall - the walk's mtime, falling back only if a row went missing."""
+            stamp = stamps.get(f)
+            return -(stamp if stamp is not None else f.stat().st_mtime)
+
+        files.sort(key=lambda f: (f.name not in self._favorites, _newest(f)))
         return files
 
     def _folders_view_active(self):
@@ -11459,7 +11606,17 @@ class App:
                 self._steps_by_model[self._model_now] = str(int(self.steps_var.get()))
         except (TypeError, ValueError):
             pass
+        # Which folder the reader is inside, by name rather than by index: the plan is recomputed on every start and
+        # every render, and an index would reopen whatever moved into that slot.
+        open_label = None
+        try:
+            if self._active_folder is not None and self._plan:
+                open_label = (self._plan['groups'][self._active_folder] or {}).get('label')
+        except Exception:
+            open_label = None
         self._settings = {'screen': getattr(self, 'view_mode', 'folders'),   # the layout choice has to survive a save
+                          'sort': (self.sort_var.get() if hasattr(self, 'sort_var') else 'Wins'),
+                          'last_folder': open_label,
                           'size': self.size_var.get(), 'steps': self.steps_var.get(),
                           'steps_by_model': dict(getattr(self, '_steps_by_model', {})),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),

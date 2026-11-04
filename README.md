@@ -1634,10 +1634,17 @@ do before it is pressed: `TEXT → IMAGE · 4 steps · euler · 512 px · one im
 `EDIT img.png at 0.60` when a base is set. Choosing a layout prints its measured cost (`16 tiles · ≈ 3 m 39 s one at a
 time, or ≈ 11 s as one batch`), from a table of timings taken on this machine rather than a formula.
 
-Window size, steps, sampler and layout are remembered in `%LOCALAPPDATA%/zimage-ui/settings.json`, and **Ctrl+Up /
+Window size, steps, sampler, layout, **the sort order and the folder you were reading** are remembered in
+`%LOCALAPPDATA%/zimage-ui/settings.json`, and **Ctrl+Up /
 Ctrl+Down** in the prompt box recalls previous prompts - plain Up/Down are left to the textbox, because a five-line prompt
 needs the caret to move by line before any shortcut gets to hijack the key. The *chain* box is deliberately **not** remembered, so a fresh window always starts
-as text to image.
+as text to image. The search box is not remembered either: a filter that survives a restart is how pictures look
+missing.
+
+**Ctrl+D** copies a single paste-ready diagnostics block: build, pid, Python and Tk, window size and DPI, theme, the
+source folder and the counts, what is being filtered and sorted, which folder is open, the server state, every live job,
+and the worst eight timed operations with **n / p50 / p90 / p95 / max** from the profile the window already keeps. It is
+the whole bug report, without opening a dialog - the same habit the Rust gallery uses.
 
 **What sends an image at all** is the base, and only three gestures set one: the **Use as Base** button, the **chain**
 box after a run, and **Ctrl+V** (paste from the clipboard). A plain click in the gallery **looks** - it shows the
