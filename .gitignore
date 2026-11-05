@@ -16,3 +16,27 @@ logs/
 
 # scratch dirs from tools/merge_equivalence.py
 .merge-equivalence*/
+
+# --- dependency stores, caches and build output (added 2026-11-05) ---
+node_modules/
+bower_components/
+.deno/
+venv/
+virtualenv/
+site-packages/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.tox/
+.gradle/
+.next/
+.nuxt/
+.parcel-cache/
+target/
+dist/
+build/
+Pods/
+DerivedData/
+.cache/
+.DS_Store
+Thumbs.db
