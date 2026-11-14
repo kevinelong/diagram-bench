@@ -446,6 +446,20 @@ class Theme:
             style.configure('Big.TButton', padding=(8, 6), font=('Segoe UI', 10))
             style.configure('Big.TCheckbutton', font=('Segoe UI', 10))
             style.configure('Big.TCombobox', padding=(4, 4), font=('Segoe UI', 10))
+            # The action family of ttk buttons, and the one place its measurements live. Every action a person is
+            # invited to press reads ACTION_PAD_X/Y from here, so "Open…", the folder's own actions and anything added
+            # later are the same size by construction. On `clam` (dark mode) the resting surface and both answer states
+            # are painted, because that theme has no opinion of its own; on `vista` the theme draws a real bevel and the
+            # map is simply not read - the padding still is, so the button is the same size in either mode.
+            style.configure('Action.TButton', padding=(ACTION_PAD_X, ACTION_PAD_Y),
+                            background=self.surface, foreground=self.text, bordercolor=self.border,
+                            lightcolor=self.surface, darkcolor=self.border)
+            style.map('Action.TButton',
+                      background=[('disabled', self.surface), ('pressed', _mix(self.surface, self.text, 0.24)),
+                                  ('active', self.hover)],
+                      foreground=[('disabled', self.muted)],
+                      relief=[('pressed', 'sunken'), ('active', 'raised')])
+
         except Exception:
             pass
 
@@ -823,6 +837,14 @@ CONTENTS_W_MAX = 480
 SASH_W = 8
 SASH_STEP = 16        # one arrow key; Shift makes it four
 GAL_FLOOR_W = STRIP_FIT_W                                      # 510
+# Every action a person is invited to press carries the same generous inside: 12 px across, 6 px down. It is written
+# once, here, and read by the two shared places that own the look - `ActionButton` for the tk family and the
+# `Action.TButton` style for the ttk one - so a new action cannot come out a different size from the ones beside it.
+# Deliberately *not* scaled by the display: this window's geometry is pixels everywhere (the sashes, the tile floors,
+# the pane width), and Tk's scaling factor moves fonts rather than pads, so a scaled pad would be the layout's one
+# number that changed under the user.
+ACTION_PAD_X = 12
+ACTION_PAD_Y = 6
 # The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
 # it is four: the strip and the open-folder pane share the gallery column (`gal`, boundary 1), and the gallery column,
 # the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
@@ -1201,6 +1223,35 @@ def shot_filename(stamp, name, width, height, seed, suffix=''):
     card's own file stops being restorable from its name. Measured against the gallery's restore path.
     """
     return '%s_%s_%dx%d_seed%d%s.png' % (stamp, name, width, height, seed, suffix)
+
+
+def pasted_filename(stamp, width, height):
+    """`pasted-<stamp>_<w>x<h>.png` - `shot_filename`'s shape for a picture no sampler made.
+
+    The same stamp, the same id in front of the size, the same `%dx%d` the gallery's restore path reads; the seed slot is
+    gone because a paste has no seed and writing `seed0` would be a claim about how it was made. The name has been
+    `pasted-<stamp>.png` since 0.28.0 and that is kept, with the size added so two pastes differ by more than a second.
+    """
+    return 'pasted-%s_%dx%d.png' % (stamp, width, height)
+
+
+def free_path(folder, name):
+    """`name` in `folder`, or the first `_2`, `_3` ... beside it that nothing already occupies.
+
+    A collision is settled in the same shape `shot_filename` already uses for the tiles of one batch (`_02`, `_16`), so
+    there is one way to say "another one of these" rather than a second naming scheme beside the first. Nothing is
+    overwritten and nothing is guessed at: the caller gets a path it can write.
+    """
+    out = Path(folder) / name
+    if not out.exists():
+        return out
+    stem, suffix = out.stem, out.suffix
+    n = 2
+    while True:
+        candidate = Path(folder) / ('%s_%d%s' % (stem, n, suffix))
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 def prompt_clashes(text):
@@ -1767,7 +1818,36 @@ STARTER_PROMPTS = [
 
 
 class ActionButton(tk.Button):
-    """A tk.Button that answers to the ttk state([...]) API, so call sites do not care which toolkit broke the line."""
+    """A tk.Button that answers to the ttk state([...]) API, so call sites do not care which toolkit broke the line.
+
+    It is also where the *look* of the action family is decided, once. The five call sites pick a colour and a line of
+    text; the padding, the resting bevel and the two answer states come from here, because a family that is padded by
+    hand at each call site is a family that drifts. Measured before this: `Generate` and `Use as Base` were flat
+    coloured words with 0 px inside, so the biggest thing on screen was the one that looked least pressable.
+    """
+
+    def __init__(self, master=None, **kw):
+        super().__init__(master, **kw)
+        self._rest_bg = str(self.cget('background'))
+        self._hover_bg = str(self.cget('activebackground') or _mix(self._rest_bg, '#ffffff', 0.18))
+        self._press_bg = _mix(self._hover_bg, '#000000', 0.22)
+        super().configure(padx=ACTION_PAD_X, pady=ACTION_PAD_Y, relief='raised', bd=2,
+                          activebackground=self._hover_bg)
+        # Tk already paints `activebackground` while the pointer is over the button; these bindings exist for the two
+        # answers a flat button does not give on its own - a hover tone on a button whose active colour equals its
+        # resting colour, and a *darker* press, so press and hover cannot be mistaken for each other.
+        self.bind('<Enter>', lambda e: self._tone(self._hover_bg), add='+')
+        self.bind('<Leave>', lambda e: self._tone(self._rest_bg), add='+')
+        self.bind('<ButtonPress-1>', lambda e: self._tone(self._press_bg), add='+')
+        self.bind('<ButtonRelease-1>', lambda e: self._tone(self._hover_bg), add='+')
+
+    def _tone(self, colour):
+        """Repaint the surface without touching the state: a disabled button keeps whatever grey it is wearing."""
+        try:
+            if str(self['state']) != 'disabled':
+                super().configure(background=colour)
+        except Exception:
+            pass
 
     def state(self, spec=None):
         if spec is None:
@@ -1778,6 +1858,16 @@ class ActionButton(tk.Button):
             elif s in ('disabled', 'active', 'normal'):
                 super().configure(state=s)
         return ()
+
+
+def action_button(master, **kw):
+    """One of the actions a person is invited to press, on the ttk side of the app.
+
+    The padding and the resting edge are the `Action.TButton` style's job (`Theme.apply`), so every ttk action shares
+    one measurement and one state map; the call site decides the words and the command, and nothing else.
+    """
+    kw.pop('style', None)
+    return ttk.Button(master, style='Action.TButton', **kw)
 
 
 class Tooltip:
@@ -1986,7 +2076,12 @@ class ScrollGrid(ttk.Frame):
         # owner keeps the selection itself (View All, whose Delete button reads `App.selected`) it passes `on_mark` and
         # `sel_ring=False`; otherwise the grid keeps its own chosen set. See `_mark`.
         self.focus_key = None
+        # `chosen` is a set, and a set has no order: `picked` is the same members in the order they were clicked, kept
+        # beside it rather than instead of it. The order is the thing a multi-reference prompt reads - the pictures are
+        # numbered Image1, Image2 by it, so "first" has to mean "the one picked first" and not "the alphabetically
+        # least file name", which is what a set would have given. See `picked_order`.
         self.chosen = set()
+        self.picked = []
         self.anchor = None
         self.sel_ring = bool(sel_ring)
         self.on_mark = on_mark              # (key, 'set' | 'extend' | 'toggle') -> None, the owner applies it
@@ -2058,11 +2153,29 @@ class ScrollGrid(ttk.Frame):
             return
         self.focus_key = key
         if self.on_mark is None:
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
         if scroll:
             self._see(key)
+
+    # -- the pick, and its order
+    def _choose(self, keys):
+        """Set the pick: the set and its click order are written together, so they cannot disagree.
+
+        Every path that changes the selection - a click, an arrow, a toggle, Ctrl+A, the folder browser parking its
+        cursor - comes through here, which is why there is exactly one place where "what is picked" is decided.
+        """
+        self.picked = list(dict.fromkeys(keys))
+        self.chosen = set(self.picked)
+
+    def picked_order(self):
+        """The picked keys, in the order they were picked.
+
+        `chosen` cannot answer this and never will - a set's iteration order is not a promise - so anything that numbers
+        the pick (a multi-reference prompt calls them Image1, Image2) reads this instead.
+        """
+        return [k for k in self.picked if k in self.chosen]
 
     # -- layout
     def _metrics(self):
@@ -2137,7 +2250,7 @@ class ScrollGrid(ttk.Frame):
         self.focus_key = key
         if self.on_mark is None:
             # the grid keeps its own selection here, so the click sets it the way a plain click elsewhere would
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
 
@@ -2186,7 +2299,7 @@ class ScrollGrid(ttk.Frame):
         if self.on_select_all is not None:
             self.on_select_all()
         elif self.sel_ring:
-            self.chosen = set(self.keys)
+            self._choose(self.keys)          # everything laid out, in the order it is laid out
             self.anchor = self.keys[0] if self.keys else None
             self._paint_focus()
         return 'break'
@@ -2197,17 +2310,23 @@ class ScrollGrid(ttk.Frame):
             self.on_mark(key, mode)
             return
         if mode == 'toggle':
+            # a toggled picture keeps the place it was picked in, so the rest of the numbering does not shift when one
+            # in the middle is dropped and re-added
             if key in self.chosen:
                 self.chosen.discard(key)
+                if key in self.picked:
+                    self.picked.remove(key)
             else:
                 self.chosen.add(key)
+                if key not in self.picked:
+                    self.picked.append(key)
             self.anchor = key
         elif mode == 'extend' and self.anchor in self.keys and key in self.keys:
             i, j = self.keys.index(self.anchor), self.keys.index(key)
             i, j = min(i, j), max(i, j)
-            self.chosen = set(self.keys[i:j + 1])
+            self._choose(self.keys[i:j + 1])
         else:
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
 
@@ -2869,10 +2988,17 @@ class App:
         # under the title, always visible, together with what that folder is and whether the walk goes into subfolders.
         self.source_row = ttk.Frame(self.title_row)
         self.source_row.pack(fill='x', pady=(3, 0))
-        self.title_open_btn = ttk.Button(self.source_row, text='Open\u2026', width=6, command=self.open_source_dialog)
+        self.title_open_btn = action_button(self.source_row, text='Open\u2026', command=self.open_source_dialog)
         self.title_open_btn.pack(side='left')
         self._tip(self.title_open_btn, 'View and categorise another folder (Ctrl+O). Renders keep going to %s.'
                                        % self.args.out)
+        # Paste is the same verb as Ctrl+V and the picture menu's entry: the clipboard lands in the folder on screen, is
+        # picked, and is armed as the base, so pasting a reference and generating from it is one gesture. It sits beside
+        # Open… because that is where a person looks when they want to bring a picture in from outside.
+        self.paste_top_btn = action_button(self.source_row, text='Paste', command=self.paste_base)
+        self.paste_top_btn.pack(side='left', padx=(4, 0))
+        self.paste_tip = self._tip(self.paste_top_btn, 'Paste a picture from the clipboard into this folder and use it as '
+                                                       'the base (Ctrl+V). A bitmap, a copied image file, or a copied path.')
         self.source_chip = ttk.Label(self.source_row, text='', foreground=self.theme.accent)
         self.source_back_btn = ttk.Button(self.source_row, text='\u00d7', width=2, command=self.close_source)
         self.recursive_var = tk.BooleanVar(value=False)
@@ -2882,8 +3008,8 @@ class App:
         # Everything above the strip except this first line folds away: it is configuration, not the work. Folding it by
         # default is what pays for the bigger controls inside it.
         self._options_shown = False
-        self.options_btn = ttk.Button(self.title_row, text='\u25b8 options', width=11,
-                                      command=self.toggle_options, style='Big.TButton')
+        self.options_btn = action_button(self.title_row, text='\u25b8 options', width=11,
+                                         command=self.toggle_options)
         self.options_btn.pack(side='right')
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = self.strip_holder = ttk.Frame(gal)
@@ -2972,25 +3098,26 @@ class App:
         for col in range(5):
             self.contents_btns.columnconfigure(col, weight=0)
         self.contents_btns.columnconfigure(2, weight=1)      # the spacer takes the slack, buttons keep their size
-        self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
+        self.contents_all_btn = action_button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
-        self.contents_del_btn = ttk.Button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
-                                           state='disabled')
+        self.contents_del_btn = action_button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
+                                              state='disabled')
         # gridded by `_pane_button_row` (inline or in the menu, depending on the screen)
         # the pane could show pairs but not start a review: the A/B entry point lived only on the strip and in the folder
         # header, so a folder open in the second column had no way in from there
-        self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
-                                          state='disabled')
+        self.contents_ab_btn = action_button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
+                                             state='disabled')
         self.contents_ab_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
         # a picture can carry its own provenance (a ComfyUI graph or an A1111 block), so a folder imported from another
         # pipeline can regain its categories without a human retyping prompts
-        self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
-        self.contents_gal_btn = ttk.Button(self.contents_btns, text='Gallery\u2026',
-                                           command=self.gallery_start)
+        self.contents_rec_btn = action_button(self.contents_btns, text='Recover\u2026',
+                                              command=self.recover_pane_sidecars)
+        self.contents_gal_btn = action_button(self.contents_btns, text='Gallery\u2026',
+                                              command=self.gallery_start)
         self.contents_gal_btn.grid(row=0, column=1, sticky='we', padx=3)
         self._tip(self.contents_gal_btn, 'Walk this folder one picture at a time, numbered, wrapping, nothing deleted. '
                                          'Arrows: right/down forward, left/up back, Esc stops.')
-        self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
+        self.contents_cap_btn = action_button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
         self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
@@ -3045,8 +3172,9 @@ class App:
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
         self._all_widgets = {}            # same, for the "More..." window
-        self.selected = []                # ordered list of paths marked for action
+        self.selected = []                # ordered list of paths marked for action - the click order, by construction
         self._anchor = None               # shift-click range starts here
+        self._paste_reason = ''           # the sentence the Paste button's greyed state is currently saying, if any
         self._nav_cur = None              # the cell the arrow keys are on: a Path in the strip, a folder index in folders
 
         btns = self.btns = ttk.Frame(gal)
@@ -3358,11 +3486,14 @@ class App:
                                         state='disabled')
         self.view_base_btn.grid(row=0, column=2, sticky='ew', padx=(4, 0))
         self._tip(self.view_base_btn, 'Every picture the next render will send, with Remove and Clear.')
+        # `height=1`: the generous inside is ACTION_PAD_X/Y's job now (the family's own padding and bevel), so the
+        # second blank text line that used to stand in for padding is gone - measured, that line was 26 px of the
+        # 48 px that pushed the prompt column over the bottom at 1200x700 with the Advanced panel open.
         self.use_base_btn = ActionButton(self.base_actions, text='Use as Base', command=self.use_as_base,
                                          font=('Segoe UI', 13), bg='#5c6b80', fg='white',
                                          activebackground='#4a5768', activeforeground='white',
                                          disabledforeground='#d5dae2', relief='flat', bd=0,
-                                         height=2, cursor='hand2', takefocus=True)
+                                         height=1, cursor='hand2', takefocus=True)
         self.use_base_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
         self.use_base_btn.state(['disabled'])
 
@@ -3370,7 +3501,7 @@ class App:
                                            font=('Segoe UI', 13), bg='#ff6347', fg='white',
                                            activebackground='#e0492f', activeforeground='white',
                                            disabledforeground='#ffe0d8', relief='flat', bd=0,
-                                           height=2, cursor='hand2', takefocus=True)
+                                           height=1, cursor='hand2', takefocus=True)
         self.clear_base_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
         self.clear_base_btn.state(['disabled'])
 
@@ -3391,7 +3522,7 @@ class App:
                                     font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
                                     activebackground='#166b34', activeforeground='white',
                                     disabledforeground='#c9e6d2', relief='flat', bd=0,
-                                    height=2, cursor='hand2', takefocus=True)
+                                    height=1, cursor='hand2', takefocus=True)
         self.gen_btn.grid(row=11, column=0, sticky='ew', pady=(0, 0))
         self.last_label = ttk.Label(left, text='', foreground=self.theme.muted, anchor='center')
         self.last_label.grid(row=12, column=0, sticky='ew', pady=(6, 0))
@@ -4059,9 +4190,29 @@ class App:
         return self._popup_menu(menu, event)
 
     def _picture_tile_menu(self, event, path):
-        """Right-click on a picture: arm it, or take its path. Only actions that already exist are offered."""
+        """Right-click on a picture: show the picture's own menu."""
+        return self._popup_menu(self._picture_menu(path), event)
+
+    def _picture_menu(self, path):
+        """The picture's menu, built and returned rather than shown: a screen is testable, a popup is a grab.
+
+        Two of the entries are the clipboard and the pick. **Paste** is the same verb as the top row's button and
+        `Ctrl+V`; **Create New Image based on Selected Images** hands the picked set to the generator as its references,
+        in the order they were clicked. A greyed entry is never a silent no-op: the status line carries the sentence
+        that says why, because a menu that closes saying nothing is how "it did nothing" gets reported.
+        """
         menu = tk.Menu(self.root, tearoff=False)
         menu.add_command(label='Use as base for the next edit', command=lambda: self._set_base(Path(path)))
+        menu.add_separator()
+        _target, paste_why = self._paste_target()
+        menu.add_command(label='Paste a picture from the clipboard into this folder',
+                         command=self.paste_base, state='disabled' if paste_why else 'normal')
+        pick_why = '' if self._pick_order_now() else 'pick at least one picture first'
+        menu.add_command(label='Create New Image based on Selected Images',
+                         command=self._create_from_selected, state='disabled' if pick_why else 'normal')
+        reason = paste_why or pick_why
+        if reason:
+            self.status.configure(text=reason)
         menu.add_separator()
 
         def copy_path():
@@ -4070,7 +4221,49 @@ class App:
             self.hint.configure(text='copied %s' % Path(path).name)
 
         menu.add_command(label='Copy path', command=copy_path)
-        return self._popup_menu(menu, event)
+        # the last one built, so the wiring can be exercised without a pointer - NOT `self._picture_menu`, which is
+        # this method's own name: an attribute would shadow it and the second right-click would raise
+        self._last_picture_menu = menu
+        return menu
+
+    def _pick_order_now(self):
+        """The picked pictures, **in the order they were clicked** - the order a multi-reference prompt numbers.
+
+        `self.selected` is already that list (it is appended to on every ctrl-click and replaced on a plain one), which
+        is the same fact the grids keep as `ScrollGrid.picked_order()` beside their `chosen` set. A set could not answer
+        this, and the pictures handed to `base_images` are numbered Image1, Image2 by exactly this order.
+        """
+        return [Path(p) for p in (self.selected or []) if Path(p).exists()]
+
+    def _create_from_selected(self):
+        """Open the generator with the picked pictures as its references, in click order.
+
+        It does **not** render: the count goes on the status line and the prompt box takes the keyboard, because what
+        the references are for is a sentence the person has not typed yet. `generate` already accepts a list of
+        references (`base_images`), and `use_as_base` is the existing path that arms more than one picture, so this is a
+        way into machinery that works rather than a second way to render.
+        """
+        order = self._pick_order_now()
+        if not order:
+            why = 'pick at least one picture first - then Create New Image based on Selected Images'
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
+            return None
+        self.selected = list(order)          # the pick as the click order, so the arm below sees the same list
+        self.use_as_base()                   # arms the first, and `_bases` receives all of them
+        self.set_view_mode('image')
+        if len(order) == 1:
+            self.status.configure(text='creating from 1 selected picture - %s, armed as the base'
+                                  % self._short_name(order[0].name))
+        else:
+            self.status.configure(text='creating from %d selected pictures - numbered Image1..%d in the order they were '
+                                       'picked; say in the prompt how they go together, then Enter'
+                                  % (len(order), len(order)))
+        try:
+            self.text.focus_set()
+        except Exception as e:
+            log_error('create from pick focus', e)
+        return order
 
     def _active_label(self):
         """The label of the folder the pane is showing, without the ` · session` suffix."""
@@ -8514,6 +8707,13 @@ class App:
 
     @timed_panel('refresh_gallery')
     def refresh_gallery(self, select=None, rescan=True):
+        """Repaint everything, and optionally leave one picture picked.
+
+        `select` was accepted and then ignored, by this function and by the two callers that pass it (a finished render,
+        and the rebuild after a click on a tile the strip had not painted) - so "paint this folder and pick the picture I
+        just wrote" silently picked nothing. It selects now: the named file, if the folder really holds it, is the pick
+        and the anchor, which is what a paste needs in order to arm the base in one gesture.
+        """
         if getattr(self, '_closing', False) or not self._alive():
             return                       # the window is on its way out: painting it now is a bgerror, not a repaint
         strip_pos = self._scroll_pos(self.gal_canvas)
@@ -8537,6 +8737,27 @@ class App:
         # draw twelve empty frames and fill them a second later (reported with a screenshot 2026-10-31).
         self._note_context()
         self._prewarm_thumbs()
+        # A named picture is picked *after* the grid exists, so the ring is drawn on the tile that is really there.
+        if select is not None:
+            self._select_name(select)
+        # The folder a paste lands in can be gone between two refreshes (a temp folder, a drive that went away), and the
+        # Paste button's state is a fact about that folder, not about the clipboard.
+        self._refresh_paste_state()
+
+    def _select_name(self, path):
+        """Pick the file `path` names, if the folder on screen really holds it - the working half of `select`.
+
+        Compared by name because a rescan hands back fresh `Path` objects for the same file and a Windows path's case is
+        not a promise; a file that is not in the folder picks nothing rather than inventing a tile.
+        """
+        name = Path(path).name
+        for row in (getattr(self, '_files', None) or []):
+            if Path(row).name == name:
+                self.selected = [Path(row)]
+                self._anchor = Path(row)
+                self._paint()
+                return True
+        return False
 
     def _refresh_gallery(self, select=None, rescan=True):
         self._scene_cache = {}
@@ -9811,74 +10032,145 @@ class App:
                                  % self.size_var.get())
         self.generate()
 
-    def paste_base(self):
-        """Take a reference picture off the clipboard and use it as the base.
+    # -- paste: the clipboard's picture, into the folder on screen -----------------
+    def _paste_target(self):
+        """(folder, why-not): where a paste lands, and the one sentence that explains a grey Paste button.
 
-        Three shapes arrive on this clipboard and all three are accepted: a bitmap (screenshot, browser
-        "copy image"), a list of files (copy in Explorer), and text that is a path to an image. A clipboard that
-        holds something else says so instead of raising.
+        The button's state and the action itself read this same answer, so the window cannot be greyed for a reason the
+        press would not have hit - or enabled for a folder that has gone since the last paint.
+        """
+        folder = getattr(self, '_source', None)
+        if folder is None:
+            return None, 'no folder is open - press Open\u2026 first'
+        folder = Path(folder)
+        if not folder.is_dir():
+            return None, 'no folder is open: %s is not a folder any more' % self._short_name(folder.name)
+        return folder, ''
+
+    def _refresh_paste_state(self):
+        """Grey Paste exactly where there is no folder to paste into, and say why on the status line - once.
+
+        Writing the reason on every refresh would overwrite whatever the window was saying; the reason is spoken when it
+        is news, and the tooltip carries it the rest of the time. The clipboard is deliberately *not* consulted here: no
+        paint path reaches OpenClipboard, so a paste costs one clipboard read, on the press.
+        """
+        if not hasattr(self, 'paste_top_btn'):
+            return
+        _folder, why = self._paste_target()
+        try:
+            self.paste_top_btn.state(['disabled'] if why else ['!disabled'])
+        except Exception as e:
+            log_error('paste state', e)
+        if why and why != getattr(self, '_paste_reason', ''):
+            self.status.configure(text=why)
+        self._paste_reason = why
+
+    def _clipboard_picture(self):
+        """(pictures, why-not) for whatever the clipboard is holding.
+
+        `ImageGrab.grabclipboard()` answers in one of three shapes and each of them means something different - so all
+        three are handled, and only one of them is a refusal:
+
+        * an `Image` - a bitmap (a screenshot, a browser's *copy image*): there is nothing on disk, so it is saved;
+        * a `list` - the file paths Explorer copied: pictures to import, **not** an error;
+        * `None` - either text (a copied path is a perfectly good reference) or nothing at all, and only the last of
+          those cannot be pasted.
+
+        Each picture comes back with the file it came from, when there was one, so the sidecar can record the origin.
         """
         from PIL import ImageGrab
         try:
             got = ImageGrab.grabclipboard()
         except Exception as e:
-            self.hint.configure(text='clipboard unavailable: %s' % type(e).__name__)
+            return [], 'clipboard unavailable: %s' % type(e).__name__
+
+        if isinstance(got, list):
+            files = [Path(f) for f in got if str(f).lower().endswith(self.IMAGE_SUFFIXES)]
+            if not files:
+                return [], 'the clipboard holds %d file(s) and none of them is an image' % len(got)
+            found = []
+            for f in files:
+                try:
+                    found.append((Image.open(f).convert('RGB'), f))
+                except Exception as e:
+                    if len(files) == 1:
+                        return [], 'could not read %s: %s' % (f.name, type(e).__name__)
+            if not found:
+                return [], 'the clipboard holds %d file(s) and none of them is an image' % len(got)
+            return found, ''
+        if isinstance(got, Image.Image):
+            return [(got.convert('RGB'), None)], ''
+        # None: text on the clipboard, and a copied path is a perfectly good reference
+        try:
+            text = self.root.clipboard_get()
+        except Exception:
+            text = ''
+        candidate = Path(text.strip().strip('"')) if text.strip() else None
+        if candidate is not None and candidate.exists() and candidate.suffix.lower() in self.IMAGE_SUFFIXES:
+            try:
+                return [(Image.open(candidate).convert('RGB'), candidate)], ''
+            except Exception as e:
+                return [], 'could not read %s: %s' % (candidate.name, type(e).__name__)
+        return [], ('clipboard holds no picture - nothing usable on the clipboard: copy a bitmap, an image file, or '
+                    'the path to one')
+
+    def paste_base(self):
+        """Paste the clipboard's picture into the folder on screen, and arm it as the base.
+
+        One verb in three places - the top row's **Paste**, `Ctrl+V`, and the picture menu's entry - and one gesture
+        rather than three: the file is written into the open folder, it is **picked**, and it is **the base**, so
+        pasting a reference and pressing Generate is what it looks like. Where it cannot act it says why on the status
+        line (`no folder is open`, `clipboard holds no picture`) rather than doing nothing at all.
+
+        The write reuses the app's own naming (`pasted_filename`, the `shot_filename` shape) and its own collision rule
+        (`free_path`), and the arm goes through `use_as_base`, the one path that sets the prompt, the strength, the base
+        label and the banner together.
+        """
+        usage.record('paste', screen=getattr(self, 'view_mode', ''))
+        folder, why = self._paste_target()
+        if why:
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
+            return
+        pictures, why = self._clipboard_picture()
+        if why:
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
             return
 
-        origin, image = None, None
-        if got is None:
-            # text on the clipboard: a copied path is a perfectly good reference
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        written = []
+        for image, origin in pictures:
+            path = free_path(folder, pasted_filename(stamp, image.size[0], image.size[1]))
             try:
-                import tkinter as _tk
-                text = self.root.clipboard_get()
-            except Exception:
-                text = ''
-            candidate = Path(text.strip().strip('"')) if text.strip() else None
-            if candidate and candidate.exists() and candidate.suffix.lower() in (
-                    '.png', '.jpg', '.jpeg', '.webp', '.bmp'):
-                try:
-                    from PIL import Image as _Image
-                    image = _Image.open(candidate)
-                    origin = candidate
-                except Exception:
-                    image = None
-            if image is None:
-                self.hint.configure(text='nothing usable on the clipboard - copy an image, or copy an image file '
-                                         'or its path')
-                return
-        elif isinstance(got, list):
-            files = [Path(f) for f in got if str(f).lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp'))]
-            if not files:
-                self.hint.configure(text='the clipboard holds %d file(s) and none of them is an image' % len(got))
-                return
-            origin = files[0]
-            try:
-                from PIL import Image as _Image
-                image = _Image.open(origin)
+                image.save(path)
             except Exception as e:
-                self.hint.configure(text='could not read %s: %s' % (origin.name, type(e).__name__))
+                self.status.configure(text='could not write %s: %s' % (path.name, type(e).__name__))
                 return
-        else:
-            image = got                                  # a bitmap
+            meta = {'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
+                    'width': image.size[0], 'height': image.size[1], 'prompt': ''}
+            if origin is not None:
+                meta['source_image'] = str(Path(origin).resolve())
+                meta['prompt'] = (read_meta(origin) or {}).get('prompt', '')
+            path.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
+            written.append(path)
 
-        out = Path(self.args.out)
-        out.mkdir(parents=True, exist_ok=True)
-        path = out / ('pasted-%s.png' % datetime.now().strftime('%Y%m%d-%H%M%S'))
-        image.convert('RGB').save(path)
-        meta = {'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
-                'width': image.size[0], 'height': image.size[1]}
-        if origin is not None:
-            meta['source_image'] = str(origin.resolve())
-            meta['prompt'] = (read_meta(origin) or {}).get('prompt', '')
+        first = written[0]
+        width, height = pictures[0][0].size
+        self.selected = [Path(first)]
+        self._anchor = Path(first)
+        self.refresh_gallery(select=first)      # the folder, repainted with the new file in it and picked
+        self.use_as_base()                      # the existing arm-the-base path, not a second one
+        if len(written) == 1:
+            self.status.configure(text='pasted %s - %dx%d, now the new base' % (first.name, width, height))
+            self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to '
+                                     '%s px' % (first.name, width, height, self.denoise.get(), self.size_var.get()))
         else:
-            meta['prompt'] = ''
-        path.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
-        self.refresh_gallery()
-        self.select_file(path)
-        self._set_base(path, from_gallery=True)
-        self.status.configure(text='pasted reference %dx%d is the new base' % image.size)
-        self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to %s px'
-                            % (path.name, image.size[0], image.size[1], self.denoise.get(), self.size_var.get()))
+            self.status.configure(text='pasted %d pictures into %s - %s is the new base'
+                                  % (len(written), self._short_name(folder.name), first.name))
+            self.hint.configure(text='%d files written, each with a sidecar; only the first is armed, so the next render '
+                                     'edits %s. Pick the others and press Use as Base to combine them.'
+                                % (len(written), first.name))
 
     # -- mask and expand, on the picture itself ---------------------------------
     def toggle_mask_mode(self, on=None):

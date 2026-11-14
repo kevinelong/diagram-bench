@@ -1,0 +1,165 @@
+NOTE 2026-11-13 - worker: buttons that look pressable, paste, and starting from a pick (0.30.0)
+
+WHAT THIS IS
+Three changes, mirroring iimage 0.141.0 (a035a45) - "top-bar actions as real buttons", "clipboard paste with a
+destination rule", and "create from the picked set" - done in Tk idiom rather than transliterated from the Win32 code.
+
+ 1. Every action a person is invited to press is padded, edged and answers the pointer.
+ 2. Paste from the clipboard: one verb, three places, lands in the folder on screen, picked and armed.
+ 3. Create New Image based on Selected Images: the pick, in click order, as the generator's references.
+
+FILES: zimage_ui.py, version.py, test_gallery_ui.py, README.md, notes/2026-11-13-buttons-paste-and-pick-worker.txt,
+shots/62-actions-top-row.png, shots/63-picture-menu-create-enabled.png,
+shots/64-picture-menu-create-disabled.png
+
+1. THE ACTIONS LOOK AND SIZE LIKE BUTTONS
+- One measurement, two shared places. `ACTION_PAD_X = 12` / `ACTION_PAD_Y = 6` at the top of the layout constants; read
+  by `ActionButton.__init__` (the tk family: Generate, Use as Base, Clear Base, Make clip, Open clip) and by the
+  `Action.TButton` style configured in `Theme.apply` (the ttk family: Open…, Paste, ▸ options, Select all, Gallery…,
+  A/B…, Recover…, Caption…, Delete…). `action_button(master, **kw)` is the ttk constructor, so a call site can only
+  choose the words and the command.
+- Resting state: the tk family wears `relief='raised', bd=2`; the ttk family gets the style's surface, bordercolor and
+  - on clam, which is what dark mode uses because it is the only bundled theme whose colours can be set - a background
+  and a state map. On vista the theme paints its own bevel and ignores the map; the padding is still read, so both modes
+  are the same size.
+- Hover and press: `activebackground` is set once (hover), and `<Enter>`/`<Leave>`/`<ButtonPress-1>`/`<ButtonRelease-1>`
+  repaint the surface so a hover tone exists even where the active colour equals the resting one and the press is
+  visibly darker than the hover. The ttk style maps `active` -> theme.hover and `pressed` -> a darker mix.
+- Deliberately NOT scaled by the display: this window's geometry is pixels everywhere (sashes, tile floors, pane
+  widths) and Tk's scaling factor moves fonts, not pads. The app has no pixel-DPI handling to hook into; inventing one
+  for four numbers would be the layout's only scaled value.
+- The layout was measured rather than assumed, at the window's own minimum (1200x700) and at 1600x950:
+  `source_row` 206 px requested / 407 px of title row; `contents_btns` 257 px requested in a 265 px pane; the picture
+  column's action bar is untouched (283 px, its own floor) and the clip row ends at 690 of 700. Two rows deliberately
+  keep the default padding: the picture column's action bar (`Vary`, `hires ×2`, `Paste image`) because its 283 px is
+  the picture column's floor and padding it would squeeze every other column, and the pane's `⋯` overflow button, which
+  is a menu affordance rather than an action in the list.
+
+2. PASTE FROM THE CLIPBOARD
+Rules taken from iimage's README ("Paste, and starting from a pick"), translated:
+- `ImageGrab.grabclipboard()` is read **once, on the press**. Three shapes, three meanings, all handled:
+  * an `Image` (screenshot, browser "copy image") - saved as a PNG;
+  * a `list` of paths (Explorer's copy) - pictures to import, **not an error**; every image in the list is written;
+  * `None` - text on the clipboard (a copied path that names an image is used) or nothing at all, and only the last of
+    those cannot be pasted: `clipboard holds no picture - nothing usable on the clipboard: copy a bitmap, an image
+    file, or the path to one`.
+  No paint path calls OpenClipboard, so an empty clipboard costs nothing until somebody presses Paste.
+- Destination: **the open folder** - the one the gallery is showing (`_source`) - and nowhere else. There is no
+  guessing at the render folder when another folder is open. `_paste_target()` returns (folder, reason) and is read by
+  the button's state, the picture menu's entry and the action itself, so the three cannot disagree. With no folder it
+  is greyed and the status line carries `no folder is open …`, which is also what pressing the verb says if it is
+  reached anyway.
+- After the write: `refresh_gallery(select=<the new file>)`, then `use_as_base()` - the existing arm-the-base path, not
+  a second one - so the file is picked, is the base, and pasting a reference then pressing Generate is one gesture.
+  The status line names the file (`pasted <name> - 300x200, now the new base`).
+- Naming and collision reuse the app's own convention: `pasted_filename()` is `shot_filename`'s shape for a picture no
+  sampler made (`pasted-<stamp>_<w>x<h>.png`; the seed slot is absent because a paste has no seed), and `free_path()`
+  settles a collision with `_2`, `_3` - the same `_NN` suffix `shot_filename` already uses for the tiles of one batch.
+  Nothing is overwritten: two pastes in the same second are two files.
+- Exposure: **Paste** in the top row beside `Open…`, **Ctrl+V** at the window (unchanged binding, the same verb), and
+  *Paste a picture from the clipboard into this folder* in a picture's right-click menu.
+- Found while doing it: `refresh_gallery(select=...)` accepted a picture and **ignored it** - the parameter had been
+  dead since it was added, at this function and at its two callers (a finished render, and the rebuild after a click on
+  a tile the strip had not painted). It now selects: the named file, if the folder holds it, is the pick and the anchor.
+
+3. START A GENERATION FROM THE PICKED SET
+- **Create New Image based on Selected Images** in the picture menu: live with >= 1 picture picked, greyed with
+  `pick at least one picture first` otherwise (the reason also goes on the status line, as for Paste). It opens the
+  generator with the pick as its basis and states the count - `creating from 3 selected pictures - numbered
+  Image1..3 in the order they were picked; say in the prompt how they go together, then Enter`.
+- It does not render, and the acceptance is that it does not: the count and the sentence go to the status line, the
+  prompt box takes the keyboard, and `generate` (which already accepts `base_images`) is what renders when a person
+  presses it. The arm goes through `use_as_base`, which already put every selection into `_bases`.
+- **Why click order matters**: a multi-reference prompt numbers the pictures Image1, Image2 - so "first" has to mean
+  the one picked first, and a set cannot answer that (a `set`'s iteration order is not a promise; sorted order would
+  mean the alphabetically least file name). `App.selected` is already that list (`_on_tile_click` appends on ctrl-click
+  and replaces on a plain one) and `_pick_order_now()` reads it; `ScrollGrid` - which keeps its own `chosen` **set** for
+  the grids that do not hand selection to the app - now keeps `picked` beside it, with one `_choose()` writer and
+  `picked_order()` as the reader, which is iimage's `selection::Picked` / `picked_order()` in Tk form. The set is kept,
+  not replaced: it is still what the rings are painted from.
+- **"Mark as best" was deliberately NOT built.** iimage's version records a `vote::record` win against the folder's
+  leader and re-ranks; this app has no vote store and no rank to record into. Its existing notion of *best* is the
+  **A/B review** (`A/B…` on the folder row, the strip header and a folder tile; decisions go through `pair_review` and
+  re-rank the folder - `pair_rank.sort_by_wins` reads them when "wins" sorting is on). A person marks a favourite today
+  with **★** (`toggle_star`, then `starred only`), which is a favourite rather than a ranking. Adding a vote table for
+  a one-click "best" would be new scope and a second definition of best - the decision is Kevin's, and it needs one of
+  those two to become the rank, not a third.
+
+VERSION
+`version.py` only: 0.29.1 -> **0.30.0** (a feature, so minor and patch reset to 0). Every surface reads
+`version.display` from that one constant (the window's bottom-right label, `python -m`, the web server, Ctrl+D
+diagnostics), so they cannot disagree - and the suite asserts the label matches.
+
+TESTS AND WHAT THEY SAY
+`python test_gallery_ui.py` - **ALL PASS**, 1071 PASS lines, 85-90 s (measured three times on this box: 90.31 s,
+85.34 s, 64.54 s). 38 new checks (`grep -c 'check('` 1017 -> 1055). Last lines:
+
+    ALL PASS
+    gallery was C:\Users\kevin\AppData\Local\Temp\gal-test-om3ehkuu
+    Wall time: 85.34 seconds
+
+`python test_tiles.py` - **ALL PASS**:
+
+    -- the split escalates for long prompts
+    a 180-picture family of long prompts becomes several folders       PASS [30, 30, 30, 30, 30, 30]
+    and no single folder holds most of it                              PASS [30, 30, 30, 30, 30, 30]
+    nothing is lost in the split                                       PASS 180 + 0 of 180
+
+    ALL PASS
+
+`python test_sizing.py` - **not completed inside this worker's time budget**, and it is the one suite whose state is
+reported as a partial run rather than a verdict. Two facts, both quoted rather than summarised:
+- the suite is far slower than its own `timeout 600` on this box: a run stopped at the cap printed
+  `Wall time: 600.07 seconds`, `EXIT=124`, having reached block B3 of the file;
+- that partial run failed **four environment-dependent tile-size checks** - `the tile takes the width it has, rounded
+  down to a rung` (112, 145, 1244, 8), `a full row of tiles is laid out` (0, 0, 8), `the columns and the tile are what
+  the rule asks for` (8, 112, 8, 145), `and the smallest window still shows a full row` (0, 1164) - which are the
+  canvas-measurement family this environment has always failed (STATE-2026-11-03.md records six such failures on an
+  unmodified tree).
+- The three **recorded pre-existing failures** live in later blocks this run never reached, so they are neither
+  re-confirmed nor cleared here: `a real press-and-drag pans the picture`, `the same real drag with crop armed ...`,
+  `and a tile widget was built for it` (STATE-2026-11-03.md, "3 failures, all pre-existing and environment-dependent").
+  No test was weakened and no threshold moved; the run continues in the background past this note.
+- What the change *could* break there - the strip's tile metrics and the sashes - is untouched by it: the four edited
+  rows are the gallery's title/source row, the folder pane's action row, the `ActionButton` family and the picture menu,
+  and the only geometry they own is `ACTION_PAD_X/Y`, asserted directly by the new checks.
+
+What the new checks prove:
+- paste: the picture is written into the folder on screen (not the render folder), its name is the app's shape, it is the
+  pick, it is the base through `use_as_base`, the status line names it, and its sidecar says `source: clipboard`;
+  a second paste in the same second is a second file and the collision is a `_2`, not an overwrite; with the folder
+  gone the button is greyed with `no folder is open` on the status line and pressing the verb writes nothing; an empty
+  clipboard says `clipboard holds no picture`.
+- the picture menu: `Create New Image based on Selected Images` and the Paste entry exist once each, and Create is
+  `disabled` with nothing picked and `normal` with two picked - the same for the status line's sentence.
+- click order: three pictures clicked out of file-name order come back in click order, which is asserted to differ from
+  the sorted order; `_create_from_selected` puts them into `_bases` in that order, opens the `image` screen, says
+  `3 selected pictures`, and renders nothing (the stub engine's call count is unchanged); with nothing picked it returns
+  None and says `pick at least one picture`.
+- the grid: `ScrollGrid.picked_order()` returns `['c', 'a', 'd']` after those toggles while `chosen` is still a `set` of
+  the same three, and a toggle that drops one leaves the order `['c', 'd']`.
+- the buttons: the `Action.TButton` padding lookup contains 12 and 6; the seven ttk actions carry that style; the five
+  `ActionButton`s are padded 12x6 with `bd >= 1` and `relief=raised`; the hover tone differs from the resting colour and
+  the press differs from the hover; and at 1200x700 the padded rows still fit their columns and the clip row still ends
+  inside the window.
+
+SCREENSHOTS
+No capture path exists in the repo beyond `test_gallery_ui.py --shots` (whole screen, cropped to the window), so the
+evidence was taken the same way, directly, with `PIL.ImageGrab.grab(bbox=...)` of the window - and of the union of the
+window and the open menu when the menu had to be in the picture. The window was a real 1440x900 window on screen
+(ZIMAGE_VIEW=columns, a temp gallery of 14 pictures, the same stub engine the suite uses):
+- `shots/62-actions-top-row.png` (1920x1050) - the window at 1280x700 on this 1280x720 screen, dark mode (`clam`):
+  `Open…` and `Paste` beside it as padded, bevelled buttons, `▸ options`, the folder action row
+  (`Select all`, `Gallery…`, `A/B…`, `⋯`), and at the bottom of the prompt column `Use as Base` / `Clear Base` over
+  `⚡ Generate`, all wearing the padding and the resting edge.
+- `shots/63-picture-menu-create-enabled.png` (1962x1111) - the picture menu with **three** picked ("3 selected",
+  "Delete (3)"): *Create New Image based on Selected Images* is live, beside *Paste a picture from the clipboard into this
+  folder*.
+- `shots/64-picture-menu-create-disabled.png` (1962x1111) - the same menu with nothing picked: that entry is greyed and
+  the status line reads `pick at least one picture first` (quoted from the capture run's own print).
+
+Two capture notes, because the first attempt produced a picture of the wrong thing: the window has to be in front
+(`-topmost`, `deiconify`, `focus_force`) or the screen grab frames whatever is on top of it; and one process cannot post
+two menus (`tk_popup` never returned its grab after the first one was dismissed from a timer), so each state is its own
+run - `python zimage_capture3.py row|enabled|disabled`. The menu shot is taken from a timer while the popup is up,
+because a posted menu owns the event source until it is dismissed.

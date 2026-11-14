@@ -166,8 +166,10 @@ not loaded - the graph will be rejected rather than silently falling back. `--pr
   what produces the warped-motion look.
 - **A reference can come from anywhere**, not just the output folder: **Paste image** accepts the three clipboard
   shapes above and refuses anything else with a sentence rather than an exception (a non-image file in a multi-file
-  copy says "none of them is an image"; junk text says "nothing usable on the clipboard"). The size selector still
-  decides what resolution the next run works at.
+  copy says "none of them is an image"; an empty clipboard says "clipboard holds no picture"). It is one verb in three
+  places (the top row's **Paste**, `Ctrl+V`, and a picture's menu) and it lands in the **open folder**, written with the
+  app's own naming and collision rule (`pasted-<stamp>_<w>x<h>.png`, then `_2`), picked, and armed as the base. The
+  size selector still decides what resolution the next run works at.
 - **You know it is done when the status line changes.** The bar is determinate and the websocket reports
   `step x of 30` while the sampler runs, so it is not a spinner; at the end the status reads `clip done: <file>`, the
   hint gives frames, seconds, wall time, peak VRAM and where the file is, and the clip **opens by itself** in the
@@ -748,6 +750,53 @@ Behaviour, which the graph keeps deliberately distinct:
 
 Verified end to end: two references (a red ring, a blue square) and the prompt "two objects from the reference pictures
 arranged side by side" produced one picture holding both, side by side. `test_refs.py` covers the wiring without a GPU.
+
+## Buttons that look pressable, paste, and starting from a pick
+
+Three changes, each of them a thing the window was *saying* it could do while making it hard to do.
+
+- **The actions are buttons now, not words.** Every control a person is invited to press - the top row (`Open…`,
+  `Paste`, `▸ options`), the open folder's own action row (`Select all`, `Gallery…`, `A/B…`, `Recover…`, `Caption…`,
+  `Delete…`) and the `ActionButton` family (`⚡ Generate`, `Use as Base`, `Clear Base`, `▶ Make clip (2 s)`,
+  `Open clip…`) - carries **12 px across and 6 px down** of padding inside, a **resting bevel** (`relief='raised'`,
+  `bd=2` on the tk family; the `Action.TButton` style's own surface and border on the ttk one) and a visible answer to
+  the pointer: a hover tone, and a **darker press** so the two cannot be mistaken for each other. It is decided in two
+  places and nowhere else - `ACTION_PAD_X`/`ACTION_PAD_Y` read by `ActionButton.__init__` and by the `Action.TButton`
+  style in `Theme.apply` - because a family padded by hand at each call site is a family that drifts, and the twenty
+  call sites that already existed would all have had to be edited to keep up. The padding is deliberately **not**
+  scaled by the display: this window's geometry is pixels everywhere (sashes, tile floors, pane widths) and Tk's scaling
+  factor moves fonts, not pads. Measured after the change at the smallest window the app allows (1200x700): the
+  picture column's action bar still fits its 283 px floor, which is the one row that padding could have broken.
+- **Paste** is one verb in three places - the top row's **Paste** button, **`Ctrl+V`**, and *Paste a picture from the
+  clipboard into this folder* in a picture's right-click menu - and it reads `ImageGrab.grabclipboard()` once, on the
+  press. Three shapes, three meanings, all handled: an **`Image`** (a bitmap: screenshot, browser *copy image*) is
+  saved; a **`list` of paths** (Explorer's copy) is pictures to import, not an error; **`None`** is text (a copied path
+  that names an image is used) or nothing, and only the last of those cannot be pasted - it says
+  `clipboard holds no picture`. It lands in the **open folder** (the one the gallery is showing) and nowhere else; with
+  no folder to land in, the button is **greyed and the status line carries the reason** (`no folder is open …`), so a
+  refusal is a sentence rather than a click that did nothing. After the write: `refresh_gallery(select=<the file>)`,
+  which now really picks it (`select` had been accepted and ignored since it was added), and the base is armed through
+  the existing `use_as_base` path - so pasting a reference and pressing Generate is one gesture. The status line names
+  the file. Names reuse the app's own rule: `pasted-<stamp>_<w>x<h>.png` is `shot_filename`'s shape for a picture no
+  sampler made (no `seed` field, because a paste has none), and a collision is settled by `free_path`'s `_2`, `_3`,
+  which is the `_NN` suffix `shot_filename` already uses for the tiles of a batch. No second naming scheme.
+- **Create New Image based on Selected Images** (picture menu) opens the generator with the picked pictures as its
+  references, **in the order they were clicked**, and states the count on the status line
+  (`creating from 3 selected pictures - numbered Image1..3 in the order they were picked …`). It does not render:
+  the prompt box takes the keyboard, because what the references are for is a sentence nobody has typed yet.
+  `generate` already accepts a list of references (`base_images`), and `use_as_base` already arms more than one, so
+  this is a way into machinery that works. The order is the whole point and is why it is kept: a multi-reference
+  prompt numbers the pictures **Image1, Image2** by it, so "first" has to mean the one picked first, not the
+  alphabetically least file name - which is what a set would answer. `App.selected` is that list; `ScrollGrid` keeps
+  the same fact beside its `chosen` **set** as `picked_order()`, because a set has no order and cannot be made to have
+  one. Greyed with `pick at least one picture first` when nothing is picked.
+- **Mark as best is deliberately not built.** iimage's one-click *Mark as best* writes a `vote::record` win against the
+  folder's leader and re-ranks; this app has **no vote store and no rank** to record into. What it does have is the
+  **A/B review** (`A/B…` on the folder's row, the strip's header and a folder tile), which is its existing notion of
+  *best* and writes pair results through `pair_review` - and **★** (`toggle_star`, then `starred only`) for "keep this
+  one where I can see it", which is a favourite rather than a ranking. Inventing a vote table beside `pair_review`
+  would be new scope and a second definition of best, so the decision is left to Kevin: a **Mark as best** entry
+  would need one of those two to become the rank, not a third.
 
 ## A foreign folder gets its prompts: Describe all
 
@@ -1816,7 +1865,7 @@ so it still lines up.
 | **paint mask -> Fill selection** | the brush lives on the picture: paint, and the Generate button becomes *Fill selection*; only painted pixels pass through `VAEEncodeForInpaint` | **8.9 s** on a 1040 px base |
 | **expand** | the pad arrows grow one side, the button becomes *Expand* via `ImagePadForOutpaint` | **11.6 s**, 256 to 384 px |
 | **pin / compare** | pin any picture, then drag the split against whatever is on screen - not only against the base | - |
-| **Paste image** (or `Ctrl+V`) | brings a picture from outside the folder in as the base: a **bitmap** (screenshot, browser "copy image"), a **copied file** (Explorer), or **copied text that is a path** to an image. Written as `pasted-<stamp>.png` with a sidecar recording the origin, then armed as the base like any other | verified on the real Windows clipboard: a 512x512 bitmap pasted from Explorer/PowerShell became the base, sidecar `{'source': 'clipboard', 'width': 512, 'height': 512}` |
+| **Paste** (top row), **Paste image** (or `Ctrl+V`), or *Paste a picture from the clipboard into this folder* in a picture's menu | brings a picture from outside the folder in as the base: a **bitmap** (screenshot, browser "copy image"), a **copied file** (Explorer), or **copied text that is a path** to an image. It lands in the **open folder** - the one the gallery is showing - written as `pasted-<stamp>_<w>x<h>.png` (a collision becomes `_2`, never an overwrite) with a sidecar recording the origin; then `refresh_gallery(select=…)` picks it and `use_as_base` arms it, so the base is ready before the button is released | verified on the real Windows clipboard: a 512x512 bitmap pasted from Explorer/PowerShell became the base, sidecar `{'source': 'clipboard', 'width': 512, 'height': 512}` |
 | **\u2702 crop** | arm it, drag a rectangle on the picture; that region is saved as a PNG, recorded in its sidecar with the source path and the box, and becomes the base - so the next Enter edits only what you framed. Mutually exclusive with painting a mask, because both start with a drag | measured 352x352 crop from a 704 px render used as a 512 px base: one 4-step klein run in **7.2 s** |
 
 
