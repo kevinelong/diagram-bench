@@ -1,0 +1,27 @@
+test_sizing.py stalls at B3 on this box, and the stall predates 0.30.0
+
+Recorded 2026-11-13 after three runs, because "stalls" and "fails" are not the same
+thing and a hang is what a change can bring. It did not.
+
+    commit     version   cap     exit   PASS lines   stopped at
+    cb2e87b    0.30.0    1800 s  124     -            (worker's run, 600 s and 1800 s both stalled)
+    c9ae32a    0.30.0    200 s   124     52           -- B3: the open-folder pane keeps its pictures inside the canvas
+    4b191cd    0.29.1    200 s   124     52           -- B3: the open-folder pane keeps its pictures inside the canvas
+
+c9ae32a is the 0.30.0 feature commit (actions, paste, create-from-pick); 4b191cd is the
+commit before it and carries version 0.29.1, i.e. the same zimage_ui.py as b5d0e6d with
+only .gitignore changed. Both stall at the same block with the same PASS count, so:
+
+  * the stall is the box (a private desktop plus the open-folder canvas in B3), not the change;
+  * test_sizing.py cannot be quoted as a whole-suite result here at any version - a partial
+    run is the honest form, naming where it stopped;
+  * the three pre-existing failures recorded on 2026-11-03 sit in blocks this box never reaches,
+    so they are still unrun rather than fixed or worsened.
+
+What this changes downstream: agent/sash-limits was described as blocked by test_sizing still
+encoding the floors policy it overturned. The larger blocker is this stall - no version of the
+suite reaches those blocks here - so the sash work needs B3 to finish on this box (or a session
+with a pointer and a visible desktop) before any expectation can be re-pinned honestly.
+
+How it was run: a throwaway worktree at C:\Users\kevin\tk-prev-sizing, `python test_sizing.py`
+with a 200 s `timeout`, one run at a time (Tk tests take the desktop). Worktree removed after.
