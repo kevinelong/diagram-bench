@@ -98,7 +98,8 @@ python check_containment.py hard/pooltable-qwen3-coder_30b.svg
 ```
 
 **The window's own suites, and the counts the documents state.** `test_gallery_ui.py`, `test_sizing.py` and
-`test_tiles.py` each drive the real window and end with their own total (`<N> checks: <N> passed, 0 failed`).
+`test_tiles.py` each drive the real window and end with their own total (`<N> checks: <P> passed, <F> failed`, plus
+`<S> skipped` when the suite asked something this box could not answer).
 `check_doc_counts.py` runs those three once each, adds their totals, and reads every check count the documents
 state about them - `README.md`, `docs/*.md` and `CONTINUE-HERE.md` - failing with the file, the line, the number
 claimed and the number measured. It is a script and not a habit because a count drifts silently: the sibling
@@ -106,7 +107,10 @@ repositories were quoting 342 for a 509-test suite and 105 for a 168-test one, e
 instrument and never by reading again. Nothing states this repository's count yet, so the run prints a NOTICE
 naming `docs/STATE.md` as the file that most needs the line; the first sentence that does state it is checked
 from then on. A suite that fails, or that prints no total, fails the run: a total taken from a red suite is not a
-number to hold a document to.
+number to hold a document to. A **skipped** check is neither a pass nor a failure - it measured nothing, so it is
+never in the passing count, and nothing was found wrong, so it is not a failure either; `test_sizing.py` skips its
+screen-coordinate hit-area check, with the reason, on a desktop that does not answer `winfo_containing`, and prints
+the count in its tail so a run cannot be read as more than it measured.
 
 ```bash
 python check_doc_counts.py                                # the three window suites, then the documents

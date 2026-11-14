@@ -1,0 +1,113 @@
+NOTE 2026-11-14 - a check this box cannot answer is SKIPped, neither failed nor passed (0.32.1)
+
+WHAT WAS ASKED
+`test_sizing.py` printed `209 checks: 208 passed, 1 failed`, the one red being `every pixel of the hit area belongs
+to the sash, and neither neighbour takes one` with detail `(['None', 'None', 'None'], ['None', 'None'])`. It probes
+`root.winfo_containing` at screen coordinates around the sash, and that call resolves *screen* coordinates: it only
+answers for windows reachable on the current input desktop. On this box's private/hidden desktop it answers None for
+everything, including the two neighbour pixels that must exist whenever the sash does. The question was unanswerable
+here, and the suite scored it as a wrong answer - the same defect the suite once fixed in the other direction, where
+a check (`a_scroll_that_is_still_moving`) was scored as a failure before its race had a chance to settle.
+
+THE PRINCIPLE THIS TURN IS ABOUT
+An unanswerable question must not be scored as a wrong answer, and a skipped check must not be scored as a pass.
+Two outcomes for three kinds of result was the bug: the suite could only say "true" or "false", so a fact about the
+desktop session had to be written down as a fact about the hit area. It now has three outcomes and reports each one.
+
+WHY A SKIP IS NEITHER
+- Not a pass: nothing was measured. Counting it as passed puts a check that never ran into the passing total, which
+  is a false green - and `check_doc_counts.py` holds documents to that passing number.
+- Not a failure: nothing about the code was found wrong. The suite's exit code is about the code.
+- So it is counted apart (`SKIPS`), included in the suite's own size (`CHECKS`, because the check was asked), printed
+  by name in the tail with the reason, and printed as a third number in the summary line. The gate reads the third
+  number, sums it, and keeps it out of both of its own totals.
+
+WHAT WAS BUILT
+1. `test_sizing.py` gained `skip(label, reason)` and `SKIPS`. `check()` keeps its signature. The summary line is now
+   `<N> checks: <P> passed, <F> failed, <S> skipped` where `P = N - F - S`, and the tail prints
+   `<S> skipped (asked, but not answerable on this box - not scored as passes)` followed by one `SKIPPED: <label> -
+   <reason>` line per skip, beside the existing `<F> failure(s)` / `FAILED:` lines.
+2. The screen-coordinate check was split into what can always be asked and what cannot:
+   - always, in-process, no screen coordinates: `the sash is mapped, as wide as the hit area, and the grip sits
+     inside it` - `sash.winfo_ismapped()`, `sash.winfo_width() == app._sash_w`, and the grip's root x and width
+     inside the sash's span.
+   - only when the desktop answers: `hit_area(root, sash, app, at=...)`, which probes the two **neighbour** pixels
+     first. Both None means no coordinate here is reachable, so it returns `(None, reason)` and the caller reports
+     SKIP with `this desktop does not answer winfo_containing at screen coordinates ...`. When they answer, the
+     assertion is the one it always was: every pixel of the hit area is the sash or its grip, and neither neighbour
+     is the sash.
+   - `at` is a parameter (defaulting to `root.winfo_containing`, the same call the app's hit test makes at
+     `zimage_ui.py:10568`), so the assertion can be exercised with a stub on a desktop that answers nothing.
+3. The assertion is not weakened by the skip, and the suite proves it every run with three more checks, using a
+   **monkeypatched probe** (`px_probe`: the pixels of the hit area are the sash, every other pixel is the window
+   behind it) - no desktop required:
+   - the whole hit area taken by the sash PASSes the assertion;
+   - one pixel short (its last pixel falling to the neighbour) still FAILs it;
+   - a probe that answers None for everything is reported as unanswerable, not as a pass.
+4. `check_doc_counts.py` reads both shapes: `<N> checks: <P> passed, <F> failed` (a transcript saved before 0.32.1)
+   and the four-part line, with `skipped` defaulting to 0 and summed separately. Its measured/all-agree/NOTICE lines
+   print the skip count, so a number that no document can agree with is visible rather than folded in. A skip is in
+   neither count, so `N passing` is still compared against `passed`, and a red suite still fails the run.
+5. Its own tests are `test_check_doc_counts.py` (new, 8 checks, no suite run): both shapes parse, a four-part
+   transcript's skips sum apart, a run with skips and nothing to compare prints the NOTICE and exits 0, a document
+   claiming the passing count agrees while one counting the skipped checks as passing is stale (MEASURED 1307, +4),
+   a suite that exited non-zero still fails the run, and a suite that printed no total fails it too.
+6. Wiring: README's "The window's own suites, and the counts the documents state" says what the fourth part means and
+   that a skip is neither; `docs/STATE.md` gained the decision row ("a check this box cannot answer is SKIPped with
+   its reason, and is in neither count") beside the counts row. `docs_check.py`: 58 relative links, 0 failures.
+
+THE RUNS, VERBATIM
+`python test_sizing.py` (logs/sizing-0.32.1.log, 79 s, exit 0) - the block this turn split, with the skip firing,
+the geometry check passing, the stub checks passing, and the summary and tail:
+
+    the sash is mapped, as wide as the hit area, and the grip sits inside it PASS (1, 8, 8, (426, 2))
+    every pixel of the hit area belongs to the sash, and neither neighbour takes one SKIP this desktop does not answer winfo_containing at screen coordinates - the sash is at (423, 347) and both neighbour pixels answered None
+    a probe that answers: the whole hit area is the sash, so the assertion holds PASS (['.!frame2.!frame4.!sash', '.!frame2.!frame4.!sash', '.!frame2.!frame4.!sash'], ['.', '.'])
+    and its last pixel falling to the neighbour still FAILS it, so the skip weakened nothing PASS (['.!frame2.!frame4.!sash', '.!frame2.!frame4.!sash', '.'], ['.', '.'])
+    and a probe that answers nothing is reported as unanswerable, not as a pass PASS this desktop does not answer winfo_containing at screen coordinates - the sash is at (423, 347) and both neighbour pixels answered None
+
+    213 checks: 212 passed, 0 failed, 1 skipped
+
+    0 failure(s)
+
+    1 skipped (asked, but not answerable on this box - not scored as passes)
+      SKIPPED: every pixel of the hit area belongs to the sash, and neither neighbour takes one - this desktop does not answer winfo_containing at screen coordinates - the sash is at (423, 347) and both neighbour pixels answered None
+
+The arithmetic: the old run was 209 checks with 208 passing and this one red; 208 + 4 new checks (the geometry one
+and the three stubs) = 212 passing, and the red one is now the 1 skipped, so 213 checks add up.
+
+`python test_check_doc_counts.py` (exit 0):
+
+    8 checks: 8 passed, 0 failed
+
+`python docs_check.py`: `58 relative links checked, 0 failures` (exit 0).
+
+`python check_doc_counts.py` (logs/doc-counts-0.32.1.log, 156 s, exit 0) - the three suites run once each, and the
+skip is a third number in the totals:
+
+    running test_gallery_ui.py (the gallery window) ...
+    running test_sizing.py (the four columns and their boundaries) ...
+    running test_tiles.py (the tiles and the prompt grouping) ...
+
+    measured: 1315 checks: 1314 passed, 0 failed, 1 skipped (from 3 suites)
+
+    NOTICE: no document states a count, so there is nothing to compare yet.
+            Read 3: README.md, docs/LOADING-UX.md, docs/STATE.md
+            Skipped, as records of a day: docs/BUGS-20261030-tile-size.md
+            The suite is 1315 checks (1314 passed, 0 failed, 1 skipped) as measured above.
+            ...                                                                   exit 0
+
+No "exited N" line was printed for any suite, so `test_gallery_ui.py` and `test_tiles.py` are green in the same run
+(they print three-part totals - the 1074 and the 28 - and `test_sizing.py` is the 213 with the 1 skipped). The NOTICE
+is the honest outcome and not a false pass: no document states a count, so there is nothing to agree with, and the
+run names `docs/STATE.md` as the file that most needs the line. `docs/STATE.md` was deliberately left free of a count
+claim this turn - the ticket was the skip, and one sentence there would put the gate to work.
+
+WHAT IS STILL OPEN
+- The skip is real on this desktop and only here: nothing answered `winfo_containing`, so the screen-coordinate half
+  of the hit-area check has not run for real on this box in this version. What it asserts is still exercised - by the
+  stubbed probe above - so a weakened assertion cannot hide behind the skip; only a box whose desktop answers runs
+  that half against Tk.
+- That also explains the 0.32.0 note's "red on this desktop, green at 0.31.0": it was never red in the code, it was
+  unanswerable in the session. The recorded 0.31.0 PASS is a run whose desktop did answer.
+

@@ -19,6 +19,12 @@ Every wait in here is bounded. `pump()` drives Tk's own event loop (`drain`) ins
 `update()` runs the queue until it is empty and a window that re-queues work for ever never comes back from it - which
 is what B3 did on this box until 2026-11-14 (see `notes/2026-11-14-test_sizing-B3-diagnosed.txt`). A queue still busy
 at `DRAIN_CAP` is reported as `<block> blocked: <what>` and the suite goes on, so a run is always quotable as a whole.
+
+A check reports one of three outcomes and never two: `PASS` when it ran and was true, `FAIL` when it ran and was
+false, and `SKIP` - with the reason - when this box cannot answer the question at all (a private or hidden Windows
+desktop does not resolve `winfo_containing` against screen coordinates, so no window is at any pixel). A skip is
+counted apart from both and is never folded into `passed`: a check that did not run measured nothing, so calling it a
+pass would be the same defect as calling an unanswerable question a wrong answer, in the other direction.
 """
 
 import json
@@ -45,7 +51,9 @@ import zimage_ui as zui  # noqa: E402
 pair_review.STATE_DIR = Path(tempfile.mkdtemp(prefix='sizing-state-'))
 
 FAILS = []
-CHECKS = [0]     # every check() that ran, so the suite can print its own size
+SKIPS = []       # checks this box could not answer, with the reason: not a pass (nothing was measured) and not a
+                 # failure (nothing was wrong) - the third outcome, counted separately and printed by name
+CHECKS = [0]     # every check() that ran or was skipped, so the suite can print its own size
 
 
 def check(label, ok, detail=''):
@@ -53,6 +61,45 @@ def check(label, ok, detail=''):
     CHECKS[0] += 1
     if not ok:
         FAILS.append(label)
+
+
+def skip(label, reason):
+    """A check whose question this box cannot answer, with the reason: neither a pass nor a failure.
+
+    A check that did not run measured nothing, so counting it as passed would be a false green - the same defect as
+    scoring an unanswerable question as a wrong answer, in the other direction. It is not a failure either: nothing
+    about the code was found wrong. So it is counted apart (`SKIPS`), it is in `CHECKS` because it was asked, and the
+    run's summary and tail both print how many there were and why.
+    """
+    print('%-64s %s %s' % (label, 'SKIP', reason))
+    CHECKS[0] += 1
+    SKIPS.append((label, reason))
+
+
+def hit_area(root, sash, app, at=None):
+    """Where the pointer lands around a sash, measured the way the app's own hit test measures it.
+
+    `at(x, y)` is `root.winfo_containing`: the call `App` makes at `zimage_ui.py:10568`, and a parameter so a test can
+    hand in a stub instead of needing a desktop that answers. Returns `(ok, detail)` - `ok` True or False when the
+    question was answerable - or `(None, reason)` when it was not.
+
+    `winfo_containing` resolves *screen* coordinates and only answers for windows reachable on the current input
+    desktop. On a private or hidden desktop it answers None for everything, including the neighbour pixels that must
+    exist whenever the sash does, which is a fact about the session and not about the hit area. So the neighbours are
+    probed first: both None means no coordinate here can be asked about, and that is reported as SKIP with the reason
+    rather than scored. When they answer, the assertion is exactly the one this check has always made.
+    """
+    at = at or (lambda x, y: root.winfo_containing(x, y))
+    left, right = sash.winfo_rootx(), sash.winfo_rootx() + sash.winfo_width()
+    mid_y = sash.winfo_rooty() + 20
+    outside = [at(left - 1, mid_y), at(right, mid_y)]
+    if outside[0] is None and outside[1] is None:
+        return None, ('this desktop does not answer winfo_containing at screen coordinates - the sash is at '
+                      '(%d, %d) and both neighbour pixels answered None' % (left, mid_y))
+    # every pixel of the hit area is the sash (or its grip), and one pixel either side is the neighbour
+    inside = [at(left + k, mid_y) for k in (0, app._sash_w // 2, app._sash_w - 1)]
+    ok = all(w is sash or w is sash.grip for w in inside) and all(w is not sash for w in outside)
+    return ok, ([str(w) for w in inside], [str(w) for w in outside])
 
 
 class Stub:
@@ -1102,15 +1149,42 @@ def main():
           app._layout_chrome() == 3 * app._sash_w + zui.GAL_PAD + zui.PANE_PAD + zui.PROMPT_PAD
           + zui.PICTURE_PAD + app._bar_px(app.contents_bar),
           (app._layout_chrome(), app._sash_w))
-    # where the pointer lands, at explicit positions rather than along the drawn 2 px line: every pixel of the hit area
-    # is the sash (or its grip), and one pixel either side is the neighbour
-    left, right = sash.winfo_rootx(), sash.winfo_rootx() + sash.winfo_width()
-    mid_y = sash.winfo_rooty() + 20
-    inside = [root.winfo_containing(left + k, mid_y) for k in (0, app._sash_w // 2, app._sash_w - 1)]
-    outside = [root.winfo_containing(left - 1, mid_y), root.winfo_containing(right, mid_y)]
-    check('every pixel of the hit area belongs to the sash, and neither neighbour takes one',
-          all(w is sash or w is sash.grip for w in inside) and all(w is not sash for w in outside),
-          ([str(w) for w in inside], [str(w) for w in outside]))
+    # The hit area is a *target*, so it is asked in two parts: what this process can always answer, and what only the
+    # desktop can. First the geometry, which is in-process and touches no screen coordinates at all.
+    sash_x, sash_w = sash.winfo_rootx(), sash.winfo_width()
+    grip_x, grip_w = sash.grip.winfo_rootx(), sash.grip.winfo_width()
+    check('the sash is mapped, as wide as the hit area, and the grip sits inside it',
+          bool(sash.winfo_ismapped()) and sash_w == app._sash_w
+          and grip_x >= sash_x and grip_x + grip_w <= sash_x + sash_w,
+          (sash.winfo_ismapped(), sash_w, app._sash_w, (grip_x, grip_w)))
+    # ...then where the pointer actually lands, at explicit positions rather than along the drawn 2 px line: every
+    # pixel of the hit area is the sash (or its grip), and one pixel either side is the neighbour. This second
+    # question needs the desktop to answer `winfo_containing` at screen coordinates; `hit_area` asks the neighbours
+    # first and says so when they are unreachable, so the check is SKIPPED with that reason instead of invented.
+    asked, hit_detail = hit_area(root, sash, app)
+    if asked is None:
+        skip('every pixel of the hit area belongs to the sash, and neither neighbour takes one', hit_detail)
+    else:
+        check('every pixel of the hit area belongs to the sash, and neither neighbour takes one', asked, hit_detail)
+    # And the skip above must not have weakened anything: the same function, given a probe that answers, must still
+    # hold on a hit area that takes its pixels and still FAIL on one that leaves the last of them to the neighbour.
+    # `px_probe` is a monkeypatched `winfo_containing` - the pixels of the hit area are the sash, every other pixel is
+    # the window behind it - so this needs no desktop to answer and never skips.
+    def px_probe(taken):
+        def at(x, _y):
+            origin = sash.winfo_rootx()
+            return sash if origin <= x < origin + taken else root
+        return at
+
+    stub_ok, stub_detail = hit_area(root, sash, app, at=px_probe(app._sash_w))
+    check('a probe that answers: the whole hit area is the sash, so the assertion holds', stub_ok is True,
+          stub_detail)
+    stub_bad, stub_bad_detail = hit_area(root, sash, app, at=px_probe(app._sash_w - 1))
+    check('and its last pixel falling to the neighbour still FAILS it, so the skip weakened nothing',
+          stub_bad is False, stub_bad_detail)
+    stub_none, stub_why = hit_area(root, sash, app, at=lambda _x, _y: None)
+    check('and a probe that answers nothing is reported as unanswerable, not as a pass',
+          stub_none is None and 'does not answer' in stub_why, stub_why)
     scaled = app._apply_sash_scale()
     check('re-reading the display puts the same width back, and the layout agrees',
           scaled == app._sash_w and sash.winfo_width() == app._sash_w, (scaled, app._sash_w))
@@ -1419,10 +1493,16 @@ def main():
         print('\n%d block(s) could not be run to completion on this box' % len(BLOCKED))
         for name, what in BLOCKED:
             print('  BLOCKED: %s - %s' % (name, what))
-    print('%d checks: %d passed, %d failed' % (CHECKS[0], CHECKS[0] - len(FAILS), len(FAILS)))
+    passed = CHECKS[0] - len(FAILS) - len(SKIPS)
+    print('%d checks: %d passed, %d failed, %d skipped' % (CHECKS[0], passed, len(FAILS), len(SKIPS)))
     print('\n%d failure(s)' % len(FAILS))
     for f in FAILS:
         print('  FAILED: %s' % f)
+    # The sibling line. A skip is in neither of the two counts above, so it is printed here by name and reason: a run
+    # whose tail says "0 failure(s)" and does not say what was skipped is a run that cannot be read as a whole.
+    print('\n%d skipped (asked, but not answerable on this box - not scored as passes)' % len(SKIPS))
+    for label, reason in SKIPS:
+        print('  SKIPPED: %s - %s' % (label, reason))
     return 1 if FAILS else 0
 
 

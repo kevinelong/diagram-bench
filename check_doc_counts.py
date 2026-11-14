@@ -5,6 +5,14 @@ The three window suites each print their own total (`test_gallery_ui.py`, `test_
 each, no suite twice - adds those three totals, then reads every check count the documents state
 and fails naming the file, the line, the number claimed and the number measured.
 
+A suite may print a fourth part instead, `<N> checks: <passed> passed, <failed> failed, <skipped>
+skipped`, for the checks it asked and this box could not answer (a hidden Windows desktop does not
+resolve `winfo_containing`, so `test_sizing.py` skips its screen-coordinate hit-area check with that
+reason). Both shapes are read, because a transcript saved before the fourth part still has to parse.
+A skipped check is neither a pass nor a failure: it is in neither count, so `N passing` is compared
+against `passed`, and the skip count is printed beside the totals so the number that has no document
+to agree with is visible rather than folded in. A red suite still fails the run.
+
 Usage (cmd.exe, per README's interpreter quirk):
 
   MSYS_NO_PATHCONV=1 cmd.exe /c "C:\\Users\\kevin\\ai_bench\\image-models-20261020\\.venv\\Scripts\\python.exe check_doc_counts.py"
@@ -52,8 +60,12 @@ RUNNERS = (
     ('test_tiles.py', 'the tiles and the prompt grouping'),
 )
 
-# Each suite's own total, printed by the suite: "52 checks: 52 passed, 0 failed".
-TOTAL = re.compile(r'^(?P<checks>\d+)\s+checks:\s+(?P<passed>\d+)\s+passed,\s+(?P<failed>\d+)\s+failed\s*$')
+# Each suite's own total, printed by the suite: "52 checks: 52 passed, 0 failed". Since 0.32.1 a suite may print a
+# fourth part - "209 checks: 205 passed, 0 failed, 4 skipped" - for the checks it asked but could not answer on this
+# box. The part is optional so a transcript saved before it still parses, and it is summed as a third quantity: a
+# skipped check is in neither `passed` nor `failed`, so it can be neither a pass nor a failure here either.
+TOTAL = re.compile(r'^(?P<checks>\d+)\s+checks:\s+(?P<passed>\d+)\s+passed,\s+(?P<failed>\d+)\s+failed'
+                   r'(?:,\s+(?P<skipped>\d+)\s+skipped)?\s*$')
 
 CLAIMS = (
     # `N checks` - but not "6 check categories", where `check` is an adjective
@@ -91,7 +103,7 @@ def transcript(line: str) -> bool:
 
 
 def read_totals(lines: list[str]) -> dict:
-    totals = {'checks': 0, 'passed': 0, 'failed': 0, 'suites': 0}
+    totals = {'checks': 0, 'passed': 0, 'failed': 0, 'skipped': 0, 'suites': 0}
     for line in lines:
         match = TOTAL.match(line.strip())
         if not match:
@@ -99,6 +111,8 @@ def read_totals(lines: list[str]) -> dict:
         totals['checks'] += int(match.group('checks'))
         totals['passed'] += int(match.group('passed'))
         totals['failed'] += int(match.group('failed'))
+        # Absent in the older three-part line, where the suite had no third outcome to report: 0, not "unknown".
+        totals['skipped'] += int(match.group('skipped') or 0)
         totals['suites'] += 1
     return totals
 
@@ -184,8 +198,8 @@ def main(argv: list[str]) -> int:
         return 1
     if not args.quiet:
         print()
-        print('measured: %d checks: %d passed, %d failed (from %d suites)' % (
-            totals['checks'], totals['passed'], totals['failed'], totals['suites']))
+        print('measured: %d checks: %d passed, %d failed, %d skipped (from %d suites)' % (
+            totals['checks'], totals['passed'], totals['failed'], totals['skipped'], totals['suites']))
         print()
 
     docs = documents()
@@ -198,8 +212,8 @@ def main(argv: list[str]) -> int:
         print('        Read %d: %s' % (len(docs), ', '.join(label for _, label in docs)))
         if SKIP:
             print('        Skipped, as records of a day: %s' % ', '.join(sorted(SKIP)))
-        print('        The suite is %d checks (%d passed, %d failed) as measured above.'
-              % (totals['checks'], totals['passed'], totals['failed']))
+        print('        The suite is %d checks (%d passed, %d failed, %d skipped) as measured above.'
+              % (totals['checks'], totals['passed'], totals['failed'], totals['skipped']))
         print('        docs/STATE.md is the file that most needs the line: it is the durable record of')
         print('        what the tests enforce, it is edited rather than appended to, and it names the suites')
         print('        without ever saying how big they are. One sentence there - "the three window suites')
@@ -226,8 +240,8 @@ def main(argv: list[str]) -> int:
 
     print()
     if not stale and not code:
-        print('all %d count claims agree with the suites: %d checks (%d passed, %d failed)' % (
-            len(found), totals['checks'], totals['passed'], totals['failed']))
+        print('all %d count claims agree with the suites: %d checks (%d passed, %d failed, %d skipped)' % (
+            len(found), totals['checks'], totals['passed'], totals['failed'], totals['skipped']))
         return 0
     if stale:
         print('stale count in %d of %d claims. The measured numbers are: %d checks, %d passing' % (
