@@ -281,16 +281,27 @@ list**, **three across**, sized from the pane's live width and as tall as the co
 moves the folder list. All three lists - pictures, folder tiles, folder contents - use **infinite scrolling**: they
 show a first batch and append the next one when you reach the bottom.
 
-**The boundary between that pane and the strip is a splitter** (2026-10-30). The pane's width used to be the constant
-`CONTENTS_W = 300`, so the only way to give the strip more room was to close the folder. The sash is an 8 px strip at
-the pane's left edge: a 2 px grip that tints while it is hovered, dragged or focused, the `sb_h_double_arrow` cursor,
-Left/Right moving it **16 px** (**64** with Shift), Home/End to the two ends, and a double-click back to 300. The width
-is remembered as `contents_w` and restored on the next start. It clamps between **180 and 480 px**, and the upper bound
-is what the window can pay for rather than the cap: four strip columns at the 96 px never-shrink floor need 424 px of
-canvas, so on this 1707x960 desktop the honest maximum is **311 px** - dragged past it the strip's canvas measures
-exactly 424 px with four 96 px tiles, and no setting can clip a column. A drag defers the strip to the release
-(`_on_strip_resize` and `_on_contents_resize` park their work while the sash is held): **a 40-step drag queues 1
-folder re-render and 3 debounced re-layouts**, where it queued 11 and 23 before that guard.
+**The boundary between that pane and the strip is a splitter** (2026-10-30; the pointer work 2026-11-14). The pane's
+width used to be the constant `CONTENTS_W = 300`, so the only way to give the strip more room was to close the folder.
+The sash is a strip at the pane's left edge, and **2026-11-14** gave it the four things a divider in shipped software
+has: a **hit area that follows the display** (`sash_px()`: 8 px at 96 dpi, 12 px at 144 dpi, read from `tk scaling`;
+the only number in this layout that scales, because it is a pointer target), an **explicit pointer capture** on the
+press (`grab_set`, released on release, and every motion guarded by `grab_current()` - a move that is not this drag's
+moves nothing), **one relayout per frame** with the first motion applied immediately (so a drag is 1:1 from the press)
+and the release flushing the last target, and **Home/End/Left/Right** through its own bindings, each one returning
+`break` so nothing behind it also acts. 2 px grip that tints while hovered, dragged or focused, `sb_h_double_arrow`
+cursor, Left/Right **16 px** (**64** with Shift), double-click back to the even split. The width is remembered as
+`contents_w` - **including 0**, which is a width a reader can set - and restored on the next start.
+**There is no floor and no cap of their own**: since 2026-11-02 the strip and the pane can be taken to nothing (the sash
+stays grabbable at the edge and Home/End bring the boundary back without a magnifier), while the prompt's floor is its
+own measured control rows and the picture column keeps its measured 283 px. The old "180 to 480" clamp is gone, and it
+had been *lying* since the day the caps were removed: `_sash_apply` still clamped the pane to `CONTENTS_W_MAX`, so the
+first motion of any drag on this boundary snapped the pane to 480 px and then dragged 1:1 from there - measured, a
+618 px pane at a 2560 px window answered **480** to a +40 px motion. Measured after the fix, same instrument: **40
+motion events -> 3 relayouts** (0.30.1: **41**) and a press + one motion through the binding moves the pane 618 -> 578,
+exactly the drag. A drag still defers the strip to the release (`_on_strip_resize` and `_on_contents_resize` park their
+work while the sash is held): **1 folder re-render and 3 debounced re-layouts**, where it queued 11 and 23 before that
+guard.
 
 **Three details that make the panes readable at a glance** (2026-10-27):
 
@@ -764,8 +775,10 @@ Three changes, each of them a thing the window was *saying* it could do while ma
   places and nowhere else - `ACTION_PAD_X`/`ACTION_PAD_Y` read by `ActionButton.__init__` and by the `Action.TButton`
   style in `Theme.apply` - because a family padded by hand at each call site is a family that drifts, and the twenty
   call sites that already existed would all have had to be edited to keep up. The padding is deliberately **not**
-  scaled by the display: this window's geometry is pixels everywhere (sashes, tile floors, pane widths) and Tk's scaling
-  factor moves fonts, not pads. Measured after the change at the smallest window the app allows (1200x700): the
+  scaled by the display: this window's geometry is pixels everywhere (tile floors, column pads, pane widths) and Tk's
+  scaling factor moves fonts, not pads. The one exception is the **sash's hit area** (2026-11-14): `sash_px()` reads
+  `tk scaling` and scales it, because a boundary is a pointer target rather than a legible line - 8 px at 96 dpi, 12 px
+  at 144 dpi. Measured after the change at the smallest window the app allows (1200x700): the
   picture column's action bar still fits its 283 px floor, which is the one row that padding could have broken.
 - **Paste** is one verb in three places - the top row's **Paste** button, **`Ctrl+V`**, and *Paste a picture from the
   clipboard into this folder* in a picture's right-click menu - and it reads `ImageGrab.grabclipboard()` once, on the

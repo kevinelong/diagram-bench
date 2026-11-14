@@ -781,13 +781,18 @@ def _px_setting(settings, key):
     """One remembered width in pixels, or None when the profile has never seen it.
 
     `None` is meaningfully different from a number here: it is what makes a fresh profile get the even split, while a
-    profile that has remembered a boundary keeps it.
+    profile that has remembered a boundary keeps it. **Zero is a number**, and since 2026-11-02 it is a width a reader
+    can actually set - the strip and the pane have no floor - so it is remembered like any other. Reading 0 as "never
+    seen" made a pane dragged shut reopen at a third of the window on the next start (measured: the suite's
+    `a fresh start reads the same three boundaries back` came back `[618, None, 1569]`).
     """
+    if key not in settings:
+        return None
     try:
         value = int(settings.get(key))
     except (TypeError, ValueError):
         return None
-    return value if value > 0 else None
+    return max(0, value)
 
 
 THUMB_DIR = '.thumbs'
@@ -828,21 +833,23 @@ GAL_MAX_W = STRIP_FIT_COLS * (STRIP_TILE_MAX + TILE_CHROME)    # 990: three colu
 # The canvas *asks* for three columns at the 96 px floor, not for the nine: a request is a hard minimum, and asking for
 # 510 here would leave the picture column 220 px at a 1200 px window (measured: its action bar needs 283).
 GAL_ASK_W = STRIP_FIT_COLS * (STRIP_TILE_MIN + TILE_CHROME)    # 318
-# The boundaries are draggable (2026-10-30). The pane has a width instead of a share: 180 is the narrowest the pictures
-# stay readable in, 480 the widest before they stop growing and the strip starves. `SASH_W` is the whole hit area,
-# including the 2 px focus ring, and `GAL_FLOOR_W` is what the strip needs for its nine at the 160 px fit size: no
-# boundary may take a column below its own floor.
-CONTENTS_W_MIN = 180
-CONTENTS_W_MAX = 480
-SASH_W = 8
+# The boundaries are draggable (2026-10-30). `CONTENTS_W_MIN`/`CONTENTS_W_MAX` are the pane's *stored default* width,
+# kept so a profile written before the floors moved still reads; neither is a limit any more - the floor comes from
+# `_column_floors` (which may be 0: a column can be taken to nothing and its sash stays grabbable) and the ceiling from
+# `_column_caps`. `SASH_W` is the whole hit area at 96 dpi, including the 2 px focus ring, and `sash_px` scales it to the
+# display - the one number here that follows the screen, because a boundary is a hit target.
+CONTENTS_W_MIN = 180      # the pane's width before anything measured it: `_column_floors` owns the floor now (0)
+CONTENTS_W_MAX = 480      # the pane's width before the caps were read off `_column_caps`: kept for the stored default
+SASH_W = 8            # the whole hit area at 96 dpi, focus ring included; `sash_px` scales it to the display
 SASH_STEP = 16        # one arrow key; Shift makes it four
 GAL_FLOOR_W = STRIP_FIT_W                                      # 510
 # Every action a person is invited to press carries the same generous inside: 12 px across, 6 px down. It is written
 # once, here, and read by the two shared places that own the look - `ActionButton` for the tk family and the
 # `Action.TButton` style for the ttk one - so a new action cannot come out a different size from the ones beside it.
-# Deliberately *not* scaled by the display: this window's geometry is pixels everywhere (the sashes, the tile floors,
-# the pane width), and Tk's scaling factor moves fonts rather than pads, so a scaled pad would be the layout's one
-# number that changed under the user.
+# Deliberately *not* scaled by the display: this window's geometry is pixels everywhere (the tile floors, the column
+# pads, the pane width) and Tk's scaling factor moves fonts rather than pads, so a scaled pad would be the layout's one
+# number that changed under the user. The one exception is the sash's *hit area* (`sash_px`), and it is an exception
+# because it is a pointer target rather than a legible line: a 96 dpi 8 px boundary is 4 px of travel on a 2x screen.
 ACTION_PAD_X = 12
 ACTION_PAD_Y = 6
 # The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
@@ -868,6 +875,22 @@ GAL_PAD = 14          # the gallery frame's padding, (10, 10, 4, 10)
 PANE_PAD = 6          # the gap in front of the open-folder pane
 STRIP_ABS_MIN = STRIP_TILE_MIN + TILE_CHROME   # 106: one column at the 96 px floor, the last thing to give way
 LAYOUT_KEYS = ('strip_w', 'contents_w', 'prompt_w')   # one width per boundary, plus the pane's
+
+
+def sash_px(root=None):
+    """The sash's hit area in pixels: `SASH_W` at 96 dpi, scaled with the display's own `tk scaling`.
+
+    A boundary is a *hit target*, so it is the one size in this layout that follows the screen rather than the design -
+    the divider in the reference app is ~4 px at 1x and scales with zoom for the same reason. `tk scaling` is pixels per
+    point: 4/3 at 96 dpi, where the answer is `SASH_W`; 2.0 at 144 dpi, where it is 12. Anything unreadable (no
+    interpreter, no display) keeps the 1x size rather than a zero-width sash nobody can grab.
+    """
+    try:
+        scaling = float(root.tk.call('tk', 'scaling'))
+    except Exception:
+        scaling = 0.0
+    factor = (scaling / (96.0 / 72.0)) if scaling > 0 else 1.0
+    return max(2, int(round(SASH_W * factor)))
 
 
 def split_evenly(total, floors, caps=None):
@@ -2429,24 +2452,30 @@ class ScrollGrid(ttk.Frame):
 class Sash(tk.Frame):
     """The draggable boundary between two adjacent columns - one piece, used at every boundary.
 
-    An 8 px hit area with the resize cursor, a 2 px grip that tints while hovered, dragged or focused, a focus ring of
-    the accent colour, 1:1 dragging, Left/Right at 16 px (64 with Shift), Home/End to the ends of its range, and a
-    double-click back to that boundary's default. What a drag *means* is the owner's: it is told the pointer's movement
-    in pixels since the press, because the thing being resized is a width only the owner knows. The grip is `place`d
+    An 8 px hit area at 96 dpi (`sash_px` scales it to the display, and the owner passes the answer in), with the
+    resize cursor, a 2 px grip that tints while hovered, dragged or focused, a focus ring of the accent colour, 1:1
+    dragging, Left/Right at 16 px (64 with Shift), Home/End to the ends of its range, and a double-click back to that
+    boundary's default. The pointer is *captured* on press (`grab_set`, released on the release) and every motion is
+    guarded by that capture, the way a browser divider guards its moves with `hasPointerCapture` - so a move that is not
+    part of this drag cannot move the boundary. What a drag *means* is the owner's: it is told the pointer's movement in
+    pixels since the press, because the thing being resized is a width only the owner knows. The grip is `place`d
     rather than packed - a packed child decides its parent's requested width (measured: `width=8` around a 2 px child
     still asked for 2 px), and this hit area is a size, not a side effect.
     """
 
     def __init__(self, master, surface, accent, border, tip='', name='', on_drag=None, on_commit=None,
-                 on_reset=None, on_step=None, on_jump=None, register=None):
-        tk.Frame.__init__(self, master, width=SASH_W, bd=0, relief='flat', background=surface, takefocus=1,
+                 on_reset=None, on_step=None, on_jump=None, register=None, width=None, on_press=None):
+        self._w = int(width or SASH_W)
+        tk.Frame.__init__(self, master, width=self._w, bd=0, relief='flat', background=surface, takefocus=1,
                           cursor='sb_h_double_arrow', highlightthickness=2, highlightbackground=surface,
                           highlightcolor=accent)
         self.name = name
         self._accent, self._border = accent, border
         self._on_drag, self._on_commit = on_drag, on_commit
         self._on_reset, self._on_step, self._on_jump = on_reset, on_step, on_jump
+        self._on_press = on_press       # "a drag of mine has begun": the owner remembers where it started
         self._start = None            # where the pointer went down, while a drag is in flight
+        self._captured = False        # did the press actually take the pointer grab? (see `_motion`)
         self._hover = False
         self.pack_propagate(False)
         self.grip = tk.Frame(self, width=2, bd=0, background=border)
@@ -2475,19 +2504,37 @@ class Sash(tk.Frame):
             pass
 
     def _press(self, event):
+        """Take the pointer explicitly, and remember where it went down.
+
+        Tk gives a pressed widget an *implicit* grab, which is enough for a real pointer and invisible to anything
+        synthetic: a `event_generate('<Button-1>')` does not establish one. So the grab is taken here, by name, and
+        every motion is guarded by it (`_motion`) - the same contract as a browser divider's `setPointerCapture` on
+        press and `hasPointerCapture` on every move. If the grab cannot be taken (a window that is not viewable) the
+        drag still works through Tk's implicit grab; `_captured` records which of the two it is.
+        """
         try:
             self.focus_set()
             self.grab_set()
+            self._captured = True
         except Exception:
-            pass
+            self._captured = False
         self._start = event.x_root            # the press, not the last motion: a drag is 1:1 from where it began
         self.tint(True)
-        if self._on_drag:
-            self._on_drag(0)
+        if self._on_press:
+            self._on_press()                  # the owner records where the drag started - not a drag of 0 px
         return 'break'
 
+    def _has_capture(self):
+        """Is this drag still ours? True when the grab was never taken, so an unusable grab cannot strand a drag."""
+        if not self._captured:
+            return True
+        try:
+            return self.grab_current() is self
+        except Exception:
+            return False
+
     def _motion(self, event):
-        if self._start is None:
+        if self._start is None or not self._has_capture():
             return None
         if self._on_drag:
             self._on_drag(event.x_root - self._start)
@@ -2501,6 +2548,7 @@ class Sash(tk.Frame):
             self.grab_release()
         except Exception:
             pass
+        self._captured = False
         if self._on_commit:
             self._on_commit()
         self.tint(False)          # quiet again: a grip left tinted reads as "still dragging" (the test asserts this)
@@ -2827,15 +2875,21 @@ class App:
         self._pads = [0, 0, 0, 0]
         self._pinned = None          # a second picture to compare against, independent of the base
         self._sidebar = self._settings.get('sidebar', True)
+        # The boundary's hit area, measured against this display before any sash is built: `sash_px` reads `tk scaling`
+        # and every place that counts a sash's width (the grid's minsizes, the layout's chrome, the pane's total) reads
+        # this one number, so a 144 dpi screen moves the boundary and the arithmetic around it together.
+        self._sash_w = sash_px(root)
         # One width per boundary, remembered like every other setting and clamped when it is *applied* rather than
         # here: a profile written on a 2560 px screen must still open on a 1500 px one without pushing a column off the
         # edge. `_layout_user` says whether these widths are the reader's at all - a profile that has never had a
         # boundary dragged opens on `split_evenly` instead, which is the same four numbers for the same window.
-        self._layout_user = any(_px_setting(self._settings, k) for k in LAYOUT_KEYS)
+        self._layout_user = any(_px_setting(self._settings, k) is not None for k in LAYOUT_KEYS)
         self._strip_w = _px_setting(self._settings, 'strip_w')
         self._prompt_w = _px_setting(self._settings, 'prompt_w')
-        self._contents_w = _px_setting(self._settings, 'contents_w') or CONTENTS_W
-        self._contents_w = max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, self._contents_w))
+        remembered = _px_setting(self._settings, 'contents_w')
+        self._contents_w = CONTENTS_W if remembered is None else remembered
+        # no clamp to a minimum here: 0 is a width a reader can set (a column can be taken to nothing), and the
+        # application clamps each width to its floor and cap from `_column_floors`/`_column_caps`
         self._pane_shown = True          # the pane is a column of the layout: gridded whether a folder is open or not
         self._pane_empty = False         # True while it is showing its empty state rather than pictures
         self._sash_drag = None           # the Sash whose drag is in flight, or None
@@ -2931,7 +2985,7 @@ class App:
         for _col in (0, 2):
             root.columnconfigure(_col, weight=0, minsize=210)
         for _col in (1, 3):                      # the two sashes between the three columns
-            root.columnconfigure(_col, weight=0, minsize=SASH_W)
+            root.columnconfigure(_col, weight=0, minsize=self._sash_w)
         root.columnconfigure(4, weight=1, minsize=PICTURE_MIN_W + PICTURE_PAD)
         root.rowconfigure(0, weight=1)
 
@@ -7875,21 +7929,48 @@ class App:
     def _make_sash(self, master, name, tip):
         """One boundary, built the same way wherever it sits: the look and the keys live in `Sash`, the meaning here."""
         return Sash(master, self._plate, self.theme.accent, self.theme.border, tip=tip, name=name,
-                    register=self._tip,
+                    register=self._tip, width=self._sash_w,
+                    on_press=lambda n=name: self._sash_begin(n),
                     on_drag=lambda dx, n=name: self._sash_move(n, dx),
                     on_commit=lambda n=name: self._sash_commit(n),
                     on_reset=lambda n=name: self._sash_default(n),
                     on_step=lambda direction, big, n=name: self._sash_step(n, direction, big),
                     on_jump=lambda end, n=name: self._sash_jump(n, end))
 
+    def _apply_sash_scale(self):
+        """Re-measure the boundary's hit area and put it everywhere a sash width is counted.
+
+        `sash_px` is read once at start; this is how it is read again - a window dragged to a screen of another density,
+        a changed `tk scaling`. The three sash widgets, the two root grid minsizes and the layout's chrome (three sashes
+        plus the pane's) all move together, and the layout is reapplied because the pixels it pays for changed.
+        """
+        want = sash_px(self.root)
+        if want == self._sash_w:
+            return want
+        self._sash_w = want
+        for sash in getattr(self, 'sashes', ()):
+            try:
+                sash._w = want
+                sash.configure(width=want)
+            except Exception:
+                pass
+        try:
+            for col in (1, 3):
+                self.root.columnconfigure(col, weight=0, minsize=want)
+        except Exception:
+            pass
+        self._apply_layout()
+        return want
+
     # -- the layout: four adjacent columns, a sash between each pair (2026-10-30) --------------------------
     def _layout_chrome(self):
         """The pixels of the window that are neither a column nor its content.
 
-        Three sashes, the four frames' padding, and the pane's scrollbar: 90 px here at 1x. The bar is *queried* from
-        the widget rather than assumed - a 2x desktop doubles it and does not double the padding.
+        Three sashes (each `self._sash_w`, which follows the display), the four frames' padding, and the pane's
+        scrollbar: 90 px here at 1x. The bar is *queried* from the widget rather than assumed - a 2x desktop doubles it
+        and does not double the padding.
         """
-        return (3 * SASH_W + GAL_PAD + PANE_PAD + PROMPT_PAD + PICTURE_PAD
+        return (3 * self._sash_w + GAL_PAD + PANE_PAD + PROMPT_PAD + PICTURE_PAD
                 + self._bar_px(self.contents_bar))
 
     def _prompt_floor(self):
@@ -8013,21 +8094,25 @@ class App:
 
     def _pane_total_w(self):
         """The pane's whole grid column: its sash, the gap in front of it, its pictures and its scrollbar."""
-        return SASH_W + PANE_PAD + self._contents_w + self._bar_px(self.contents_bar)
+        return self._sash_w + PANE_PAD + self._contents_w + self._bar_px(self.contents_bar)
 
     def _gallery_col_w(self):
         """The gallery column's width: the strip, the pane, and the chrome between them inside `gal`."""
         return GAL_PAD + self._strip_w + self._pane_total_w()
 
     def _contents_w_limit(self):
-        """The widest the pane may be here without taking the strip below four columns at the 96 px floor.
+        """The widest the pane may be here: whatever the gallery column leaves once the strip has its floor.
 
-        The strip and the pane trade width between them inside the gallery column, so the pane's ceiling is whatever
-        that column leaves once the strip has its floor, capped at the width the pane stops growing at. It comes from
-        the column the two of them share, never from the pane's own width, so no gesture can chase its own tail.
+        The strip and the pane trade width between them inside the gallery column, so the pane's ceiling is that
+        column's width less the strip's floor, capped by the pane's own cap. Both numbers come from the policy on
+        either side (`_column_floors`, `_column_caps`), never from a constant here: `CONTENTS_W_MAX` used to be the
+        ceiling, and once the caps were removed (2026-11-02) the even split opened the pane wider than that constant -
+        so the first motion of a drag snapped it back to 480 and dragging stopped being 1:1 (measured 2026-11-14:
+        a 618 px pane at a 2560 px window reported 480 after a +40 px motion).
         """
+        floors, caps = self._column_floors(), self._column_caps()
         total = self._strip_w + self._contents_w
-        return max(CONTENTS_W_MIN, min(CONTENTS_W_MAX, total - self._column_floors()[COL_STRIP]))
+        return max(floors[COL_PANE], min(caps[COL_PANE], total - floors[COL_STRIP]))
 
     def _layout_min_w(self):
         """The narrowest window this layout can be shown in: every column at its floor, and the chrome between them."""
@@ -8140,13 +8225,14 @@ class App:
 
     def _set_contents_w(self, width, persist=False):
         """Move the strip|pane boundary: clamp it to what the gallery column can pay, apply, and remember it."""
-        floors = self._column_floors()
+        floors, caps = self._column_floors(), self._column_caps()
         total = self._strip_w + self._contents_w
         try:
             value = int(width)
         except (TypeError, ValueError):
             value = CONTENTS_W
-        value = max(floors[COL_PANE], min(CONTENTS_W_MAX, value, max(floors[COL_PANE], total - floors[COL_STRIP])))
+        value = max(floors[COL_PANE], min(caps[COL_PANE], value,
+                                          max(floors[COL_PANE], total - floors[COL_STRIP])))
         self._layout_user = True                 # the reader moved a boundary: these widths are theirs now
         self._contents_w = value
         self._apply_layout(persist=persist, light=True)
@@ -8170,17 +8256,31 @@ class App:
         """
         grew = int(want) - (strip + pane)
         if grew > 0:
-            add = min(grew, max(0, self._column_caps()[COL_STRIP] - strip))
+            caps = self._column_caps()
+            add = min(grew, max(0, caps[COL_STRIP] - strip))
             strip += add
-            pane += min(grew - add, max(0, CONTENTS_W_MAX - pane))
+            pane += min(grew - add, max(0, caps[COL_PANE] - pane))
         elif grew < 0:
             take = min(-grew, max(0, pane - floors[COL_PANE]))
             pane -= take
             strip -= min(-grew - take, max(0, strip - floors[COL_STRIP]))
         return strip, pane
 
+    def _sash_begin(self, name):
+        """The press: record where this drag starts, and say that the *first motion* of it is applied at once.
+
+        The immediate first apply used to be spent by the press itself (the press called `on_drag(0)`), which meant the
+        first real motion - the one that has to hold 1:1 - was coalesced into the next frame. Measured 2026-11-14
+        through the binding: the boundary did not move until the release flushed the target. So the press records and
+        does not apply; the first motion applies immediately; every motion after it waits for its frame.
+        """
+        self._sash_drag = name
+        self._sash_from = (self._strip_w, self._contents_w, self._prompt_w)
+        self._sash_first = True
+        self._layout_user = True          # a drag is the reader taking the layout over from `split_evenly`
+
     def _sash_move(self, name, dx, persist=False):
-        """The pointer moved `dx` px: remember the target and apply it at most once per frame.
+        """The pointer moved `dx` px: apply the first motion at once, then at most one apply per frame.
 
         Windows delivers motion events faster than a relayout can run, and `_apply_layout` is not free - it recomputes
         the prompt's wrap, the window minimum and three grid minsizes, each of which can bounce back as a Configure. So
@@ -8189,10 +8289,7 @@ class App:
         release (`_strip_dirty` / `_contents_dirty` in `_sash_commit`).
         """
         if self._sash_from is None:
-            self._sash_drag = name
-            self._sash_from = (self._strip_w, self._contents_w, self._prompt_w)
-            self._sash_first = True        # the first motion after a press is applied now, not next frame: dragging is 1:1
-        self._layout_user = True          # a drag is the reader taking the layout over from `split_evenly`
+            self._sash_begin(name)
         self._sash_target = (name, dx, persist)
         if persist or getattr(self, '_sash_first', False):
             self._sash_first = False
@@ -8228,12 +8325,17 @@ class App:
         return self._sash_apply(*target)
 
     def _sash_apply(self, name, dx, persist=False):
-        """The arithmetic of one drag: which columns trade what, and by how much."""
+        """The arithmetic of one drag: which columns trade what, and by how much.
+
+        Both ends of every pair come from the policy - `_column_floors` for a floor, `_column_caps` for a ceiling - so
+        the pair can be taken to nothing (both floors are 0) and nothing snaps to a constant that the even split no
+        longer respects.
+        """
         strip0, pane0, prompt0 = self._sash_from
-        floors = self._column_floors()
+        floors, caps = self._column_floors(), self._column_caps()
         if name == COL_STRIP:                     # strip | pane: they trade inside the gallery column
             total = strip0 + pane0
-            low = max(floors[COL_STRIP], total - CONTENTS_W_MAX)
+            low = max(floors[COL_STRIP], min(caps[COL_STRIP], total - caps[COL_PANE]))
             high = max(low, total - floors[COL_PANE])
             strip = max(low, min(high, strip0 + dx))
             self._strip_w, self._contents_w = strip, total - strip

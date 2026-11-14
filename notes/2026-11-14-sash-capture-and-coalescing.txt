@@ -1,0 +1,355 @@
+NOTE 2026-11-14 - the sash finished: capture on press, one relayout per frame, a hit area that follows the display,
+and the keyboard contract through the bindings (0.31.0)
+
+WHAT WAS ASKED
+Take `agent/sash-limits` - one WIP commit (`cab873f`, "suite RED, not for master") - and finish it to green, with the
+measurements that make the claim arithmetic rather than a reading of the diff:
+
+1. measure the *old* app against the *new* instrument, so "we fixed N" is a subtraction;
+2. take the four properties a shipped Electron divider has (explicit pointer capture, per-frame coalescing with the
+   first motion immediate and the release flushing, a hit area that scales with the display, Home/End/arrows) and say,
+   for each, what the branch did, what was added, and the test that proves it;
+3. re-pin only the expectations that encode a decision that changed, each with the decision named;
+4. everything else passes by fixing the app.
+
+THE INSTRUMENT, AND THE THREE RUNS - ONE TK TEST AT A TIME ON THIS BOX
+The instrument is `test_sizing.py` at master (03b9e91, the 0.30.1 file: bounded `drain`/`settle`/`pump`, `step()` block
+names, B3 on the columns screen). It is the same file in all three runs - the only thing that changes is `zimage_ui.py`.
+
+* **BASELINE** - a scratch tree outside the repo, `C:\Users\kevin\AppData\Local\Temp\sash-base\`: `git archive
+  4b191cd | tar -x` (0.29.1, before the 0.30.0 button/paste work and before the branch), then `test_sizing.py` copied
+  over it from master. Nothing else was edited; `version.py` in that tree says `0.29.1`, and the two files hash the
+  same as the originals (`git hash-object` -> `59558283829c32bf6201d072e87d108a366ab0a6` for `test_sizing.py` in both
+  trees).
+
+      cd %TEMP%\sash-base && timeout 540 <repo>\.venv\Scripts\python.exe test_sizing.py
+      exit=1  wall 73 s  22 failure(s)
+
+* **MASTER** - `03b9e91` (0.30.1) in the repo:
+
+      cd C:\Users\kevin\ai_bench\image-models-20261020 && timeout 540 .venv\Scripts\python.exe test_sizing.py
+      exit=1  wall 73 s  22 failure(s)
+
+* **THE BRANCH, AS MERGED** - master merged into `agent/sash-limits` with one conflict resolved (below) and *no other
+  change*; that is the state `cab873f` was waiting for a session with a pointer for:
+
+      exit=1  wall 72 s  24 failure(s)
+
+THE BASELINE LIST (verbatim, 0.29.1 app on the 0.30.1 instrument)
+
+    22 failure(s)
+      FAILED: and a sash at every boundary between them
+      FAILED: each sash sits between the two columns it separates
+      FAILED: prompt: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip
+      FAILED: the root grid carries the same numbers as the columns plus their padding
+      FAILED: and the pane is the one at its own cap, which is stated rather than accidental
+      FAILED: and the strip is then wide enough for a 206 px tile
+      FAILED: the strip|pane sash widens the strip by the drag and narrows the pane by it
+      FAILED: strip|pane stops with the pane at its stated minimum
+      FAILED: Left/Right move the strip|pane boundary 16 px each way
+      FAILED: Shift moves it 64, or to the end of its range when that is nearer
+      FAILED: which is what its control rows need, so nothing in it is clipped
+      FAILED: and at the other end the gallery column is its two floors and the prompt has the rest
+      FAILED: with no folder open the pane is still gridded
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: a full row of tiles is laid out
+      FAILED: the columns and the tile are what the rule asks for
+      FAILED: the smallest window still shows a full row
+      FAILED: a press and a motion through the binding move the boundary 1:1
+      FAILED: and the pane canvas follows it
+      FAILED: and a tile widget was built for it
+
+THE MASTER LIST (verbatim, 0.30.1) - identical, line for line, to the baseline
+
+    22 failure(s)
+      FAILED: and a sash at every boundary between them
+      FAILED: each sash sits between the two columns it separates
+      FAILED: prompt: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip
+      FAILED: the root grid carries the same numbers as the columns plus their padding
+      FAILED: and the pane is the one at its own cap, which is stated rather than accidental
+      FAILED: and the strip is then wide enough for a 206 px tile
+      FAILED: the strip|pane sash widens the strip by the drag and narrows the pane by it
+      FAILED: strip|pane stops with the pane at its stated minimum
+      FAILED: Left/Right move the strip|pane boundary 16 px each way
+      FAILED: Shift moves it 64, or to the end of its range when that is nearer
+      FAILED: which is what its control rows need, so nothing in it is clipped
+      FAILED: and at the other end the gallery column is its two floors and the prompt has the rest
+      FAILED: with no folder open the pane is still gridded
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: a full row of tiles is laid out
+      FAILED: the columns and the tile are what the rule asks for
+      FAILED: the smallest window still shows a full row
+      FAILED: a press and a motion through the binding move the boundary 1:1
+      FAILED: and the pane canvas follows it
+      FAILED: and a tile widget was built for it
+
+Two PASS lines differ between them and both are the 0.30.x work showing up (`the height gives the three rows the same
+size` 1132 vs 1126; `a narrower window re-lays them out` 313/318 vs 191/393); no verdict changes. **The 0.30.0 button
+and paste work fixed none of these 22 and broke none of them.**
+
+THE BRANCH LIST (verbatim, master merged in, nothing else changed)
+
+    24 failure(s)
+      FAILED: and a sash at every boundary between them
+      FAILED: each sash sits between the two columns it separates
+      FAILED: prompt: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip
+      FAILED: the root grid carries the same numbers as the columns plus their padding
+      FAILED: and the pane is the one at its own cap, which is stated rather than accidental
+      FAILED: and the strip is then wide enough for a 206 px tile
+      FAILED: the strip|pane sash widens the strip by the drag and narrows the pane by it
+      FAILED: strip|pane stops with the pane at its stated minimum
+      FAILED: Left/Right move the strip|pane boundary 16 px each way
+      FAILED: Shift moves it 64, or to the end of its range when that is nearer
+      FAILED: which is what its control rows need, so nothing in it is clipped
+      FAILED: and at the other end the gallery column is its two floors and the prompt has the rest
+      FAILED: a fresh start reads the same three boundaries back
+      FAILED: so a window that opens on that file starts with a layout the reader set
+      FAILED: with no folder open the pane is still gridded
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: and the pane is the same width it was
+      FAILED: a full row of tiles is laid out
+      FAILED: the columns and the tile are what the rule asks for
+      FAILED: the smallest window still shows a full row
+      FAILED: a press and a motion through the binding move the boundary 1:1
+      FAILED: and the pane canvas follows it
+      FAILED: and a tile widget was built for it
+
+SIDE BY SIDE - WHAT THE BRANCH DID ON ITS OWN
+
+    fixed by the branch, as it stood ......... 0 of 22
+    left by the branch, as it stood .......... 22 of 22
+    introduced by the branch ................. 2
+        a fresh start reads the same three boundaries back
+        so a window that opens on that file starts with a layout the reader set
+
+The two it introduced are its own regression and they are the zero floor showing up in the settings file: with floors 0
+a pane dragged shut is 0 px, `save_settings` writes `contents_w: 0`, and `_px_setting` read 0 as "no value"
+(`return value if value > 0 else None`), so the reread came back `[618, None, 1569]`. Fixed in the app (below): zero is
+a width.
+
+So the honest arithmetic for the branch commit alone is **0 fixed, 2 broken**. The WIP was a design in the right
+direction whose blocker it had mis-diagnosed, which is why it could not be finished on the 4060.
+
+THE BLOCKER IT NAMED, AND WHAT IT ACTUALLY WAS
+`cab873f` says: "its 1:1 binding check fails through event_generate for a reason not yet diagnosed - possibly the
+synthetic press not establishing the grab". **It was not the grab, and the grab was never missing.** Measured today, on
+master, from the same block:
+
+    the strip|pane sash widens the strip by the drag and narrows the pane by it   FAIL ((618, 618, 617, 617), (756, 480, 617, 617))
+    a press and a motion through the binding move the boundary 1:1               FAIL 480
+    and the pane canvas follows it                                               FAIL (480, 618)
+
+The even split at a 2560 px window is 618 px for the pane, a +40 px drag should give 578, and the answer is **480** -
+`CONTENTS_W_MAX`. The motion *was* delivered and *was* applied (the pane canvas really moved to 480); what moved it to
+the wrong number is one stale clamp left behind by the 2026-11-02 decision to remove the caps:
+
+    _sash_apply, strip|pane:   low = max(floors[COL_STRIP], total - CONTENTS_W_MAX)
+
+`_column_caps()` had already been emptied (`10 ** 6` everywhere, "no cap where the reader is steering") and
+`_even_widths` honoured that, but the drag path still capped the pane at the constant - so the first motion of every
+drag on the strip|pane boundary snapped the pane to 480 and then dragged 1:1 from there. A press-and-drag through the
+binding is exactly what shows it; a handler-level drag (`drag()` in the suite) hides it, because it asks for the same
+boundary 40 px from a *different* starting width. The suite's own detail line printed the 480 and nobody had read it as
+arithmetic.
+
+WHAT THE FOUR PROPERTIES ARE NOW, EACH WITH ITS TEST
+
+**1. Explicit pointer capture on press, every move guarded.** The branch did nothing here (`Sash` was untouched); master
+already took `grab_set()` on the press and `grab_release()` on the release, but nothing ever *checked* the capture, and
+`_motion` only asked whether a press had happened. Added: `_press` records `_captured` (did the grab actually get
+taken?), `_motion` is guarded by `_has_capture()` - `grab_current() is self` when a grab was taken, and permissive when
+it was not, so a window that cannot be grabbed cannot strand a drag - and `_release` clears it. The press also stopped
+being "a drag of 0 px": it announces with `on_press` -> `App._sash_begin`, which records the starting widths and says
+the *first motion* applies immediately (see 2).
+
+    the press takes the pointer explicitly, so the moves are known to be this drag's  PASS (<Sash .!frame2.!frame4.!sash>, True)
+    and a move with the capture gone moves nothing                                  PASS (618, 618)
+    and the release gives the capture back                                         PASS (None, False)
+
+The middle one is the guard measured: with the grab released mid-drag, a `<B1-Motion>` of +40 px delivered through the
+binding moves the boundary by 0 px. (This suite can only synthesise events, so the grab is handled deliberately - the
+press takes it for real, and one check gives it away and puts it back.)
+
+**2. Per-frame coalescing, the first motion immediate, the release flushing.** The branch had this; it was measured but
+never asserted, and the assertion that existed allowed it (`counts['layout'] <= 41`, "once per motion plus once per
+commit"). What was wrong is that the *press* spent the "apply immediately" flag by calling `on_drag(0)`, so the first
+real motion - the one that has to hold 1:1 - went into the next frame. Measured through the binding before the fix:
+`a press and a motion through the binding move the boundary 1:1 FAIL 618` (nothing moved until the release flushed the
+target into the canvas, `(578, 618)`). After `_sash_begin`/first-motion the same block reads:
+
+    a press and a motion through the binding move the boundary 1:1   PASS (618 -> 578)
+    and the pane canvas follows it                                   PASS (578, 618)
+
+and the coalescing claim, measured on one block with both numbers from the same instrument:
+
+    40 motions in, at most 4 relayouts out - one per frame, not one per pixel event  PASS {'refresh': 1, 'tiles': 0,
+                     'resize': 3, 'layout': 3, 'motions': 40}
+
+      before (0.29.1 baseline and 0.30.1 master, same block, same 40 motions): layout 41
+      after  (0.31.0):                                                        layout  3   (-93 %)
+
+and the drag is proved to have happened in that block (`and the drag did move the boundary ... PASS (618, 738)`) so the
+count cannot be low for the wrong reason. The interiors (title reflow, prompt wrap, window minimum) are the deferred
+half; the *grid* moves every frame, which is the split the branch introduced and the gallery suite keeps honest.
+
+**3. A hit area that follows the display, tested at explicit positions.** Added `sash_px(root)` - `SASH_W` (8 px) at
+96 dpi, scaled by `tk scaling`, 12 px at 144 dpi - and wired it through one number, `App._sash_w`, read at start and
+re-read by `_apply_sash_scale()`: the three sash widgets, the two root grid minsizes, `_layout_chrome` (three of them
+plus the pads and the pane's bar) and `_pane_total_w`. This window's geometry is otherwise pixels-by-design (`ACTION_PAD`
+says so, and that comment now names this one exception: a boundary is a pointer target, not a legible line).
+
+    the hit area is SASH_W at 96 dpi and scales with the display                 PASS (8, 12, 8)
+    and the sash on screen is that wide, and so is the grid column it sits in    PASS (8, 8, 8)
+    and the layout pays for three of them in its chrome                         PASS (90, 8)
+    every pixel of the hit area belongs to the sash, and neither neighbour takes one
+        PASS (['.!sash', '.!sash.!frame', '.!sash'], ['.!frame2', '.!frame2.!frame4.!canvas.!frame'])
+    re-reading the display puts the same width back, and the layout agrees       PASS (8, 8)
+
+The fourth one is the "tested around explicit boundary positions rather than the drawn line" half: `winfo_containing`
+at the left edge, the middle and the last pixel of the hit area returns the sash or its 2 px grip, and one pixel either
+side returns the neighbour. The grip is *not* the target; the 8 px is.
+
+**4. Home/End/arrows as the keyboard contract, `preventDefault` included.** `Sash` already bound the four keys and
+returned `'break'`, but the suite drove `app._sash_step(...)`/`_sash_jump(...)` directly - a function call, not a key.
+Added: the keys are driven through the binding now, and the `'break'` is asserted as well, so a window-level binding
+cannot also act.
+
+    <Left> moves the boundary one step, through the binding rather than a function call  PASS (618, 634, 16)
+    and Shift makes it four steps                                                       PASS (618, 698)
+    <End> takes the pane to its floor, at once - there is no release to wait for        PASS (0, 0)
+    <Home> takes it to the other end of its range                                       PASS (1236, 1236)
+    and each key reports "break", so nothing behind it on the window also acts           PASS ('break', 'break')
+
+WHAT WAS A TEST'S FAULT, NOT THE APP'S - AND WHAT THAT FIX CHANGED
+Twelve of the 22 are the four-column screen, not the sash: the app opens on the folders screen (2026-11-03), where the
+pane, the prompt column and two of the three sashes are `grid_remove`d on purpose, and the strip is the folder list. A
+block that measures those columns was measuring removed widgets. That is the same family B3 needed fixed for and the
+same fix - `on_screen(root, app, mode)`, the screen switch a click makes, then a check that names what is on screen -
+applied to the three blocks that need it (the layout block, and the finished-render block at the end of the file).
+No assertion was weakened, removed or reordered: the same checks run, against a window that is showing what they
+describe. Measured before the switch, per block: the render block's `_tile_widgets` was `[]` with the file in `_files`
+(probe: `%TEMP%\tkprobe\render_probe.py`), and with `set_view_mode('columns')` the same two events built four tile
+widgets.
+
+Two more were genuinely stale expectations of an *older* decision that the columns screen had been hiding:
+
+- `the columns and the tile are what the rule asks for` - the tile is a *rung* of the ladder since 2026-11-01
+  (`tile_bucket`, round down, `TILE_STEP = 16`), and the check compared it to the band value with a tolerance of
+  `TILE_CHROME` (10). At a 2524 px strip the two agreed by luck; at a 604 px strip the rung is 128 and the band value
+  141, i.e. 13 px apart. The check now states the ladder contract: the same column count, the tile is a rung, and the
+  band value is above it and below the next rung.
+
+THE RE-PINS - EACH ONE A DECISION THAT CHANGED, AND WHAT THE OLD LINE ASSERTED
+Every one of these is marked `RE-PINNED 2026-11-14` in `test_sizing.py` with the same sentence.
+
+1. `and the pane is the one at its own cap, which is stated rather than accidental` -> **and no column is held by a cap:
+   the pane takes the same share as the other three.** Decision: 2026-11-02 removed the caps ("no cap where the reader
+   is steering"). Old expectation: `even_2560[COL_PANE] == CONTENTS_W_MAX` (480). At 2560 px the even split is
+   618/618/617/617, so the old line could only ever fail once the caps were gone.
+2. `and the strip is then wide enough for a 206 px tile` -> **and the strip's share at 2560 px is still enough for the
+   nine at the fit size.** Same decision: the 206 px tile was what the *capped* pane left over to the strip (756 px of
+   strip). With an even share the strip has 618 px and its tile is 191 - the rule holds (>= the 160 px fit size, inside
+   the 320 cap), the old number is history, and the number is still printed in the detail line.
+3. `strip|pane stops with the pane at its stated minimum` -> **... at its floor, which the policy says is nothing**.
+   Decision: 2026-11-02 gave the strip and the pane a floor of 0. Old expectation: `_contents_w == CONTENTS_W_MIN`
+   (180).
+4. `Left/Right move the strip|pane boundary 16 px each way` -> the same three numbers around the *floor* instead of
+   around 180: `(0, 16, 0)` rather than `(180, 196, 180)`. Same decision.
+5. `Shift moves it 64, or to the end of its range when that is nearer` -> `min(limit, floor + 4 * SASH_STEP)` rather
+   than `min(limit, CONTENTS_W_MIN + 64)`. Same decision.
+6. `and at the other end the gallery column is its two floors and the prompt has the rest` -> "its two floors" is now
+   `0 + 0`. Old expectation: `_contents_w == CONTENTS_W_MIN`. Same decision.
+7. `the other end is the pane's widest, which never takes the strip below its floor` -> the strip's floor is `0`, so
+   the check compares against `_column_floors()[COL_STRIP]` instead of the pre-2026-11-02 constant `GAL_FLOOR_W` (510).
+   This one is a *fix of a fix*: it passed on master only because `CONTENTS_W_MAX` was still capping the pane, i.e. the
+   stale clamp was holding a stale expectation up.
+8. `so a window that opens on that file starts with a layout the reader set` -> presence, not truthiness
+   (`_px_setting(...) is not None`). Same decision: 0 is a width the reader set. Old expectation: `all(...)` over the
+   values, which reads 0 as "never seen".
+9. `the layout is applied once per motion plus once per commit - not once per pixel event` -> **40 motions in, at most 4
+   relayouts out - one per frame, not one per pixel event**, plus a new check that the drag really moved. Old
+   expectation: `<= 41`. This one got *tighter*, not looser.
+
+APP CHANGES (all in `zimage_ui.py`)
+- the pane's ceiling is `_column_caps()[COL_PANE]`, not `CONTENTS_W_MAX`, in all four places a width is clamped
+  (`_sash_apply`, `_set_contents_w`, `_contents_w_limit`, `_share_gallery`), and `__init__` no longer clamps the
+  remembered pane width into `[CONTENTS_W_MIN, CONTENTS_W_MAX]` - that clamp is what made a remembered 0 into 180;
+- `_px_setting` returns 0 for a remembered 0 (and `None` only when the key is absent), and `_layout_user` asks
+  `is not None`;
+- `sash_px()` + `App._sash_w` + `_apply_sash_scale()` (the scaled hit area, everywhere it is counted);
+- `Sash._press` takes the grab explicitly, records `_captured`, and announces with `on_press`; `Sash._has_capture` +
+  the guarded `_motion`; `_release` clears it;
+- `App._sash_begin` + the first *motion* applying immediately (was the press);
+- comments/docstrings that had gone stale with the caps and the floors: the pane-width block at the constants, the
+  `Sash` docstring, `_layout_chrome`, `ACTION_PAD_X`'s "not scaled by the display" (now names the one exception).
+
+THE MERGE INTO MASTER (this branch was 56 commits behind)
+`git merge master` had exactly one conflict, in `_apply_layout`, and both sides applied: master's 2026-11-03 rule for
+which column takes the slack per screen, then this branch's `light=True` early-out (grid now, interiors coalesced). The
+merge commit is `23628c6`.
+
+THE RUN THAT IS GREEN - WHOLE FILE, NOT A TRUNCATED ONE
+    cd C:\Users\kevin\ai_bench\image-models-20261020 && timeout 540 .venv\Scripts\python.exe test_sizing.py
+    exit=0, wall 77 s, 264 lines, 209 PASS, 24 blocks, **0 failure(s)**, no `blocked:` line
+
+The tail, verbatim:
+
+    -- splitter: Home/End/Left/Right through the bindings, and a hit area that follows the display
+    <Left> moves the boundary one step, through the binding rather than a function call PASS (618, 634, 16)
+    and Shift makes it four steps                                    PASS (618, 698)
+    <End> takes the pane to its floor, at once - there is no release to wait for PASS (0, 0)
+    <Home> takes it to the other end of its range                    PASS (1236, 1236)
+    and each key reports "break", so nothing behind it on the window also acts PASS ('break', 'break')
+    the hit area is SASH_W at 96 dpi and scales with the display     PASS (8, 12, 8)
+    and the sash on screen is that wide, and so is the grid column it sits in PASS (8, 8, 8)
+    and the layout pays for three of them in its chrome              PASS (90, 8)
+    every pixel of the hit area belongs to the sash, and neither neighbour takes one PASS (['.!frame2.!frame4.!sash',
+                                                                          '.!frame2.!frame4.!sash.!frame', '.!frame2.!frame4.!sash'],
+                                                                         ['.!frame2', '.!frame2.!frame4.!canvas.!frame'])
+    re-reading the display puts the same width back, and the layout agrees PASS (8, 8)
+    ...
+    -- layout: a finished render is drawn with folders off
+    the strip is on screen, so a tile for the render can exist at all PASS ('columns', 1, 429)
+    the new picture is in the strip list                             PASS ['finished_render.png', 'seed2.png', 'seed1.png']
+    and a tile widget was built for it                               PASS [WindowsPath('...finished_render.png'), ...]
+
+    0 failure(s)
+
+(One line of Tk noise appears in every run of this file, the baseline included - `invalid command name
+"..._folders_watchdog"` / `("after" script)` - an `after` callback firing once on a destroyed window. It is not a check
+and not new.)
+
+THE OTHER TWO SUITES, RE-RUN (one at a time)
+    python test_gallery_ui.py  -> exit 0, ALL PASS, 57 s   (1075 PASS lines)
+    python test_tiles.py       -> exit 0, ALL PASS,  2 s   (`nothing is lost in the split PASS 180 + 0 of 180`)
+
+The gallery suite is the one that made the picture floor stay a real number (the branch's own note: a 160 px floor
+clipped the action bar and the gallery suite caught it immediately) and it still passes with the zero floors and the
+capture guard in place.
+
+SCREENSHOTS - `tools/shot_sash.py` (new, same convention as `tools/shot_sizing.py`), written to `docs/shots/`
+    sash-drag.png   a real press through the binding plus one `<B1-Motion>` of -90 px, nothing released: the pane went
+                    618 -> 708 px, the capture is held (`grab_current() is sash`), and the grip is tinted (`#758500`)
+    sash-end.png    `<End>` on the strip|pane sash: pane 0 px (its floor), strip 1236 px
+    sash-home.png   `<Home>` on the same sash: pane 1236 px (its limit), strip 0 px
+The numbers are printed beside each shot by the tool, so a stale picture shows up as a mismatch.
+
+VERSION
+`version.py`: 0.30.1 -> **0.31.0** (features, so minor + 1 and patch to 0): capture + coalescing + a scaled hit area +
+the keyboard contract through the bindings are behaviour a person gets, and the two app fixes ride with them.
+
+STATE, AND WHERE THE DECISIONS ARE RECORDED
+`docs/STATE.md` is new: it is the one page that says which decisions the suite now encodes (zero floors, no caps, a
+scaled hit area, one relayout per frame) and where the dated `STATE-YYYY-MM-DD.md` files at the root continue the log.
+There is no `CHANGELOG` file in this repo - its changelog is the dated notes, the README's per-feature paragraphs (the
+splitter paragraph under "Opening a folder does not replace the list" is updated with the new policy and the new
+measurements) and those STATE files - so none was invented.
+
+FILES
+`zimage_ui.py`, `test_sizing.py`, `tools/shot_sash.py`, `version.py`, `README.md`, `docs/STATE.md`,
+`docs/shots/sash-{drag,end,home}.png`, this note.
