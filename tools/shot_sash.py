@@ -128,9 +128,8 @@ def main():
         time.sleep(0.03)
     settle(root, app)
     sash = app.contents_sash
-    print('sash: %d px wide at tk scaling %.3f, k = %.3f' % (sash.winfo_width(),
-                                                            float(root.tk.call('tk', 'scaling')),
-                                                            app._k if hasattr(app, '_k') else 0.0))
+    print('sash: %d px wide at tk scaling %.3f (sash_px -> %d), chrome %d px'
+          % (sash.winfo_width(), float(root.tk.call('tk', 'scaling')), zui.sash_px(root), app._layout_chrome()))
 
     # 1. a drag in progress: the press through the sash's own binding, then one motion of +90 px. Nothing is released,
     #    so the grip is still tinted and the boundary is mid-gesture - which is the state the screenshot is about.

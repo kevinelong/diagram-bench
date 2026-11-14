@@ -291,7 +291,16 @@ APP CHANGES (all in `zimage_ui.py`)
 THE MERGE INTO MASTER (this branch was 56 commits behind)
 `git merge master` had exactly one conflict, in `_apply_layout`, and both sides applied: master's 2026-11-03 rule for
 which column takes the slack per screen, then this branch's `light=True` early-out (grid now, interiors coalesced). The
-merge commit is `23628c6`.
+merge commit is `23628c6`, and the green run above is on that merge.
+
+Master was then fast-forwarded to the finished branch (`git checkout master && git merge --ff-only agent/sash-limits` ->
+`1471003`, a fast-forward, so the tree is the one that was already green), and the suite was run **again on `master`**
+to have the number rather than the argument:
+
+    cd C:\Users\kevin\ai_bench\image-models-20261020 && timeout 540 .venv\Scripts\python.exe test_sizing.py   # on master
+    exit=0, wall 77 s, 264 lines, 209 PASS, 24 blocks, **0 failure(s)**
+
+Both were pushed: `agent/sash-limits` and `master`.
 
 THE RUN THAT IS GREEN - WHOLE FILE, NOT A TRUNCATED ONE
     cd C:\Users\kevin\ai_bench\image-models-20261020 && timeout 540 .venv\Scripts\python.exe test_sizing.py
