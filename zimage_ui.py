@@ -446,6 +446,20 @@ class Theme:
             style.configure('Big.TButton', padding=(8, 6), font=('Segoe UI', 10))
             style.configure('Big.TCheckbutton', font=('Segoe UI', 10))
             style.configure('Big.TCombobox', padding=(4, 4), font=('Segoe UI', 10))
+            # The action family of ttk buttons, and the one place its measurements live. Every action a person is
+            # invited to press reads ACTION_PAD_X/Y from here, so "Open…", the folder's own actions and anything added
+            # later are the same size by construction. On `clam` (dark mode) the resting surface and both answer states
+            # are painted, because that theme has no opinion of its own; on `vista` the theme draws a real bevel and the
+            # map is simply not read - the padding still is, so the button is the same size in either mode.
+            style.configure('Action.TButton', padding=(ACTION_PAD_X, ACTION_PAD_Y),
+                            background=self.surface, foreground=self.text, bordercolor=self.border,
+                            lightcolor=self.surface, darkcolor=self.border)
+            style.map('Action.TButton',
+                      background=[('disabled', self.surface), ('pressed', _mix(self.surface, self.text, 0.24)),
+                                  ('active', self.hover)],
+                      foreground=[('disabled', self.muted)],
+                      relief=[('pressed', 'sunken'), ('active', 'raised')])
+
         except Exception:
             pass
 
@@ -645,9 +659,14 @@ def copy_png_to_clipboard(path):
         return False, '%s: %s' % (type(e).__name__, e)
 
 
-SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url',
+SETTINGS_KEYS = ('size', 'steps', 'sampler', 'layout', 'history', 'style', 'model', 'advanced', 'llm_url', 'view',
+                 'screen', 'view_schema',
                  'favorites', 'custom_styles', 'runs', 'sidebar', 'seed_step', 'denoise', 'folders', 'motion',
-                 'zoom', 'contents_w', 'strip_w', 'prompt_w')
+                 'zoom', 'contents_w', 'strip_w', 'prompt_w',
+                 # `_persist` has always written these six and `save_settings` has always filtered them out, so the
+                 # steps-per-model map, both rephrase settings, the sort order and the folder last read died at exit.
+                 # A key that is written and not whitelisted is a setting the window forgets every time it closes.
+                 'steps_by_model', 'rephrase_intensity', 'rephrase_matching', 'sort', 'last_folder')
 
 # An image prompt describes a still; an image-to-video model obeys motion language. Sending the still's description
 # with a clip asks for motion while describing stillness, which is exactly what "unusable" looked like.
@@ -818,6 +837,14 @@ CONTENTS_W_MAX = 480
 SASH_W = 8
 SASH_STEP = 16        # one arrow key; Shift makes it four
 GAL_FLOOR_W = STRIP_FIT_W                                      # 510
+# Every action a person is invited to press carries the same generous inside: 12 px across, 6 px down. It is written
+# once, here, and read by the two shared places that own the look - `ActionButton` for the tk family and the
+# `Action.TButton` style for the ttk one - so a new action cannot come out a different size from the ones beside it.
+# Deliberately *not* scaled by the display: this window's geometry is pixels everywhere (the sashes, the tile floors,
+# the pane width), and Tk's scaling factor moves fonts rather than pads, so a scaled pad would be the layout's one
+# number that changed under the user.
+ACTION_PAD_X = 12
+ACTION_PAD_Y = 6
 # The layout is N adjacent columns with a sash between every pair (2026-10-30). Read off the grid rather than assumed,
 # it is four: the strip and the open-folder pane share the gallery column (`gal`, boundary 1), and the gallery column,
 # the prompt column and the picture column are the root's columns 0/2/4 (boundaries 2 and 3). The folded sidebar's
@@ -826,6 +853,8 @@ COLUMNS = ('strip', 'pane', 'prompt', 'picture')
 import sessions as sessions_mod
 import matrix as matrix_module
 import deployments
+import groups_store
+import usage
 
 COL_STRIP, COL_PANE, COL_PROMPT, COL_PICTURE = COLUMNS
 PROMPT_MIN_W = 420    # the prompt column's floor before its own rows are measured; its combos cannot shrink
@@ -1196,6 +1225,35 @@ def shot_filename(stamp, name, width, height, seed, suffix=''):
     return '%s_%s_%dx%d_seed%d%s.png' % (stamp, name, width, height, seed, suffix)
 
 
+def pasted_filename(stamp, width, height):
+    """`pasted-<stamp>_<w>x<h>.png` - `shot_filename`'s shape for a picture no sampler made.
+
+    The same stamp, the same id in front of the size, the same `%dx%d` the gallery's restore path reads; the seed slot is
+    gone because a paste has no seed and writing `seed0` would be a claim about how it was made. The name has been
+    `pasted-<stamp>.png` since 0.28.0 and that is kept, with the size added so two pastes differ by more than a second.
+    """
+    return 'pasted-%s_%dx%d.png' % (stamp, width, height)
+
+
+def free_path(folder, name):
+    """`name` in `folder`, or the first `_2`, `_3` ... beside it that nothing already occupies.
+
+    A collision is settled in the same shape `shot_filename` already uses for the tiles of one batch (`_02`, `_16`), so
+    there is one way to say "another one of these" rather than a second naming scheme beside the first. Nothing is
+    overwritten and nothing is guessed at: the caller gets a path it can write.
+    """
+    out = Path(folder) / name
+    if not out.exists():
+        return out
+    stem, suffix = out.stem, out.suffix
+    n = 2
+    while True:
+        candidate = Path(folder) / ('%s_%d%s' % (stem, n, suffix))
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 def prompt_clashes(text):
     """Word pairs in one prompt that ask for different things. Returns [(a, b), ...] for the banner and the hint."""
     low = (text or '').lower()
@@ -1293,7 +1351,7 @@ class _Profile:
         def pct(q):
             return ordered[min(len(ordered) - 1, int(round(q * (len(ordered) - 1))))]
         return {'n': len(ordered), 'p50': round(pct(.5), 2), 'p90': round(pct(.9), 2),
-                'max': round(ordered[-1], 2), 'total': round(sum(ordered), 1)}
+                'p95': round(pct(.95), 2), 'max': round(ordered[-1], 2), 'total': round(sum(ordered), 1)}
 
     def summary(self):
         return {ev: self._stats(list(v)) for ev, v in sorted(self.samples.items())}
@@ -1405,6 +1463,20 @@ def tile_plan(batch, seed, seed_step, has_base=False):
     total = max(1, int(batch or 1))
     step = max(1, int(seed_step or 1))
     return total, [seed + i * step for i in range(total)]
+
+
+def restored_folder(plan, was_open=None, saved=None):
+    """Which folder a plan should open: the one already open, else the one the last session was reading.
+
+    Pure so it can be tested without a window: the label must still exist in the plan, because a folder can be renamed
+    by a re-group and a stale name would open nothing while looking like it should have.
+    """
+    labels = [g.get('label') for g in (plan or {}).get('groups') or []]
+    if was_open and was_open in labels:
+        return was_open
+    if saved and saved in labels:
+        return saved
+    return None
 
 
 class Engine:
@@ -1746,7 +1818,36 @@ STARTER_PROMPTS = [
 
 
 class ActionButton(tk.Button):
-    """A tk.Button that answers to the ttk state([...]) API, so call sites do not care which toolkit broke the line."""
+    """A tk.Button that answers to the ttk state([...]) API, so call sites do not care which toolkit broke the line.
+
+    It is also where the *look* of the action family is decided, once. The five call sites pick a colour and a line of
+    text; the padding, the resting bevel and the two answer states come from here, because a family that is padded by
+    hand at each call site is a family that drifts. Measured before this: `Generate` and `Use as Base` were flat
+    coloured words with 0 px inside, so the biggest thing on screen was the one that looked least pressable.
+    """
+
+    def __init__(self, master=None, **kw):
+        super().__init__(master, **kw)
+        self._rest_bg = str(self.cget('background'))
+        self._hover_bg = str(self.cget('activebackground') or _mix(self._rest_bg, '#ffffff', 0.18))
+        self._press_bg = _mix(self._hover_bg, '#000000', 0.22)
+        super().configure(padx=ACTION_PAD_X, pady=ACTION_PAD_Y, relief='raised', bd=2,
+                          activebackground=self._hover_bg)
+        # Tk already paints `activebackground` while the pointer is over the button; these bindings exist for the two
+        # answers a flat button does not give on its own - a hover tone on a button whose active colour equals its
+        # resting colour, and a *darker* press, so press and hover cannot be mistaken for each other.
+        self.bind('<Enter>', lambda e: self._tone(self._hover_bg), add='+')
+        self.bind('<Leave>', lambda e: self._tone(self._rest_bg), add='+')
+        self.bind('<ButtonPress-1>', lambda e: self._tone(self._press_bg), add='+')
+        self.bind('<ButtonRelease-1>', lambda e: self._tone(self._hover_bg), add='+')
+
+    def _tone(self, colour):
+        """Repaint the surface without touching the state: a disabled button keeps whatever grey it is wearing."""
+        try:
+            if str(self['state']) != 'disabled':
+                super().configure(background=colour)
+        except Exception:
+            pass
 
     def state(self, spec=None):
         if spec is None:
@@ -1757,6 +1858,16 @@ class ActionButton(tk.Button):
             elif s in ('disabled', 'active', 'normal'):
                 super().configure(state=s)
         return ()
+
+
+def action_button(master, **kw):
+    """One of the actions a person is invited to press, on the ttk side of the app.
+
+    The padding and the resting edge are the `Action.TButton` style's job (`Theme.apply`), so every ttk action shares
+    one measurement and one state map; the call site decides the words and the command, and nothing else.
+    """
+    kw.pop('style', None)
+    return ttk.Button(master, style='Action.TButton', **kw)
 
 
 class Tooltip:
@@ -1965,7 +2076,12 @@ class ScrollGrid(ttk.Frame):
         # owner keeps the selection itself (View All, whose Delete button reads `App.selected`) it passes `on_mark` and
         # `sel_ring=False`; otherwise the grid keeps its own chosen set. See `_mark`.
         self.focus_key = None
+        # `chosen` is a set, and a set has no order: `picked` is the same members in the order they were clicked, kept
+        # beside it rather than instead of it. The order is the thing a multi-reference prompt reads - the pictures are
+        # numbered Image1, Image2 by it, so "first" has to mean "the one picked first" and not "the alphabetically
+        # least file name", which is what a set would have given. See `picked_order`.
         self.chosen = set()
+        self.picked = []
         self.anchor = None
         self.sel_ring = bool(sel_ring)
         self.on_mark = on_mark              # (key, 'set' | 'extend' | 'toggle') -> None, the owner applies it
@@ -2037,11 +2153,29 @@ class ScrollGrid(ttk.Frame):
             return
         self.focus_key = key
         if self.on_mark is None:
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
         if scroll:
             self._see(key)
+
+    # -- the pick, and its order
+    def _choose(self, keys):
+        """Set the pick: the set and its click order are written together, so they cannot disagree.
+
+        Every path that changes the selection - a click, an arrow, a toggle, Ctrl+A, the folder browser parking its
+        cursor - comes through here, which is why there is exactly one place where "what is picked" is decided.
+        """
+        self.picked = list(dict.fromkeys(keys))
+        self.chosen = set(self.picked)
+
+    def picked_order(self):
+        """The picked keys, in the order they were picked.
+
+        `chosen` cannot answer this and never will - a set's iteration order is not a promise - so anything that numbers
+        the pick (a multi-reference prompt calls them Image1, Image2) reads this instead.
+        """
+        return [k for k in self.picked if k in self.chosen]
 
     # -- layout
     def _metrics(self):
@@ -2116,7 +2250,7 @@ class ScrollGrid(ttk.Frame):
         self.focus_key = key
         if self.on_mark is None:
             # the grid keeps its own selection here, so the click sets it the way a plain click elsewhere would
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
 
@@ -2165,7 +2299,7 @@ class ScrollGrid(ttk.Frame):
         if self.on_select_all is not None:
             self.on_select_all()
         elif self.sel_ring:
-            self.chosen = set(self.keys)
+            self._choose(self.keys)          # everything laid out, in the order it is laid out
             self.anchor = self.keys[0] if self.keys else None
             self._paint_focus()
         return 'break'
@@ -2176,17 +2310,23 @@ class ScrollGrid(ttk.Frame):
             self.on_mark(key, mode)
             return
         if mode == 'toggle':
+            # a toggled picture keeps the place it was picked in, so the rest of the numbering does not shift when one
+            # in the middle is dropped and re-added
             if key in self.chosen:
                 self.chosen.discard(key)
+                if key in self.picked:
+                    self.picked.remove(key)
             else:
                 self.chosen.add(key)
+                if key not in self.picked:
+                    self.picked.append(key)
             self.anchor = key
         elif mode == 'extend' and self.anchor in self.keys and key in self.keys:
             i, j = self.keys.index(self.anchor), self.keys.index(key)
             i, j = min(i, j), max(i, j)
-            self.chosen = set(self.keys[i:j + 1])
+            self._choose(self.keys[i:j + 1])
         else:
-            self.chosen = {key}
+            self._choose([key])
             self.anchor = key
         self._paint_focus()
 
@@ -2746,6 +2886,43 @@ class App:
         except Exception:
             root.geometry('1180x720')
         self._later(150, self._ensure_maximized)
+        # ZIMAGE_VIEW lets a test (or a launcher) fix the shape at construction. Switching modes *after* the window exists
+        # left the prompt column's layout stale, so the suite needs to be born in the layout it is testing.
+        # A stored shape from *before* the screens existed is not a choice about the screens: `columns` was simply the only
+        # option then, so it was written for everyone. Once per schema change the old value is dropped and the new default
+        # applies - otherwise a preference nobody set silently pins the old UI forever (reported 2026-11-03: "I seem to be
+        # seeing the old ui").
+        # The key is `screen`, not `view`: `view` was written by builds where `columns` was the only shape, and one of them
+        # may still be in a settings file somewhere, so a new name is the only way to be sure the default applies. Nothing
+        # old can pin the layout now.
+        stored_screen = self._settings.get('screen')
+        # `columns` is still in the code for A/B review, but it is no longer a *screen* anyone can land on: a stored choice of
+        # it was exactly how a build that "removed the columns" still opened on them (2026-11-03). Only the three drill-down
+        # shapes are remembered and reachable; the workshop view is asked for explicitly, in code, and nothing else.
+        if stored_screen not in ('folders', 'images', 'image'):
+            stored_screen = None
+        self.view_mode = os.environ.get('ZIMAGE_VIEW') or stored_screen or 'folders'
+        # Recorded so a "why am I seeing the old layout" question can be answered from the app's own log rather than by
+        # guessing at settings files: what was stored, what schema, and what was chosen.
+        try:
+            usage.record('view.start', mode=self.view_mode, stored=str(self._settings.get('view')),
+                         screen=str(self._settings.get('screen')),
+                         env=str(os.environ.get('ZIMAGE_VIEW')), version=str(getattr(self, 'APP_VERSION', '')))
+        except Exception:
+            pass
+        # ...and the settings dict itself must carry the new value too: leaving the old `view` in place meant the next save
+        # wrote `columns` back *together with* the schema marker, which made it look like a deliberate choice for ever (seen
+        # on v0.27.1: the migration ran, then the save undid it).
+        self._settings['screen'] = self.view_mode
+        self._back_btn = self._new_back_button()
+        self._new_btn = self._new_button()
+        self._top = self._top_bar()
+        self._new_target_folder = None
+        # ...and actually applied: the mode was restored into a variable and never used, so the window always opened on all
+        # columns whatever had been chosen (reported 2026-11-03: "still seeing the 4 pane layout").
+        # Applied *now*, not after 120 ms: the window painted the default four-column shape first and the chosen screen
+        # replaced it a moment later, which is the flash of a "folderless view" seen on startup (reported 2026-11-03).
+        self._later(0, lambda: self.set_view_mode(self.view_mode, persist=False))
         # gallery | sash | prompt | sash | picture (2026-10-30): the window is five grid cells, three of them columns
         # whose widths the sashes set and two of them the sashes themselves. Only the picture column has a weight, so a
         # wider window feeds the picture instead of re-opening a boundary the reader closed; each column's minsize is
@@ -2811,10 +2988,17 @@ class App:
         # under the title, always visible, together with what that folder is and whether the walk goes into subfolders.
         self.source_row = ttk.Frame(self.title_row)
         self.source_row.pack(fill='x', pady=(3, 0))
-        self.title_open_btn = ttk.Button(self.source_row, text='Open\u2026', width=6, command=self.open_source_dialog)
+        self.title_open_btn = action_button(self.source_row, text='Open\u2026', command=self.open_source_dialog)
         self.title_open_btn.pack(side='left')
         self._tip(self.title_open_btn, 'View and categorise another folder (Ctrl+O). Renders keep going to %s.'
                                        % self.args.out)
+        # Paste is the same verb as Ctrl+V and the picture menu's entry: the clipboard lands in the folder on screen, is
+        # picked, and is armed as the base, so pasting a reference and generating from it is one gesture. It sits beside
+        # Open… because that is where a person looks when they want to bring a picture in from outside.
+        self.paste_top_btn = action_button(self.source_row, text='Paste', command=self.paste_base)
+        self.paste_top_btn.pack(side='left', padx=(4, 0))
+        self.paste_tip = self._tip(self.paste_top_btn, 'Paste a picture from the clipboard into this folder and use it as '
+                                                       'the base (Ctrl+V). A bitmap, a copied image file, or a copied path.')
         self.source_chip = ttk.Label(self.source_row, text='', foreground=self.theme.accent)
         self.source_back_btn = ttk.Button(self.source_row, text='\u00d7', width=2, command=self.close_source)
         self.recursive_var = tk.BooleanVar(value=False)
@@ -2824,8 +3008,8 @@ class App:
         # Everything above the strip except this first line folds away: it is configuration, not the work. Folding it by
         # default is what pays for the bigger controls inside it.
         self._options_shown = False
-        self.options_btn = ttk.Button(self.title_row, text='\u25b8 options', width=11,
-                                      command=self.toggle_options, style='Big.TButton')
+        self.options_btn = action_button(self.title_row, text='\u25b8 options', width=11,
+                                         command=self.toggle_options)
         self.options_btn.pack(side='right')
         # the strip scrolls: 20 tiles at 92 px need ~500 px, which is more than a small window has
         holder = self.strip_holder = ttk.Frame(gal)
@@ -2861,10 +3045,12 @@ class App:
                                               theme=self.theme)
         self.contents_title.grid(row=0, column=1, sticky='we', pady=(0, 4))
         # the session gesture lives on the open folder's own title: "split this folder into sessions", reversible
+        # `SelectableTitle` *is* a `tk.Text`, so the binding belongs on it - attaching it to `.text` raised, and the bare
+        # except swallowed it, which is why right-clicking the folder did nothing (reported 2026-11-02).
         try:
-            self.contents_title.text.bind('<Button-3>', self._title_session_menu, add='+')
-        except Exception:
-            pass
+            self.contents_title.bind('<Button-3>', self._title_session_menu, add='+')
+        except Exception as e:
+            log_error('title menu bind', e)
         # "Loading..." for the folder column: centred in the column, in a size that reads from across the desk, with dots
         # that chase rather than blink - a spinner that flashes reads as a fault, one that drifts reads as work in progress
         base = abs(int(tkfont.nametofont('TkDefaultFont').cget('size')))
@@ -2907,33 +3093,41 @@ class App:
         # folder's column stayed on screen until something else re-rendered it. Both are here now, under the grid.
         self.contents_btns = ttk.Frame(self.contents_holder)
         self.contents_btns.grid(row=2, column=1, columnspan=2, sticky='we', pady=(4, 0))
-        for col in range(3):
-            self.contents_btns.columnconfigure(col, weight=1)
-        self.contents_all_btn = ttk.Button(self.contents_btns, text='Select all', command=self._select_all_pane)
+        # One line, ordered by how often it is travelled: Select all and Gallery are the main path, A/B is the alternate that
+        # still earns a visible slot, and Recover/Caption/Delete move behind the menu (asked 2026-11-03).
+        for col in range(5):
+            self.contents_btns.columnconfigure(col, weight=0)
+        self.contents_btns.columnconfigure(2, weight=1)      # the spacer takes the slack, buttons keep their size
+        self.contents_all_btn = action_button(self.contents_btns, text='Select all', command=self._select_all_pane)
         self.contents_all_btn.grid(row=0, column=0, sticky='we', padx=(0, 3))
-        self.contents_del_btn = ttk.Button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
-                                           state='disabled')
-        self.contents_del_btn.grid(row=0, column=1, sticky='we', padx=3)
+        self.contents_del_btn = action_button(self.contents_btns, text='Delete\u2026', command=self.delete_selected,
+                                              state='disabled')
+        # gridded by `_pane_button_row` (inline or in the menu, depending on the screen)
         # the pane could show pairs but not start a review: the A/B entry point lived only on the strip and in the folder
         # header, so a folder open in the second column had no way in from there
-        self.contents_ab_btn = ttk.Button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
-                                          state='disabled')
-        self.contents_ab_btn.grid(row=0, column=2, sticky='we', padx=(3, 0))
+        self.contents_ab_btn = action_button(self.contents_btns, text='A/B\u2026', command=self.review_pane,
+                                             state='disabled')
+        self.contents_ab_btn.grid(row=0, column=3, sticky='we', padx=(3, 0))
         # a picture can carry its own provenance (a ComfyUI graph or an A1111 block), so a folder imported from another
         # pipeline can regain its categories without a human retyping prompts
-        self.contents_rec_btn = ttk.Button(self.contents_btns, text='Recover\u2026', command=self.recover_pane_sidecars)
-        self.contents_rec_btn.grid(row=1, column=0, sticky='we', padx=(0, 3), pady=(3, 0))
-        self.contents_gal_btn = ttk.Button(self.contents_btns, text='Gallery\u2026',
-                                           command=self.gallery_start)
-        self.contents_gal_btn.grid(row=1, column=1, sticky='we', padx=3, pady=(3, 0))
+        self.contents_rec_btn = action_button(self.contents_btns, text='Recover\u2026',
+                                              command=self.recover_pane_sidecars)
+        self.contents_gal_btn = action_button(self.contents_btns, text='Gallery\u2026',
+                                              command=self.gallery_start)
+        self.contents_gal_btn.grid(row=0, column=1, sticky='we', padx=3)
         self._tip(self.contents_gal_btn, 'Walk this folder one picture at a time, numbered, wrapping, nothing deleted. '
                                          'Arrows: right/down forward, left/up back, Esc stops.')
-        self.contents_cap_btn = ttk.Button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
-        self.contents_cap_btn.grid(row=1, column=2, sticky='we', padx=(3, 0), pady=(3, 0))
+        self.contents_cap_btn = action_button(self.contents_btns, text='Caption\u2026', command=self.caption_folder)
         self._tip(self.contents_cap_btn, 'Caption the pictures in this folder that have no prompt, with the local vision '
                                          'model, then file them by caption. Nothing is deleted or ranked.')
         self.contents_sel_label = ttk.Label(self.contents_btns, text='', foreground=self.theme.accent, anchor='w')
-        self.contents_sel_label.grid(row=2, column=0, columnspan=3, sticky='we', pady=(2, 0))
+        self.contents_sel_label.grid(row=1, column=0, columnspan=5, sticky='we', pady=(2, 0))
+        # The rare three live in a menu, but they are still the same widgets, so their enabled state and their commands keep
+        # working (and the checks that assert it keep passing).
+        self.more_btn2 = ttk.Button(self.contents_btns, text='\u22ef', width=3, takefocus=0,
+                                    command=self._pane_more_menu)
+        self.more_btn2.grid(row=0, column=4, sticky='e', padx=(3, 0))
+        self._tip(self.more_btn2, 'Recover, Caption and Delete - the rarer paths on this folder.')
         self._contents_geom = None       # (columns, tile) the pane's cells were last laid out for
         self._contents_job = None        # the debounced reflow, so a mid-layout width cannot rebuild the pane
         self.contents = ttk.Frame(self.contents_canvas)
@@ -2978,8 +3172,9 @@ class App:
         self._thumbs = {}                 # path -> PhotoImage, kept alive
         self._tile_widgets = {}           # path -> Label, so selection can be painted without a rebuild
         self._all_widgets = {}            # same, for the "More..." window
-        self.selected = []                # ordered list of paths marked for action
+        self.selected = []                # ordered list of paths marked for action - the click order, by construction
         self._anchor = None               # shift-click range starts here
+        self._paste_reason = ''           # the sentence the Paste button's greyed state is currently saying, if any
         self._nav_cur = None              # the cell the arrow keys are on: a Path in the strip, a folder index in folders
 
         btns = self.btns = ttk.Frame(gal)
@@ -2992,17 +3187,21 @@ class App:
         self.more_btn.pack(side='left', fill='x', expand=True)
         self.folders_btn = ttk.Button(toprow, text='Folders \u25b8', command=self._folders_clicked, style='Big.TButton')
         self.folders_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        # The view control: one visible button that cycles folders-only -> all columns -> pictures-only. Without it the mode
+        # was reachable only from a right-click menu, which is not discoverable (reported 2026-11-03).
+        self.view_btn = ttk.Button(toprow, text='\u25a4', width=3, command=self._cycle_view, style='Big.TButton',
+                                   takefocus=0)
+        self.view_btn.pack(side='left', padx=(3, 0))
+        self._tip(self.view_btn, 'View: folders only \u2192 all columns \u2192 pictures only.')
 
         toolrow = ttk.Frame(btns)
         toolrow.pack(fill='x', pady=(3, 0))
         self.refresh_btn = ttk.Button(toolrow, text='\u21bb', width=3, command=self.refresh_gallery,
                                       style='Big.TButton')
         self.refresh_btn.pack(side='left')
-        self.log_btn = ttk.Button(toolrow, text='Session log\u2026', command=self.show_run_log, style='Big.TButton')
-        self.log_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
-        self.folder_btn = ttk.Button(toolrow, text='Open pictures folder\u2026', command=self.open_folder,
-                                     style='Big.TButton')
-        self.folder_btn.pack(side='left', fill='x', expand=True)
+        # `Session log…` and `Open pictures folder…` are on the folder title menu now: they are diagnostics and OS-level
+        # actions, opened perhaps once a session, and they were taking a third of a toolbar row that also holds the
+        # refresh button. One action, one home - the buttons are gone, not hidden (PLAN-UX-20261102 §3).
         self.collapse_btn = ttk.Button(toolrow, text='\u00ab', width=3, command=lambda: self.set_sidebar(False),
                                        style='Big.TButton')
         self.collapse_btn.pack(side='left', padx=(3, 0))
@@ -3015,6 +3214,11 @@ class App:
         # away in the picker, and with no bouts recorded every win count is 0, so the order falls back to newest-first
         # and a gallery nobody has reviewed looks exactly as it did before.
         self.sort_var = tk.StringVar(value='Wins')
+        # The picker is a control the reader sets on purpose, so it survives a restart - but only a value the picker
+        # actually offers, or a stale profile would put a word in the box that paints a list nothing can re-sort.
+        _saved_sort = (self._settings or {}).get('sort')
+        if _saved_sort in ('Recent', 'Wins', 'Sequence'):
+            self.sort_var.set(_saved_sort)
         # Sequence reads a storyboard in film order (the scene numbers a multi-scene prompt records in its sidecars);
         # it falls back to recency for pictures that have none, so an ordinary gallery is unchanged
         self.sort_cb = ttk.Combobox(selrow, state='readonly', width=8, values=['Recent', 'Wins', 'Sequence'],
@@ -3282,11 +3486,14 @@ class App:
                                         state='disabled')
         self.view_base_btn.grid(row=0, column=2, sticky='ew', padx=(4, 0))
         self._tip(self.view_base_btn, 'Every picture the next render will send, with Remove and Clear.')
+        # `height=1`: the generous inside is ACTION_PAD_X/Y's job now (the family's own padding and bevel), so the
+        # second blank text line that used to stand in for padding is gone - measured, that line was 26 px of the
+        # 48 px that pushed the prompt column over the bottom at 1200x700 with the Advanced panel open.
         self.use_base_btn = ActionButton(self.base_actions, text='Use as Base', command=self.use_as_base,
                                          font=('Segoe UI', 13), bg='#5c6b80', fg='white',
                                          activebackground='#4a5768', activeforeground='white',
                                          disabledforeground='#d5dae2', relief='flat', bd=0,
-                                         height=2, cursor='hand2', takefocus=True)
+                                         height=1, cursor='hand2', takefocus=True)
         self.use_base_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
         self.use_base_btn.state(['disabled'])
 
@@ -3294,7 +3501,7 @@ class App:
                                            font=('Segoe UI', 13), bg='#ff6347', fg='white',
                                            activebackground='#e0492f', activeforeground='white',
                                            disabledforeground='#ffe0d8', relief='flat', bd=0,
-                                           height=2, cursor='hand2', takefocus=True)
+                                           height=1, cursor='hand2', takefocus=True)
         self.clear_base_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
         self.clear_base_btn.state(['disabled'])
 
@@ -3315,7 +3522,7 @@ class App:
                                     font=('Segoe UI', 13, 'bold'), bg='#1f8a45', fg='white',
                                     activebackground='#166b34', activeforeground='white',
                                     disabledforeground='#c9e6d2', relief='flat', bd=0,
-                                    height=2, cursor='hand2', takefocus=True)
+                                    height=1, cursor='hand2', takefocus=True)
         self.gen_btn.grid(row=11, column=0, sticky='ew', pady=(0, 0))
         self.last_label = ttk.Label(left, text='', foreground=self.theme.muted, anchor='center')
         self.last_label.grid(row=12, column=0, sticky='ew', pady=(6, 0))
@@ -3603,6 +3810,9 @@ class App:
         # Ctrl+F finds inside the prompt from anywhere in the window - it is the one find a prompt box needs, and
         # Alt+F is already the folders switch. Nothing else in the app claims Control-f.
         root.bind('<Control-f>', lambda e: (self.find_open(), 'break')[1])
+        # Ctrl+D is the Rust gallery's habit and a good one: one paste-ready block, no dialog to fill in. Nothing else
+        # in the app claims Control-d, and it is not a text-editing key on Windows (that is Delete).
+        root.bind('<Control-d>', lambda e: (self.copy_diagnostics(), 'break')[1])
         self.canvas.bind('<B1-Motion>', self._on_compare_drag)
         # the pan is appended after the three modes that already own a press on this canvas - compare, mask and crop -
         # and refuses to move unless the picture overflows the canvas and none of them is armed. A wheel notch or an
@@ -3676,6 +3886,111 @@ class App:
             }
         except Exception:
             pass
+
+    # ---- diagnostics: one paste-ready block ---------------------------------------------------------------
+    def diagnostics_text(self):
+        """Everything a bug report needs, in one block, from state the window already holds.
+
+        The same idea as the Rust gallery's Ctrl+D: one string that says which build, which screen, what is being
+        filtered, which folder is open, what the server is doing, what it last measured and where the files are. It
+        costs nothing until pressed - the profile samples are already in memory.
+        """
+        out, w = [], 10
+
+        def add(label, value):
+            out.append('%-*s %s' % (w, label + ':', value))
+
+        try:
+            import platform
+            add('app', '%s  pid %d  python %s  tk %s' % (
+                version.display, os.getpid(), platform.python_version(), self.root.tk.call('info', 'patchlevel')))
+            add('os', platform.platform(terse=True))
+        except Exception as e:
+            add('app', '%s (could not describe the build: %s)' % (version.display, e))
+        try:
+            dpi = self.root.winfo_fpixels('1i')
+            add('window', '%dx%d  dpi %.0f (%.0f%%)  theme %s  sidebar %s' % (
+                self.root.winfo_width(), self.root.winfo_height(), dpi, 100.0 * dpi / 96.0,
+                'dark' if getattr(self.theme, 'dark', False) else 'light', 'on' if self._sidebar else 'off'))
+        except Exception:
+            pass
+        try:
+            add('source', '%s  files=%d  folders=%d  recent=%d  selected=%d' % (
+                getattr(self, '_source', None) or self.args.out,
+                len(getattr(self, '_files', ()) or ()),
+                len(((getattr(self, '_plan', None) or {}).get('groups') or [])),
+                len(getattr(self, '_content_order', ()) or ()),
+                len(getattr(self, 'selected', ()) or ())))
+        except Exception:
+            pass
+        try:
+            add('view', 'mode=%s  sort=%s  filter=%r  star-only=%s  no-prompt=%s  layout=%s  zoom=%s' % (
+                getattr(self, 'view_mode', ''), self.sort_var.get(), self.search_var.get(),
+                bool(self.starred_only.get()), bool(getattr(self, 'noprompt_only', None).get()) if getattr(
+                    self, 'noprompt_only', None) is not None else False,
+                self.layout_var.get(), self.zoom_var.get() if hasattr(self, 'zoom_var') else ''))
+        except Exception:
+            pass
+        try:
+            plan = getattr(self, '_plan', None) or {}
+            groups = plan.get('groups') or []
+            index = getattr(self, '_active_folder', None)
+            if index is not None and index < len(groups):
+                add('folder', '%s  (%d pictures)' % (groups[index].get('label'), len(groups[index].get('images') or [])))
+            else:
+                add('folder', 'none open')
+        except Exception:
+            pass
+        try:
+            engine = self.engine
+            add('server', 'port %s  ready=%s  %s' % (
+                getattr(engine, 'port', '?'), getattr(engine, 'ready', '?'),
+                'owned by this window' if getattr(engine, 'owned', False) else 'was already running'))
+        except Exception:
+            pass
+        jobs = getattr(self, '_jobs', None) or {}
+        if jobs:
+            now = time.time()
+            add('jobs', '')
+            for key, job in jobs.items():
+                out.append('           %-8s %-24s %5.1fs%s' % (
+                    key, job.get('label', ''), (job.get('end') or now) - job.get('t0', now),
+                    '' if job.get('total') is None else '  %s/%s' % (job.get('done'), job.get('total'))))
+        try:
+            summary = PROFILE.summary()
+            by_total = sorted(summary.items(), key=lambda kv: -kv[1].get('total', 0))[:8]
+            if by_total:
+                add('timings', 'p50/p90/p95/max ms, n')
+                for ev, st in by_total:
+                    out.append('           %-34s %7.1f %7.1f %7.1f %8.1f  n=%d' % (
+                        ev, st.get('p50', 0), st.get('p90', 0), st.get('p95', 0), st.get('max', 0), st.get('n', 0)))
+        except Exception:
+            pass
+        for label, path in (('settings', settings_path()), ('errors', ERROR_LOG), ('timings-log', _TIMING_LOG)):
+            try:
+                add(label, str(path))
+            except Exception:
+                pass
+        return '\n'.join(out) + '\n'
+
+    def copy_diagnostics(self):
+        """Ctrl+D: put that block on the clipboard and say so in the hint line."""
+        try:
+            text = self.diagnostics_text()
+        except Exception as e:
+            log_error('diagnostics', e)
+            try:
+                self.hint.configure(text='could not build diagnostics: %s' % e)
+            except Exception:
+                pass
+            return ''
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.hint.configure(text='diagnostics copied (%d lines)' % len(text.splitlines()))
+        except Exception as e:
+            self.hint.configure(text='diagnostics built but not copied: %s' % e)
+        return text
 
     def save_profile(self, path=None):
         """Write what has been measured so far and say where: real use must record something."""
@@ -3836,6 +4151,120 @@ class App:
         self._render_folder_tiles()
         self.hint.configure(text='%d session%s in the folders view' % (periods, '' if periods == 1 else 's'))
 
+    def _popup_menu(self, menu, event):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        except Exception as e:
+            log_error('popup', e)
+        return 'break'
+
+    def _folder_tile_menu(self, event, index):
+        """Right-click on a folder tile: the folder-level actions that used to be buttons elsewhere."""
+        try:
+            label = ((self._plan or {}).get('groups') or [])[index].get('label') or ''
+        except (IndexError, AttributeError):
+            return None
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Open', command=lambda: self._folder_clicked(index))
+        menu.add_separator()
+        menu.add_command(label='Matrix\u2026  (strengths \u00d7 bases, with a cost estimate)',
+                         command=self.open_matrix_dialog)
+        menu.add_command(label='Split into sessions (breaks of %d h or more)'
+                               % int(sessions_mod.DEFAULT_GAP_HOURS),
+                         command=lambda: self._split_into_sessions(label))
+        menu.add_command(label='Merge the sessions back into one folder',
+                         command=lambda: self._merge_sessions(label))
+        menu.add_separator()
+        menu.add_command(label='Regroup everything (ignore the remembered folders)',
+                         command=self.regroup_everything)
+        menu.add_separator()
+        menu.add_command(label='Folders only', command=lambda: self.set_view_mode('folders'))
+        menu.add_command(label='Pictures only', command=lambda: self.set_view_mode('pictures'))
+        menu.add_command(label='All columns', command=lambda: self.set_view_mode('columns'))
+        menu.add_separator()
+        menu.add_command(label='Session log\u2026', command=self.show_run_log)
+        menu.add_command(label='Open pictures folder\u2026', command=self.open_folder)
+        menu.add_separator()
+        menu.add_command(label='Copy folder name', command=lambda: (self.root.clipboard_clear(),
+                                                                    self.root.clipboard_append(label)))
+        return self._popup_menu(menu, event)
+
+    def _picture_tile_menu(self, event, path):
+        """Right-click on a picture: show the picture's own menu."""
+        return self._popup_menu(self._picture_menu(path), event)
+
+    def _picture_menu(self, path):
+        """The picture's menu, built and returned rather than shown: a screen is testable, a popup is a grab.
+
+        Two of the entries are the clipboard and the pick. **Paste** is the same verb as the top row's button and
+        `Ctrl+V`; **Create New Image based on Selected Images** hands the picked set to the generator as its references,
+        in the order they were clicked. A greyed entry is never a silent no-op: the status line carries the sentence
+        that says why, because a menu that closes saying nothing is how "it did nothing" gets reported.
+        """
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Use as base for the next edit', command=lambda: self._set_base(Path(path)))
+        menu.add_separator()
+        _target, paste_why = self._paste_target()
+        menu.add_command(label='Paste a picture from the clipboard into this folder',
+                         command=self.paste_base, state='disabled' if paste_why else 'normal')
+        pick_why = '' if self._pick_order_now() else 'pick at least one picture first'
+        menu.add_command(label='Create New Image based on Selected Images',
+                         command=self._create_from_selected, state='disabled' if pick_why else 'normal')
+        reason = paste_why or pick_why
+        if reason:
+            self.status.configure(text=reason)
+        menu.add_separator()
+
+        def copy_path():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(path))
+            self.hint.configure(text='copied %s' % Path(path).name)
+
+        menu.add_command(label='Copy path', command=copy_path)
+        # the last one built, so the wiring can be exercised without a pointer - NOT `self._picture_menu`, which is
+        # this method's own name: an attribute would shadow it and the second right-click would raise
+        self._last_picture_menu = menu
+        return menu
+
+    def _pick_order_now(self):
+        """The picked pictures, **in the order they were clicked** - the order a multi-reference prompt numbers.
+
+        `self.selected` is already that list (it is appended to on every ctrl-click and replaced on a plain one), which
+        is the same fact the grids keep as `ScrollGrid.picked_order()` beside their `chosen` set. A set could not answer
+        this, and the pictures handed to `base_images` are numbered Image1, Image2 by exactly this order.
+        """
+        return [Path(p) for p in (self.selected or []) if Path(p).exists()]
+
+    def _create_from_selected(self):
+        """Open the generator with the picked pictures as its references, in click order.
+
+        It does **not** render: the count goes on the status line and the prompt box takes the keyboard, because what
+        the references are for is a sentence the person has not typed yet. `generate` already accepts a list of
+        references (`base_images`), and `use_as_base` is the existing path that arms more than one picture, so this is a
+        way into machinery that works rather than a second way to render.
+        """
+        order = self._pick_order_now()
+        if not order:
+            why = 'pick at least one picture first - then Create New Image based on Selected Images'
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
+            return None
+        self.selected = list(order)          # the pick as the click order, so the arm below sees the same list
+        self.use_as_base()                   # arms the first, and `_bases` receives all of them
+        self.set_view_mode('image')
+        if len(order) == 1:
+            self.status.configure(text='creating from 1 selected picture - %s, armed as the base'
+                                  % self._short_name(order[0].name))
+        else:
+            self.status.configure(text='creating from %d selected pictures - numbered Image1..%d in the order they were '
+                                       'picked; say in the prompt how they go together, then Enter'
+                                  % (len(order), len(order)))
+        try:
+            self.text.focus_set()
+        except Exception as e:
+            log_error('create from pick focus', e)
+        return order
+
     def _active_label(self):
         """The label of the folder the pane is showing, without the ` · session` suffix."""
         try:
@@ -3860,11 +4289,7 @@ class App:
                          command=lambda: self._split_into_sessions(label))
         menu.add_command(label='Merge the sessions back into one folder',
                          command=lambda: self._merge_sessions(label))
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        except Exception:
-            pass
-        return 'break'
+        return self._popup_menu(menu, event)
 
     def _raise_version(self):
         """Keep the version visible: siblings created after it are drawn above a placed widget."""
@@ -4199,6 +4624,7 @@ class App:
             bad.bind('<Button-1>', lambda e, p=path, b=browser, n=pane: self._on_tile_click(e, p, browser=b, pane=n))
             self._tip(bad, '%s\nno prompt: this picture is unfiled and cannot join a family' % Path(path).name)
         lab.bind('<Button-1>', lambda e, p=path: self._on_tile_click(e, p, browser=browser, pane=pane))
+        lab.bind('<Button-3>', lambda e, p=path: self._picture_tile_menu(e, p), add='+')
         for seq, fn in (('<Left>', lambda e: self._nav_key(e, -1, 0)), ('<Right>', lambda e: self._nav_key(e, 1, 0)),
                         ('<Up>', lambda e: self._nav_key(e, 0, -1)), ('<Down>', lambda e: self._nav_key(e, 0, 1))):
             lab.bind(seq, fn)
@@ -4563,6 +4989,7 @@ class App:
         return 'break'
 
     def _select_all_pane(self):
+        usage.record('pane.select_all')
         """Select every picture in the open folder - pressing it again clears, the way the strip's button behaves."""
         keys = list(self._pane_cells()[0])
         if keys and len(self.selected) == len(keys) and all(k in self.selected for k in keys):
@@ -4571,6 +4998,102 @@ class App:
             self.selected = keys
         self._anchor = keys[0] if keys else None
         self._paint()
+
+    def start_new(self):
+        """The prominent New button on the folder and image-list screens: go to the controls with nothing selected.
+
+        Asked 2026-11-03. Nothing is armed and no picture is chosen, so the next render is text-to-image - except that when
+        this is pressed from a folder's image list, that folder is remembered as the target, so a picture generated here lands
+        there when it is categorised instead of dropping into `unfiled`.
+        """
+        usage.record('new', screen=self.view_mode, folder=self._active_label() or '')
+        self._new_target_folder = self._active_folder if self.view_mode == 'images' else None
+        try:
+            self._clear_picture_selection()
+        except Exception as e:
+            log_error('new button', e)
+        where = (' for "%s"' % (self._active_label() or '')) if self._new_target_folder is not None else ''
+        self.hint.configure(text='new picture' + where)
+        return self.set_view_mode('image')
+
+    def _clear_picture_selection(self):
+        """Drop the current selection so the next render is not an edit of it."""
+        for name in ('clear_selection', 'select_none', 'clear_all_selection'):
+            fn = getattr(self, name, None)
+            if callable(fn):
+                try:
+                    fn()
+                    return True
+                except Exception:
+                    pass
+        try:
+            self._pane_cur = None
+            self._selected = set()
+        except Exception:
+            pass
+        return False
+
+    def _inverse_button(self, master, text, command):
+        """Inverse video, on its own line: the back/New controls are the primary actions of a drill-down screen."""
+        return tk.Button(master, text=text, command=command, bd=0, relief='flat', highlightthickness=0,
+                         background=self.theme.text, foreground=self.theme.window, activebackground=self.theme.accent,
+                         activeforeground=self.theme.window, font=('Segoe UI', 12, 'bold'), padx=14, pady=6,
+                         cursor='hand2', takefocus=0)
+
+    def _top_bar(self):
+        """One dedicated line above the screen: back on the left, New on the right (asked 2026-11-03)."""
+        bar = tk.Frame(self.root, background=self.theme.window)
+        self._bar_back = self._inverse_button(bar, '\u2039 Folders', self._drill_back)
+        self._bar_back.pack(side='left')
+        self._bar_new = self._inverse_button(bar, '\uff0b New', self.start_new)
+        self._bar_new.pack(side='right')
+        bar.place_forget()
+        return bar
+
+    def _new_button(self):
+        """Placed rather than gridded: it belongs to the drill-down screens, not to a column that can be hidden."""
+        btn = ttk.Button(self.root, text='\uff0b New', command=self.start_new, style='Big.TButton', takefocus=0)
+        self._tip(btn, 'Start a new picture: the controls without a selection. From a folder, what you make lands there.')
+        btn.place_forget()
+        return btn
+
+    def _pane_more_menu(self):
+        usage.record('pane.more')
+        """The rarer folder actions, behind one button: the pane's row stays a line of the paths actually travelled."""
+        menu = tk.Menu(self.root, tearoff=False)
+        menu.add_command(label='Gallery\u2026 walk one picture at a time', command=self.gallery_start)
+        menu.add_command(label='Recover\u2026 provenance from sidecars', command=self.recover_pane_sidecars)
+        menu.add_command(label='Caption\u2026 with the local vision model', command=self.caption_folder)
+        menu.add_separator()
+        menu.add_command(label='Delete\u2026 the selected pictures', command=self.delete_selected)
+        try:
+            x = self.more_btn2.winfo_rootx()
+            y = self.more_btn2.winfo_rooty() + self.more_btn2.winfo_height()
+            menu.tk_popup(x, y)
+        except Exception as e:
+            log_error('pane more menu', e)
+        return 'break'
+
+    def regroup_everything(self):
+        usage.record('grouping.regroup')
+        """Throw the remembered folders away and cluster from scratch - the one action that distrusts the store.
+
+        The store is reused until the rule changes, which is what makes a launch 6 s instead of 74 s; it also means a stale
+        plan would drift silently. This is the visible way out: delete the record, drop the plan, group again.
+        """
+        gallery = getattr(self, '_source', self.args.out)
+        try:
+            groups_store.store_path(gallery).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log_error('regroup store', e)
+        self._plan = None
+        self._plan_raw = None
+        self._active_folder = None
+        self.hint.configure(text='clustering every picture again - this takes a while on a large gallery')
+        self._regroup_soon()
+        return True
 
     def _regroup_soon(self):
         """Recompute the folders after a render lands: a new picture changes the plan, and the open folder should see it.
@@ -4694,6 +5217,12 @@ class App:
             pass
         threading.Thread(target=self._compute_groups, daemon=True).start()
 
+    def _cycle_view(self):
+        """The visible way to change shape: folders only, all columns, pictures only, and round again."""
+        order = ('folders', 'images', 'image')
+        current = getattr(self, 'view_mode', 'folders')
+        return self.set_view_mode(order[(order.index(current) + 1) % len(order)] if current in order else 'folders')
+
     def _folders_clicked(self):
         """Fork the one folder control: browse when a plan exists, otherwise start computing one."""
         if self._plan:
@@ -4709,10 +5238,14 @@ class App:
             rows = []
             scan = self._scan()
             total_files = max(1, len(scan))
+            _reading_from = time.time()
             for i, (path, stamp) in enumerate(scan):  # (path, mtime); the prompt lives in the sidecar
                 if (i & 63) == 0:
-                    self.ui_events.put(('load', (0.10 * i / total_files, 'reading the gallery',
-                                                 '%d of %d pictures' % (i, total_files))))
+                    # The percentage is intentionally 0-10 % here (this is the first tenth of the whole job), which used to read
+                    # as a frozen "0 %" for the whole scan. The line now carries how far it is and how long it has taken, so a
+                    # stage that cannot move its bar still reports movement.
+                    self.ui_events.put(('load', (0.10 * i / total_files, 'reading the gallery \u00b7 %.0f s' % (time.time() - _reading_from),
+                                                 '%d of %d pictures read' % (i, total_files))))
                 meta = read_meta(path) or {}
                 prompt = meta.get('prompt') or ''
                 topic = ''
@@ -4729,12 +5262,34 @@ class App:
                              'created': meta.get('created') or datetime.fromtimestamp(stamp).isoformat(timespec='seconds'),
                              'root': meta.get('lineage_root'), 'lineage': meta.get('lineage'),
                              'topic': topic, 'from_caption': bool(topic or (not meta.get('prompt') and meta.get('caption')))})
+            self._plan_started_at = time.time()
+
             def _say(frac, stage, _rows=rows):
                 # 0.10 is the sidecar read above; the grouping pass owns the rest
+                waited = time.time() - getattr(self, '_plan_started_at', time.time())
                 self.ui_events.put(('load', (0.10 + 0.90 * frac, stage,
-                                             '%d pictures in the gallery' % len(_rows))))
+                                             '%d pictures in the gallery \u00b7 %.0f s' % (len(_rows), waited))))
             signature = self._plan_signature()      # before the work: the pictures this plan describes
-            plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
+            # Incremental grouping (asked 2026-11-03): a picture already in a folder keeps it, so the ~75 s pass runs only
+            # when something is new or the rule changed. `reuse` returns None in exactly those cases, so this cannot serve a
+            # stale plan silently - and the store is written from the plan that was actually computed.
+            gallery_root = getattr(self, '_source', self.args.out)
+            rule = groups_store.fingerprint_for(group_prompts.DEFAULT_THRESHOLD, RECENT_POLICY, group_prompts.MIN_GROUP)
+            reused = groups_store.reuse(rows, groups_store.load(gallery_root), rule)
+            self._plan_reused = bool(reused)
+            if reused:
+                plan = dict(reused, recent=list(rows)[:RECENT_POLICY])
+                # `predict` (which drives "type a prompt, the matching folder opens") needs the vocabulary, and a reused plan
+                # has no lexicon of its own. Fitting it costs a fraction of the clustering pass.
+                try:
+                    plan['_lexicon'] = group_prompts.fit_lexicon([r.get('prompt') or '' for r in rows])
+                except Exception as e:
+                    log_error('reuse lexicon', e)
+                self.ui_events.put(('load', (1.0, 'reusing the folders from last time',
+                                             '%d pictures, %d folders' % (len(rows), len(plan['groups'])))))
+            else:
+                plan = group_prompts.plan(rows, keep_lexicon=True, recent=RECENT_POLICY, progress=_say)
+                self._plan_needs_save = (gallery_root, rule)
             # A picture with no prompt can never be in a prompt folder. Without a bucket of their own those pictures are
             # invisible while the folders view is on - which is what a folder dumped from another pipeline is full of.
             for group in plan.get('groups') or []:
@@ -4747,6 +5302,16 @@ class App:
             # came to be invisible (measured 2026-10-30). They get their own tile, at the head, the way `unfiled` already
             # covers the leftovers at the tail.
             plan = with_synthetic_head(plan)
+            # Saved *after* the synthetic buckets exist: the recent and unfiled pictures are in no family, and a store that
+            # omitted them made every launch look like it had new pictures and forced the full pass (measured: 72.5 s on the
+            # second boot of the real gallery, reuse never taken).
+            pending_save = getattr(self, '_plan_needs_save', None)
+            self._plan_needs_save = None
+            if pending_save:
+                try:
+                    groups_store.save(pending_save[0], plan, pending_save[1])
+                except Exception as e:
+                    log_error('group store', e)
             # A folder with accepted session cuts becomes one tile per session (asked 2026-11-02): cut in the gap, not on
             # the clock. The raw plan is kept, so splitting again recomputes from the families and never nests.
             self._plan_raw = plan
@@ -4766,6 +5331,14 @@ class App:
         was_open = None
         if self._plan and self._active_folder is not None and self._active_folder < len(self._plan['groups']):
             was_open = self._plan['groups'][self._active_folder].get('label')
+        # The first plan of a session has no open folder of its own, so the folder the last session was reading is
+        # reopened by name - the same rule a re-group uses, which is why it lands here rather than in a second path.
+        # One shot: the key is taken out of the settings dict so a later re-group cannot drag the reader back.
+        saved = self._settings.pop('last_folder', None) if self._settings else None
+        chosen = restored_folder(plan, was_open, saved)
+        if chosen and chosen != was_open:
+            folder_event('restore', label=chosen)
+        was_open = chosen
         self._folder_shown = BATCH_FOLDERS
         self._shown = RECENT_N
         self._sheets = {}
@@ -4994,6 +5567,171 @@ class App:
         except Exception:
             pass
 
+    # ---------------------------------------------------------------- drill-down view modes
+    # Asked 2026-11-02, after the flicker report: folders alone, then pictures alone, then the split. The three columns are
+    # still the layout; a mode only *hides* cells, so no surface is re-created and nothing new has to be kept consistent.
+    VIEW_MODES = ('folders', 'pictures', 'columns')
+    _VIEW_CELLS = (0, 1, 2, 3, 4)      # gallery, gallery sash, prompt, prompt sash, picture
+
+    # The three screens (asked 2026-11-03): folders only, then the images of ONE folder, then the split. Only the last has
+    # a sash, and the first two are whole windows - the earlier "modes" hid root columns but left the folder grid and the
+    # pane sharing one screen, which is not what a drill-down is.
+    SCREENS = ('folders', 'images', 'image', 'columns')
+    SCREEN_ALIASES = {'pictures': 'image'}
+
+    def set_view_mode(self, mode, persist=True):
+        """Show one screen: folders only, one folder's images, the image with its controls, or the old four columns."""
+        mode = self.SCREEN_ALIASES.get(mode, mode)
+        mode = mode if mode in self.SCREENS else 'folders'
+        self.view_mode = mode
+        usage.record('view', mode=mode)
+        whole = mode in ('folders', 'images')          # the gallery column takes the whole window
+        strip = mode in ('folders', 'columns')         # the folder grid / recent thumbnails
+        pane = mode in ('images', 'columns')           # one open folder's pictures
+        # cached once: `grid_slaves` stops listing a widget as soon as it is removed, so a later call would find an empty
+        # cell and could never put it back.
+        cells = dict(getattr(self, '_view_cells', None) or {})
+        for column in range(5):
+            found = tuple(self.root.grid_slaves(row=0, column=column))
+            cells[column] = tuple(dict.fromkeys(tuple(cells.get(column) or ()) + found))
+        self._view_cells = cells
+        # The sashes are a *columns* idea and nothing else needs them: the third screen is two halves, 50/50, and a boundary
+        # you can drag there is a control nobody asked for (2026-11-03).
+        for column, visible in {0: whole or mode == 'columns', 1: whole or mode == 'columns',
+                                2: mode in ('image', 'columns'), 3: mode == 'columns',
+                                4: mode in ('image', 'columns')}.items():
+            for widget in cells.get(column, ()):
+                try:
+                    widget.grid() if visible else widget.grid_remove()
+                except Exception as e:
+                    log_error('screen cell', e)
+        # Inside the gallery column: the strip and the pane are different screens, never both in a drill-down screen.
+        try:
+            self.contents_holder.grid() if pane else self.contents_holder.grid_remove()
+            for widget in (getattr(self, 'gal_canvas', None), getattr(self, 'gal_bar', None)):
+                if widget is not None:
+                    widget.grid() if strip else widget.grid_remove()
+        except Exception as e:
+            log_error('screen panes', e)
+        try:
+            self._apply_layout()
+            # The third screen is exactly two halves: the controls take one, the picture the other, and the sash column
+            # between them holds nothing.
+            if mode == 'image':
+                self.root.columnconfigure(2, weight=1, minsize=0)
+                self.root.columnconfigure(3, weight=0, minsize=0)
+                self.root.columnconfigure(4, weight=1, minsize=0)
+            # The third screen is exactly two halves: controls one, picture the other, and the sash column between them holds
+            # nothing - its 8 px were still being reserved (measured 1035 / 1115 with the sash unmapped).
+            if mode == 'image':
+                for column, weight in ((2, 1), (3, 0), (4, 1)):
+                    self.root.columnconfigure(column, weight=weight, minsize=0)
+            # The whole window goes to whichever half of the gallery column is on screen.
+            self.gal.columnconfigure(0, weight=1 if strip else 0, minsize=0 if not strip else self.gal.columnconfigure(0)['minsize'])
+            self.gal.columnconfigure(2, weight=1 if (pane and not strip) else 0)
+            # The strip lived in the two strip columns and left the pane's third empty - the dead space beside and below the
+            # folder grid once the pane is hidden (2026-11-03). With no pane, it takes all three.
+            span = 3 if mode in ('folders', 'images') else 2
+            for widget in (getattr(self, 'title_row', None), getattr(self, 'btns', None),
+                           getattr(self, 'strip_holder', None)):
+                if widget is not None:
+                    widget.grid_configure(columnspan=span)
+            if span == 3:
+                self.search_box.grid_configure(columnspan=2)
+        except Exception as e:
+            log_error('screen widths', e)
+        # The folders screen exists to pick a folder, so the folders view must be on there: with the toggle off the strip drew
+        # the all-pictures list and the screen looked like an image list (reported 2026-11-03).
+        if mode == 'folders' and not self.group_var.get():
+            try:
+                self.group_var.set(True)
+                # Stored, not just set: the toggle is reloaded from settings on the next refresh, so a settings file saying
+                # folders: false turned the folder view off again and the strip painted recent pictures under the wait message
+                # (seen at v0.27.7).
+                self._settings['folders'] = True
+                if (getattr(self, '_plan', None) or {}).get('groups'):
+                    self._render_folder_tiles()
+                else:
+                    self.toggle_groups(True)
+                # ...and repaint, but WITHOUT walking the folder again: this runs on every screen switch, and a rescan there
+                # blocked the event loop long enough for Windows to mark the window "Not Responding" (seen at v0.27.9).
+                self.refresh_gallery(rescan=False)
+            except Exception as e:
+                log_error('folders screen toggle', e)
+        try:
+            self.view_btn.configure(text={'folders': '\u25a4', 'images': '\u25a6', 'image': '\u25a3',
+                                          'columns': '\u25a9'}[mode])
+            self._back_btn.place_forget()          # the bar carries the back control now
+            # The bar is a line of its own, so a big inverse back button never sits on top of the picture.
+            if mode in ('folders', 'images', 'image'):
+                self._top.place(x=0, y=0, relwidth=1.0)
+                self._bar_back.configure(text={'folders': '\u2039 Folders', 'images': '\u2039 Folders',
+                                               'image': '\u2039 Pictures'}[mode])
+                self._bar_back.pack_forget()
+                self._bar_back.pack(side='left') if mode != 'folders' else None
+                self._bar_new.pack_forget()
+                self._bar_new.pack(side='right') if mode in ('folders', 'images') else None
+                self._top.lift()
+            else:
+                self._top.place_forget()
+            # New belongs to the two list screens - the primary action there - in the same top-left spot the back button uses
+            # on the image screens, so the two never compete for it.
+            self._new_btn.place_forget()
+            self._back_btn.lift()
+        except Exception as e:
+            log_error('screen button', e)
+        if persist:
+            self._settings['screen'] = mode
+            self._save_settings_best_effort()
+        self.hint.configure(text={'folders': 'folders - open one to see its pictures',
+                                  'images': 'pictures in this folder - click one to work on it',
+                                  'image': 'the picture and its controls',
+                                  'columns': 'all columns'}[mode])
+        return mode
+
+    def _drill_click(self, index):
+        """Folders-only -> pictures-only, with the folder actually opened first."""
+        usage.record('folder.open', index=index)
+        try:
+            self.select_folder(index)
+        except Exception as e:
+            log_error('drill click', e)
+        return self.set_view_mode('images')
+
+    def _drill_back(self):
+        """The prominent top-left control: back out one step of the drill-down."""
+        usage.record('view.back', was=self.view_mode)
+        return self.set_view_mode({'image': 'images', 'images': 'folders'}.get(self.view_mode, 'columns'))
+
+    def _new_back_button(self):
+        # takefocus=0: a control that appears and disappears would otherwise shift the F6 visit order by one, which is
+        # exactly what the focus tests caught.
+        btn = ttk.Button(self.root, text='\u2039 Folders', command=self._drill_back, style='Big.TButton', takefocus=0)
+        btn.place_forget()            # shown by `set_view_mode`; placed, so it cannot disturb the grid it floats over
+        return btn
+
+    def _center_dialog(self, win):
+        """Centre a dialog over the main window, then ask for the OS caption (asked 2026-11-02).
+
+        Tk puts a Toplevel where the window manager feels like it, which on Windows is the top-left of the screen - far
+        from the button that opened it. Every dialog already goes through `_closing_raises_main`, so the centring is
+        scheduled there once instead of being repeated at each of the nine construction sites.
+        """
+        try:
+            if not win.winfo_exists():
+                return
+            win.update_idletasks()
+            w, h = win.winfo_width(), win.winfo_height()
+            if w <= 1 or h <= 1:                      # not mapped yet: use what it asked for
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            rw, rh = max(1, self.root.winfo_width()), max(1, self.root.winfo_height())
+            x = self.root.winfo_rootx() + max(0, (rw - w) // 2)
+            y = self.root.winfo_rooty() + max(0, (rh - h) // 2)
+            win.geometry('+%d+%d' % (x, y))
+        except Exception as e:
+            log_error('centre dialog', e)
+        self._retitle(win)
+
     def _closing_raises_main(self, win):
         """Prepare a child window: open it maximised, and hand the front back when it goes away.
 
@@ -5010,6 +5748,7 @@ class App:
             win.bind('<Destroy>', self._raise_main, add='+')
         except Exception:
             pass
+        self._later(20, self._center_dialog, win)
         return win
 
     def open_folder_browser(self):
@@ -5284,13 +6023,29 @@ class App:
         except Exception:
             index = None
         if index is not None and self._folders_view_active() and index != self._active_folder:
-            # the folder this picture landed in is the one to look at; its pane puts the newest first
+            # the folder this picture landed in is the one to look at; its pane puts the newest first.
+            # During a driven run, opening a *new* folder per picture rebuilds the strip and the pane each time - so the
+            # switch is remembered and taken once, when the run drains (the coalesced flush).
+            if self._run_in_flight():
+                self._fresh_folder = index
+                self._fresh_pending = path
+                if not getattr(self, '_fresh_job', None):
+                    self._fresh_job = self._later(1200, self._flush_fresh_result)
+                return
             try:
                 self.select_folder(index)
             except Exception:
                 pass
         else:
-            self.refresh_gallery()
+            # A driven run (matrix, scenes) calls this once per finished picture, and `refresh_gallery` rebuilds the whole
+            # strip - 476 ms measured - on the UI thread. Twenty-one of those is the window not drawing while a matrix
+            # runs. One rebuild per 1.2 s still shows progress as it happens and leaves the thread free to paint.
+            if self._run_in_flight():
+                self._fresh_pending = path
+                if not getattr(self, '_fresh_job', None):
+                    self._fresh_job = self._later(1200, self._flush_fresh_result)
+            else:
+                self.refresh_gallery()
         try:
             self._warm_one(path)          # so the tile that just appeared is a picture, not a placeholder
         except Exception:
@@ -5300,6 +6055,30 @@ class App:
             # so the next item in the series lands in the right folder instead of staying unfiled
             try:
                 self._regroup_soon()
+            except Exception:
+                pass
+
+    def _run_in_flight(self):
+        """True while a driven run owns the UI's attention: a matrix queue or a scene run still has items to render."""
+        return bool(getattr(self, '_matrix_queue', None)) or bool(getattr(self, '_scenes_left', None))
+
+    def _flush_fresh_result(self):
+        """The coalesced rebuild a driven run deferred: one strip refresh for every picture that landed in the window."""
+        self._fresh_job = None
+        path, self._fresh_pending = getattr(self, '_fresh_pending', None), None
+        index, self._fresh_folder = getattr(self, '_fresh_folder', None), None
+        if index is not None:
+            try:
+                self.select_folder(index)          # the folder the run was filling, opened once
+            except Exception as e:
+                log_error('fresh open', e)
+        try:
+            self.refresh_gallery()
+        except Exception as e:
+            log_error('fresh refresh', e)
+        if path:
+            try:
+                self._warm_one(path)
             except Exception:
                 pass
 
@@ -5353,6 +6132,7 @@ class App:
         return label, paths, False
 
     def review_pane(self):
+        usage.record('pane.ab')
         """A/B review the pane's selection, or the whole open folder when nothing is selected."""
         cells = list(getattr(self, '_content_order', []) or [])
         chosen = [p for p in (self.selected or []) if p in set(cells)]
@@ -5447,22 +6227,55 @@ class App:
         # gallery mode: Prev/Next live where the three decisions were, and the count sits on the picture
         b_prev = ttk.Button(bar, text='\u25c0  Prev  (\u2190 or \u2191)', command=lambda: self.gallery_step(-1))
         b_next = ttk.Button(bar, text='Next  (\u2192 or \u2193)  \u25b6', command=lambda: self.gallery_step(+1))
+        # the gallery's own furniture: zoom, slideshow, fullscreen. Gridded only in gallery mode, so the comparison
+        # window keeps exactly the controls it had.
+        chips = ttk.Frame(bar)
+        chips.grid(row=3, column=0, columnspan=4, sticky='ew', pady=(6, 2))
+        g_zoom = ttk.Button(chips, text='zoom: fit', command=self._gallery_cycle_zoom)
+        g_zoom.pack(side='left', padx=(0, 4))
+        g_auto = ttk.Button(chips, text='slideshow: off', command=self._gallery_cycle_auto)
+        g_auto.pack(side='left', padx=4)
+        g_full = ttk.Button(chips, text='full screen  (F11)', command=lambda: self._gallery_fullscreen())
+        g_full.pack(side='left', padx=4)
+        g_hint = ttk.Label(chips, text='z zoom \u00b7 a slideshow \u00b7 drag a zoomed picture to pan',
+                           foreground=self.theme.muted)
+        g_hint.pack(side='left', padx=(10, 0))
+        chips.grid_remove()
         badge = tk.Label(win, text='', background='#101010', foreground='#e8e8e8', font=('Segoe UI', 16, 'bold'),
                          padx=12, pady=4)
         self._review = {'win': win, 'state': state, 'left_lbl': left_lbl, 'right_lbl': right_lbl, 'info': info,
                         'pair': None, 'deleted': 0, 'queue': None, 'path': None,
                         'buttons': (b_left, b_keep, b_right), 'badge': badge, 'cur': 0,
-                        'gallery_buttons': (b_prev, b_next, b_stop)}
+                        'gallery_buttons': (b_prev, b_next, b_stop),
+                        'bar': bar, 'chips': (chips, g_zoom, g_auto, g_full, g_hint),
+                        'gzoom': 'fit', 'gauto': 0, 'gpan': (0, 0), 'gfull': False,
+                        'hide_job': None, 'auto_job': None, 'gdrag': None, 'src': None, 'gdraw': None}
         for key, fn in (('1', lambda: self.review_decide('left')),
                         ('2', lambda: self.review_decide('middle')),
                         ('3', lambda: self.review_decide('right')),
-                        ('<Escape>', self.review_stop),
+                        ('<Escape>', self._gallery_escape),
                         ('<Left>', lambda: self._review_arrow('left')),
                         ('<Right>', lambda: self._review_arrow('right')),
                         ('<Down>', lambda: self._review_arrow('down')),
                         ('<Up>', lambda: self._review_arrow('up')),
                         ('<space>', lambda: self.review_decide('middle'))):
             win.bind(key, lambda e, f=fn: (f(), 'break')[1])
+        # gallery-only keys: z cycles zoom, a cycles the slideshow, +/- step it, F11 is the full screen. Each handler
+        # checks the mode itself, so the comparison window's keys are exactly what they were.
+        for seq, fn in (('<F11>', self._gallery_fullscreen),
+                        ('z', self._gallery_cycle_zoom),
+                        ('Z', self._gallery_cycle_zoom),
+                        ('a', self._gallery_cycle_auto),
+                        ('A', self._gallery_cycle_auto),
+                        ('<plus>', lambda: self._gallery_slide(+1)),
+                        ('<minus>', lambda: self._gallery_slide(-1)),
+                        ('<Motion>', self._gallery_touch)):
+            # every handler takes an optional event and is called with none, so the same tuple serves Tk and a test
+            win.bind(seq, lambda e, f=fn: (f(), 'break')[1], add='+')
+        # dragging a zoomed picture: the label is the picture's own surface in gallery mode
+        left_lbl.bind('<ButtonPress-1>', self._gallery_press, add='+')
+        left_lbl.bind('<B1-Motion>', self._gallery_drag, add='+')
+        left_lbl.bind('<ButtonRelease-1>', self._gallery_release, add='+')
         win.protocol('WM_DELETE_WINDOW', self.review_stop)
         # B2: the finish screen lays twelve tiles out at once, so the thumbnails it will want are built now, on the
         # background thread - a review lasts longer than the first completion does.
@@ -5475,6 +6288,312 @@ class App:
         else:
             self._review_show_next()
 
+
+    # ---- gallery: full screen, zoom, pan, slideshow, chrome that hides ------------------------------------
+    # Asked for 2026-11-03, after the Rust gallery: a real full-screen picture window. That app paints pixels, so its
+    # gallery is chrome-less by construction; here the picture is a Tk label, so the same effect comes from a
+    # borderless window, a cell-sized PhotoImage the picture is drawn into, and furniture that hides itself. Every
+    # handler below checks the mode, because this window also hosts the A/B comparison and rank/delete must not change.
+
+    GALLERY_ZOOMS = (('fit', 'fit'), ('centred', 'centred'), ('original', 'original'), ('2x', '2\u00d7'),
+                     ('4x', '4\u00d7'))
+    GALLERY_AUTO = (0, 1, 2, 3, 5, 10, 15, 20, 30, 60)
+    OVERLAY_MS = 2500          # the Rust gallery fades its chrome at ~2.5 s; the same interval reads the same way
+
+    def _gallery_mode(self):
+        """True only in the gallery tab - the one gate every new handler passes through."""
+        mode = getattr(self, '_review_mode', None)
+        r = getattr(self, '_review', None)
+        if r is None or mode is None:
+            return False
+        try:
+            return str(mode.get()) == 'gallery' and bool(r.get('win') and r['win'].winfo_exists())
+        except Exception:
+            return False
+
+    def _gallery_load(self, path):
+        """Open the picture once and paint it; called on every step, so the decode is cached against path+size."""
+        r = self._review
+        try:
+            r['src'] = Image.open(path).convert('RGB')
+            r['src_path'] = str(path)
+        except Exception as e:
+            r['src'] = None
+            r['left_lbl'].configure(image='', text='%s\n(%s)' % (Path(path).name, type(e).__name__))
+            log_error('gallery load %s' % Path(path).name, e)
+            return
+        r['left_lbl'].source = path
+        r['gpan'] = (0, 0)                       # a new picture starts centred, not inheriting the last pan
+        self._gallery_paint()
+
+    def _gallery_paint(self):
+        """Draw the picture into a cell-sized image at the chosen zoom, offset by the pan, and show one PhotoImage.
+
+        Composing into the cell rather than resizing the label is what keeps the window from reflowing: the label never
+        changes size, so nothing beside it moves when the zoom changes, and the pan is a paste offset, not a scroll.
+        """
+        r = getattr(self, '_review', None)
+        if not r or r.get('src') is None or not self._gallery_mode():
+            return
+        lbl = r['left_lbl']
+        try:
+            cell_w = max(160, lbl.winfo_width() - 8)
+            cell_h = max(120, lbl.winfo_height() - 8)
+        except Exception:
+            return
+        im = r['src']
+        sw, sh = im.size
+        mode = r.get('gzoom') or 'fit'
+        if mode == 'fit':
+            scale = min(cell_w / float(sw), cell_h / float(sh))
+        elif mode == 'centred':
+            scale = 1.0
+        elif mode == 'original':
+            scale = 1.0
+        elif mode == '2x':
+            scale = 2.0
+        else:
+            scale = 4.0
+        tw, th = max(1, int(round(sw * scale))), max(1, int(round(sh * scale)))
+        try:
+            if (tw, th) != (sw, sh):
+                # one integer box reduction before the smooth step when shrinking a lot: the same pipeline the main
+                # canvas uses, and the difference between a 4x view that appears at once and one that lags the key
+                draw = im
+                if tw < sw and int(sw / float(tw)) >= 2:
+                    draw = draw.reduce(int(sw / float(tw)))
+                draw = draw.resize((tw, th), Image.BILINEAR if tw < sw else Image.LANCZOS)
+            else:
+                draw = im
+            bg = r['win']['background']
+            px, py = r.get('gpan') or (0, 0)
+            ox = (cell_w - tw) // 2 + px
+            oy = (cell_h - th) // 2 + py
+            ox = (cell_w - tw) // 2 if tw <= cell_w else min(0, max(cell_w - tw, ox))
+            oy = (cell_h - th) // 2 if th <= cell_h else min(0, max(cell_h - th, oy))
+            board = Image.new('RGB', (cell_w, cell_h), bg)
+            board.paste(draw, (ox, oy))
+            photo = self._photo(board)
+            lbl.configure(image=photo, text='')
+            lbl.image = photo                        # Tk drops a PhotoImage nothing references
+            r['gdraw'] = (ox, oy, tw, th, cell_w, cell_h)
+        except Exception as e:
+            log_error('gallery paint', e)
+
+    def _gallery_cycle_zoom(self, event=None):
+        """z, or the chip: fit -> centred -> original -> 2x -> 4x -> fit."""
+        if not self._gallery_mode():
+            return 'break'
+        r = self._review
+        names = [name for name, _label in self.GALLERY_ZOOMS]
+        try:
+            i = names.index(r.get('gzoom') or 'fit')
+        except ValueError:
+            i = 0
+        r['gzoom'] = names[(i + 1) % len(names)]
+        r['gpan'] = (0, 0)
+        self._gallery_chrome()
+        self._gallery_paint()
+        return 'break'
+
+    def _gallery_chrome(self):
+        """Keep the chips' wording in step with the state they describe."""
+        r = getattr(self, '_review', None)
+        if not r or not r.get('chips'):
+            return
+        _frame, zoom_btn, auto_btn, full_btn, _hint = r['chips']
+        label = dict(self.GALLERY_ZOOMS).get(r.get('gzoom') or 'fit', 'fit')
+        zoom_btn.configure(text='zoom: %s' % label)
+        auto = int(r.get('gauto') or 0)
+        auto_btn.configure(text='slideshow: %s' % ('off' if not auto else ('%d s' % auto)))
+        full_btn.configure(text='windowed  (F11)' if r.get('gfull') else 'full screen  (F11)')
+
+    def _gallery_fullscreen(self, event=None):
+        """F11: drop the caption and cover the screen, or put the maximised window back.
+
+        `overrideredirect` is the only way to get a Windows frame out of the way from Tk, and it has two prices worth
+        naming: the window must be re-positioned by hand, and it no longer gets a taskbar entry, so Escape and F11 are
+        the way back. Both are bound.
+        """
+        if not self._gallery_mode():
+            return 'break'
+        r = self._review
+        win = r['win']
+        try:
+            if r.get('gfull'):
+                win.overrideredirect(False)
+                win.state('zoomed')
+                r['gfull'] = False
+            else:
+                sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+                win.overrideredirect(True)
+                win.geometry('%dx%d+0+0' % (sw, sh))
+                win.focus_force()
+                win.bind('<Map>', lambda e: win.focus_force(), add='+')
+                r['gfull'] = True
+            self._gallery_chrome()
+            self._later(120, self._gallery_paint)      # the cell has no size until the frame has been laid out
+        except Exception as e:
+            log_error('gallery fullscreen', e)
+        return 'break'
+
+    def _gallery_escape(self, event=None):
+        """Escape leaves the full screen first and the window second, so one key never loses the place twice."""
+        if self._gallery_mode() and self._review.get('gfull'):
+            return self._gallery_fullscreen()
+        return self.review_stop()
+
+    def _gallery_cycle_auto(self, event=None):
+        """a, or the chip: off -> 1 s -> 2 -> 3 -> 5 -> 10 -> 15 -> 20 -> 30 -> 60 -> off."""
+        if not self._gallery_mode():
+            return 'break'
+        self._gallery_slide(+1)
+        return 'break'
+
+    def _gallery_slide(self, step):
+        """Step through the slideshow intervals, and start or stop the timer to match."""
+        r = self._review
+        intervals = self.GALLERY_AUTO
+        try:
+            i = intervals.index(int(r.get('gauto') or 0))
+        except ValueError:
+            i = 0
+        seconds = intervals[(i + step) % len(intervals)]
+        if step < 0 and seconds == 0:
+            seconds = intervals[-1]
+        r['gauto'] = seconds
+        self._gallery_auto_arm()
+        self._gallery_chrome()
+        self.hint.configure(text='slideshow off' if not seconds
+                            else 'slideshow every %d s \u00b7 any key or click stops it' % seconds)
+        return 'break'
+
+    def _gallery_auto_arm(self):
+        """(Re)start the slideshow timer. Cancelled on any manual step, so a walk never fights the reader."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        job = r.get('auto_job')
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            r['auto_job'] = None
+        seconds = int(r.get('gauto') or 0)
+        if seconds <= 0 or not self._gallery_mode():
+            return
+
+        def tick():
+            r = getattr(self, '_review', None)
+            if not r or not self._gallery_mode():
+                return
+            r['auto_job'] = None
+            self.gallery_step(+1)
+            self._gallery_auto_arm()
+
+        r['auto_job'] = self._later(seconds * 1000, tick)
+
+    def _gallery_touch(self, event=None):
+        """Mouse moved: bring the chrome back and restart the 2.5 s clock that hides it."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        self._gallery_show_chrome(True)
+        job = r.get('hide_job')
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+            r['hide_job'] = None
+        r['hide_job'] = self._later(self.OVERLAY_MS, self._gallery_hide_chrome)
+        return None
+
+    def _gallery_show_chrome(self, show):
+        """The bar and the badge are the chrome; the picture is never resized to make room for them."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        try:
+            bar = r.get('bar')
+            if bar is not None:
+                bar.grid() if show else bar.grid_remove()
+            badge = r.get('badge')
+            if badge is None:
+                return
+            if show:
+                badge.place(relx=1.0, rely=1.0, anchor='se', x=-24, y=-112)
+            else:
+                badge.place_forget()
+        except Exception:
+            pass
+
+    def _gallery_hide_chrome(self):
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        r['hide_job'] = None
+        if self._gallery_mode():
+            self._gallery_show_chrome(False)
+
+    def _gallery_press(self, event):
+        """Press on the picture: remember where the drag started, if there is anything to drag."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        self._gallery_touch()
+        gdraw = r.get('gdraw')
+        if not gdraw:
+            return None
+        _ox, _oy, tw, th, cw, ch = gdraw
+        if tw <= cw and th <= ch:
+            return None                      # it fits: there is nothing to pan, and a press is just a press
+        r['gdrag'] = (event.x, event.y, r.get('gpan') or (0, 0))
+        try:
+            r['left_lbl'].configure(cursor='fleur')
+        except Exception:
+            pass
+        return None
+
+    def _gallery_drag(self, event):
+        """Drag a picture larger than its cell. Pan is clamped by `_gallery_paint`, so no blank edge is reachable."""
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        grab = r.get('gdrag')
+        if not grab:
+            return None
+        x0, y0, pan = grab
+        r['gpan'] = (pan[0] + event.x - x0, pan[1] + event.y - y0)
+        self._gallery_paint()
+        self._gallery_touch()
+        return 'break'
+
+    def _gallery_release(self, event):
+        if not self._gallery_mode():
+            return None
+        r = self._review
+        r['gdrag'] = None
+        try:
+            r['left_lbl'].configure(cursor='')
+        except Exception:
+            pass
+        return None
+
+    def _gallery_stop_timers(self):
+        """Drop both gallery timers before the window goes: a pending tick would fire into a destroyed Toplevel."""
+        r = getattr(self, '_review', None)
+        if not r:
+            return
+        for key in ('hide_job', 'auto_job'):
+            job = r.get(key)
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except Exception:
+                    pass
+                r[key] = None
 
     def _review_fit(self, lbl, path=None, redraw_only=False):
         """Size a picture to the label's own cell, not to the screen.
@@ -5506,6 +6625,7 @@ class App:
         return '%d / %d%s' % (index + 1, total, '  FIN' if index == total - 1 else '')
 
     def gallery_start(self):
+        usage.record('pane.gallery')
         """Walk the open folder (or the whole source) one picture at a time."""
         cells = list(getattr(self, '_content_order', []) or []) or list(self._files)
         if len(cells) < 2:
@@ -5551,8 +6671,7 @@ class App:
         r['cur'] = index
         path = series[index]
         r['pair'] = None
-        r['left_lbl'].source = path
-        self._review_fit(r['left_lbl'], path)
+        self._gallery_load(path)
         last = index == len(series) - 1
         badge = r.get('badge')
         if badge is not None:
@@ -5629,7 +6748,14 @@ class App:
                 prev_btn, next_btn, _stop = r['gallery_buttons']
                 prev_btn.grid(row=2, column=0, columnspan=2, sticky='ew', padx=4)
                 next_btn.grid(row=2, column=2, columnspan=2, sticky='ew', padx=4)
+                if r.get('chips'):
+                    r['chips'][0].grid()
+                    self._gallery_chrome()
             else:
+                if r.get('chips'):
+                    r['chips'][0].grid_remove()
+                self._gallery_stop_timers()
+                self._gallery_show_chrome(True)
                 r['left_lbl'].grid_configure(columnspan=1, padx=(6, 3))
                 r['right_lbl'].grid()
                 for b in r.get('gallery_buttons', ())[:2]:
@@ -5644,6 +6770,7 @@ class App:
             except Exception:
                 pass
             self.gallery_show()
+            self._gallery_touch()          # chrome visible now, hidden 2.5 s after the pointer stops
             return
         if r.get('badge') is not None:
             r['badge'].place_forget()
@@ -5742,6 +6869,9 @@ class App:
         if not r:
             return
         r['_resize_job'] = None
+        if self._gallery_mode():
+            self._gallery_paint()          # the cell changed size: re-compose at the same zoom and pan
+            return
         for lbl in (r['left_lbl'], r['right_lbl']):
             if getattr(lbl, 'source', None):
                 self._review_fit(lbl)
@@ -6054,6 +7184,7 @@ class App:
             return 'break'
         pair_review.save_state(r['state'])
         decided, total, deletes = pair_review.progress(r['state'])
+        self._gallery_stop_timers()
         try:
             r['win'].destroy()
         except Exception:
@@ -6168,6 +7299,10 @@ class App:
         # `_refresh_gallery` has usually just walked the source; a second identical walk here was half of the 1.1 s a
         # folder click used to cost (measured: refresh 1 103 ms inside a 1 104 ms click handler).
         rows = rows if rows is not None else self._scan_cached(False)
+        # The walk hands back (path, mtime) pairs; the mtime used to be thrown away here and fetched again with
+        # `f.stat()` inside the sort key - one syscall per picture per refresh, on 2 160-3 216 pictures, for a value
+        # the walk had just read. The map keeps the picture list identical and removes the syscalls.
+        stamps = dict(rows)
         files = [p for p, _m in rows]
         # NOT scoped to the open folder. It was, and that is what hid two classes of file: a picture written during a
         # run (not in the plan yet) and anything the grouping could not file - a picture with no prompt, a screenshot
@@ -6177,7 +7312,6 @@ class App:
         # timeline of the whole gallery.
         needle = self.search_var.get().strip().lower()
         if needle:
-            stamps = dict(rows)
             files = [f for f in files if needle in self._searchable(f, stamps.get(f))]
         if getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get():
             files = [f for f in files if not ((read_meta(f) or {}).get('prompt') or '').strip()]
@@ -6185,7 +7319,12 @@ class App:
             files = [f for f in files if f.name in self._favorites]
         if self._sort_sequence():
             return [Path(p) for p in self._sequence_order(files)]
-        files.sort(key=lambda f: (f.name not in self._favorites, -f.stat().st_mtime))
+        def _newest(f):
+            """Sort key: newest first, and no syscall - the walk's mtime, falling back only if a row went missing."""
+            stamp = stamps.get(f)
+            return -(stamp if stamp is not None else f.stat().st_mtime)
+
+        files.sort(key=lambda f: (f.name not in self._favorites, _newest(f)))
         return files
 
     def _folders_view_active(self):
@@ -6200,6 +7339,10 @@ class App:
         nowhere to appear - "show the images in the list as each one is generated". While `busy`, the strip lists the
         pictures; the folders come back when the run ends and the plan is recomputed.
         """
+        # The folders *screen* is the folder view by definition: without this, the seconds spent grouping at startup were spent
+        # drawing the recent pictures, so the first screen looked like an image list (reported 2026-11-03).
+        if getattr(self, 'view_mode', '') == 'folders' and not self._plan:
+            return not self.search_var.get().strip() and not self.starred_only.get()
         return (bool(self._plan)
                 and not self.search_var.get().strip() and not self.starred_only.get()
                 and not (getattr(self, 'noprompt_only', None) is not None and self.noprompt_only.get())
@@ -6914,6 +8057,24 @@ class App:
                 self.root.columnconfigure(4, minsize=widths[COL_PICTURE] + PICTURE_PAD)
             except Exception:
                 pass
+        # Which column takes the slack is decided by the shape: folders-only gives it to the gallery, everything else to
+        # the picture (the historical rule). Without this the gallery kept its old width and the freed space stayed empty,
+        # which is exactly what a screenshot showed on 2026-11-03.
+        mode = getattr(self, 'view_mode', 'columns')
+        whole = mode in ('folders', 'images')      # the gallery column owns the window
+        try:
+            self.root.columnconfigure(0, weight=1 if whole else 0)
+            self.root.columnconfigure(4, weight=0 if whole else 1)
+            # A hidden column still reserves its minsize - grids do not shrink for an empty cell - which left the gallery at
+            # 1278 px of a 2560 px window instead of taking the whole width (seen in a screenshot 2026-11-03).
+            for column in ((2, 3, 4) if whole else (0, 1) if mode == 'image' else ()):
+                self.root.columnconfigure(column, minsize=0)
+            # ...and inside the gallery column the *pane* takes the slack on the images screen, the strip on the folders one.
+            if mode == 'images':
+                self.gal.columnconfigure(0, weight=0, minsize=0)
+                self.gal.columnconfigure(2, weight=1)
+        except Exception:
+            pass
         if light:
             # A drag moves the boundary every motion event; the *interiors* - the title's reflow, the prompt's wrap, the
             # window minimum - are what cost, and each can bounce back as a Configure that triggers another pass. So the
@@ -7163,7 +8324,9 @@ class App:
         """
         self._pane_shown = True
         try:
-            if not self.contents_holder.winfo_manager():
+            # ...but only on a screen that has it: this helper re-gridded the pane unconditionally, which silently undid
+            # folders-only and put the image list back beside the folder grid (reported 2026-11-03).
+            if getattr(self, 'view_mode', 'columns') in ('images', 'columns') and not self.contents_holder.winfo_manager():
                 self.contents_holder.grid()
         except Exception:
             pass
@@ -7392,6 +8555,27 @@ class App:
         from the column, so the row always fills it instead of leaving a gutter.
         """
         from PIL import ImageTk
+        if not ((getattr(self, '_plan', None) or {}).get('groups')):
+            # Nothing to draw yet. Say what is happening instead of leaving an empty area, but only once - a redraw every
+            # event was a visible flash (11 in 15 s measured).
+            # Only here: while there is no plan, the strip holds either the previous picture tiles or nothing, and either way
+            # they must go before the notice - clearing unconditionally destroyed the picture tiles the thumbnail warming was
+            # still filling (two suite checks caught it).
+            try:
+                for stale in self.recent.winfo_children():
+                    stale.destroy()
+            except Exception as e:
+                log_error('strip clear', e)
+            if not getattr(self, '_grouping_notice', None):
+                try:
+                    self._grouping_notice = ttk.Label(self.recent, text='grouping pictures\u2026',
+                                                      font=('Segoe UI', 11), foreground=self.theme.muted,
+                                                      background=plate if 'plate' in dir() else None)
+                    self._grouping_notice.grid(row=0, column=0, padx=18, pady=24)
+                except Exception as e:
+                    log_error('grouping notice', e)
+                    self._grouping_notice = True
+            return
         for w in self.recent.winfo_children():
             w.destroy()
         self._tile_widgets = {}
@@ -7400,6 +8584,7 @@ class App:
         # what these tiles were composed for: `_apply_strip_resize` compares it with the canvas's current width and
         # re-lays them out when it moved, because a folder tile is not one of `_tile_widgets` and nothing else did
         self._folder_geom = (width, cols, sheet_px)
+        self._folder_photos = getattr(self, '_folder_photos', None) or {}
         heads_wanted = False
         for index, group in enumerate(self._plan['groups'][:self._folder_shown]):
             # The open folder is drawn in reverse video: a 1 px line around the sheet and between its four pictures (the
@@ -7420,8 +8605,19 @@ class App:
                 head = self._sheet_paths(group)          # paid once, then written into the plan cache
                 group['head'] = head
                 heads_wanted = True
-            photo = self._photo(self._folder_sheet(group, sheet_px,
-                                                   gutter=plate if selected else None, head=head))
+            # The composed sheet and its PhotoImage are the cost of this loop (102 folders x ~12 ms = 1.26 s measured,
+            # STATE 25) and a refresh redraws the *same* sheets with the same size and the same selected state, so they
+            # are memoised. Keyed by the head, the size and whether the tile is the open one, because those are the only
+            # inputs that change the pixels; the cache is dropped whenever the tile geometry changes.
+            if getattr(self, '_folder_photo_geom', None) != (sheet_px, width):
+                self._folder_photos = {}
+                self._folder_photo_geom = (sheet_px, width)
+            photo_key = (tuple(head) if isinstance(head, list) else head, sheet_px, bool(selected))
+            photo = self._folder_photos.get(photo_key)
+            if photo is None:
+                photo = self._photo(self._folder_sheet(group, sheet_px,
+                                                       gutter=plate if selected else None, head=head))
+                self._folder_photos[photo_key] = photo
             pic = tk.Label(body, image=photo, bd=0, relief='flat', cursor='hand2', background=plate)
             pic.image = photo
             pic.pack()
@@ -7440,6 +8636,7 @@ class App:
             self._tip(title, full_title)
             for w in (tile, body, pic, title, meta):
                 w.bind('<Button-1>', lambda e, i=index: self._folder_clicked(i))
+                w.bind('<Button-3>', lambda e, i=index: self._folder_tile_menu(e, i), add='+')
             # One tab stop per folder, on the frame that already carries the "this folder is open" border: the four
             # labels inside it are mouse targets too, and four stops per folder would be four stops too many. The ring
             # itself is the cursor ring `_paint_folder_cursor` draws, so focusing a tile costs no extra geometry.
@@ -7465,6 +8662,11 @@ class App:
         self._idle(lambda: self._fill_view('strip'))
 
     def _folder_clicked(self, index):
+        # in folders-only mode, opening one is the drill-down step: the pictures take the window and the back button
+        # appears top-left. In all-columns mode a click keeps its old meaning (select + show in the pane).
+        if getattr(self, 'view_mode', 'columns') == 'folders':
+            self._drill_click(index)
+            return
         """A click on a folder tile: open it, park the keyboard cursor on it, and hand the strip the arrows.
 
         `select_folder` is also called by the prediction and by the browser, so the focus belongs to the click, not to
@@ -7566,6 +8768,13 @@ class App:
 
     @timed_panel('refresh_gallery')
     def refresh_gallery(self, select=None, rescan=True):
+        """Repaint everything, and optionally leave one picture picked.
+
+        `select` was accepted and then ignored, by this function and by the two callers that pass it (a finished render,
+        and the rebuild after a click on a tile the strip had not painted) - so "paint this folder and pick the picture I
+        just wrote" silently picked nothing. It selects now: the named file, if the folder really holds it, is the pick
+        and the anchor, which is what a paste needs in order to arm the base in one gesture.
+        """
         if getattr(self, '_closing', False) or not self._alive():
             return                       # the window is on its way out: painting it now is a bgerror, not a repaint
         strip_pos = self._scroll_pos(self.gal_canvas)
@@ -7589,6 +8798,27 @@ class App:
         # draw twelve empty frames and fill them a second later (reported with a screenshot 2026-10-31).
         self._note_context()
         self._prewarm_thumbs()
+        # A named picture is picked *after* the grid exists, so the ring is drawn on the tile that is really there.
+        if select is not None:
+            self._select_name(select)
+        # The folder a paste lands in can be gone between two refreshes (a temp folder, a drive that went away), and the
+        # Paste button's state is a fact about that folder, not about the clipboard.
+        self._refresh_paste_state()
+
+    def _select_name(self, path):
+        """Pick the file `path` names, if the folder on screen really holds it - the working half of `select`.
+
+        Compared by name because a rescan hands back fresh `Path` objects for the same file and a Windows path's case is
+        not a promise; a file that is not in the folder picks nothing rather than inventing a tile.
+        """
+        name = Path(path).name
+        for row in (getattr(self, '_files', None) or []):
+            if Path(row).name == name:
+                self.selected = [Path(row)]
+                self._anchor = Path(row)
+                self._paint()
+                return True
+        return False
 
     def _refresh_gallery(self, select=None, rescan=True):
         self._scene_cache = {}
@@ -7666,11 +8896,18 @@ class App:
         if hasattr(self, 'grouping_badge'):
             self.grouping_badge.place_forget()
         if self._folders_view_active():
-            total = len(self._plan['groups'])
+            # `_folders_view_active` can be true before a plan exists (the folders *screen* is the folder view by definition),
+            # and this line assumed it could not - which crashed the refresh on every launch during grouping.
+            groups_now = (self._plan or {}).get('groups') or []
+            if not groups_now:
+                self.gal_title.configure(text='Grouping pictures by prompt\u2026')
+                self._render_folder_tiles()
+                return
+            total = len(groups_now)
             shown = min(total, self._folder_shown)
             self.gal_title.configure(text='Folders (%d%s)  \u00b7  %d pictures'
                                      % (shown, '' if shown >= total else ' of %d' % total,
-                                        sum(len(g['items']) for g in self._plan['groups'])))
+                                        sum(len(g['items']) for g in groups_now)))
             self._render_folder_tiles()
             self._paint()          # the folders branch used to return without painting, so a pane click left the
             return                 # action row disabled while `selected` held the path
@@ -8856,74 +10093,145 @@ class App:
                                  % self.size_var.get())
         self.generate()
 
-    def paste_base(self):
-        """Take a reference picture off the clipboard and use it as the base.
+    # -- paste: the clipboard's picture, into the folder on screen -----------------
+    def _paste_target(self):
+        """(folder, why-not): where a paste lands, and the one sentence that explains a grey Paste button.
 
-        Three shapes arrive on this clipboard and all three are accepted: a bitmap (screenshot, browser
-        "copy image"), a list of files (copy in Explorer), and text that is a path to an image. A clipboard that
-        holds something else says so instead of raising.
+        The button's state and the action itself read this same answer, so the window cannot be greyed for a reason the
+        press would not have hit - or enabled for a folder that has gone since the last paint.
+        """
+        folder = getattr(self, '_source', None)
+        if folder is None:
+            return None, 'no folder is open - press Open\u2026 first'
+        folder = Path(folder)
+        if not folder.is_dir():
+            return None, 'no folder is open: %s is not a folder any more' % self._short_name(folder.name)
+        return folder, ''
+
+    def _refresh_paste_state(self):
+        """Grey Paste exactly where there is no folder to paste into, and say why on the status line - once.
+
+        Writing the reason on every refresh would overwrite whatever the window was saying; the reason is spoken when it
+        is news, and the tooltip carries it the rest of the time. The clipboard is deliberately *not* consulted here: no
+        paint path reaches OpenClipboard, so a paste costs one clipboard read, on the press.
+        """
+        if not hasattr(self, 'paste_top_btn'):
+            return
+        _folder, why = self._paste_target()
+        try:
+            self.paste_top_btn.state(['disabled'] if why else ['!disabled'])
+        except Exception as e:
+            log_error('paste state', e)
+        if why and why != getattr(self, '_paste_reason', ''):
+            self.status.configure(text=why)
+        self._paste_reason = why
+
+    def _clipboard_picture(self):
+        """(pictures, why-not) for whatever the clipboard is holding.
+
+        `ImageGrab.grabclipboard()` answers in one of three shapes and each of them means something different - so all
+        three are handled, and only one of them is a refusal:
+
+        * an `Image` - a bitmap (a screenshot, a browser's *copy image*): there is nothing on disk, so it is saved;
+        * a `list` - the file paths Explorer copied: pictures to import, **not** an error;
+        * `None` - either text (a copied path is a perfectly good reference) or nothing at all, and only the last of
+          those cannot be pasted.
+
+        Each picture comes back with the file it came from, when there was one, so the sidecar can record the origin.
         """
         from PIL import ImageGrab
         try:
             got = ImageGrab.grabclipboard()
         except Exception as e:
-            self.hint.configure(text='clipboard unavailable: %s' % type(e).__name__)
+            return [], 'clipboard unavailable: %s' % type(e).__name__
+
+        if isinstance(got, list):
+            files = [Path(f) for f in got if str(f).lower().endswith(self.IMAGE_SUFFIXES)]
+            if not files:
+                return [], 'the clipboard holds %d file(s) and none of them is an image' % len(got)
+            found = []
+            for f in files:
+                try:
+                    found.append((Image.open(f).convert('RGB'), f))
+                except Exception as e:
+                    if len(files) == 1:
+                        return [], 'could not read %s: %s' % (f.name, type(e).__name__)
+            if not found:
+                return [], 'the clipboard holds %d file(s) and none of them is an image' % len(got)
+            return found, ''
+        if isinstance(got, Image.Image):
+            return [(got.convert('RGB'), None)], ''
+        # None: text on the clipboard, and a copied path is a perfectly good reference
+        try:
+            text = self.root.clipboard_get()
+        except Exception:
+            text = ''
+        candidate = Path(text.strip().strip('"')) if text.strip() else None
+        if candidate is not None and candidate.exists() and candidate.suffix.lower() in self.IMAGE_SUFFIXES:
+            try:
+                return [(Image.open(candidate).convert('RGB'), candidate)], ''
+            except Exception as e:
+                return [], 'could not read %s: %s' % (candidate.name, type(e).__name__)
+        return [], ('clipboard holds no picture - nothing usable on the clipboard: copy a bitmap, an image file, or '
+                    'the path to one')
+
+    def paste_base(self):
+        """Paste the clipboard's picture into the folder on screen, and arm it as the base.
+
+        One verb in three places - the top row's **Paste**, `Ctrl+V`, and the picture menu's entry - and one gesture
+        rather than three: the file is written into the open folder, it is **picked**, and it is **the base**, so
+        pasting a reference and pressing Generate is what it looks like. Where it cannot act it says why on the status
+        line (`no folder is open`, `clipboard holds no picture`) rather than doing nothing at all.
+
+        The write reuses the app's own naming (`pasted_filename`, the `shot_filename` shape) and its own collision rule
+        (`free_path`), and the arm goes through `use_as_base`, the one path that sets the prompt, the strength, the base
+        label and the banner together.
+        """
+        usage.record('paste', screen=getattr(self, 'view_mode', ''))
+        folder, why = self._paste_target()
+        if why:
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
+            return
+        pictures, why = self._clipboard_picture()
+        if why:
+            self.status.configure(text=why)
+            self.hint.configure(text=why)
             return
 
-        origin, image = None, None
-        if got is None:
-            # text on the clipboard: a copied path is a perfectly good reference
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        written = []
+        for image, origin in pictures:
+            path = free_path(folder, pasted_filename(stamp, image.size[0], image.size[1]))
             try:
-                import tkinter as _tk
-                text = self.root.clipboard_get()
-            except Exception:
-                text = ''
-            candidate = Path(text.strip().strip('"')) if text.strip() else None
-            if candidate and candidate.exists() and candidate.suffix.lower() in (
-                    '.png', '.jpg', '.jpeg', '.webp', '.bmp'):
-                try:
-                    from PIL import Image as _Image
-                    image = _Image.open(candidate)
-                    origin = candidate
-                except Exception:
-                    image = None
-            if image is None:
-                self.hint.configure(text='nothing usable on the clipboard - copy an image, or copy an image file '
-                                         'or its path')
-                return
-        elif isinstance(got, list):
-            files = [Path(f) for f in got if str(f).lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp'))]
-            if not files:
-                self.hint.configure(text='the clipboard holds %d file(s) and none of them is an image' % len(got))
-                return
-            origin = files[0]
-            try:
-                from PIL import Image as _Image
-                image = _Image.open(origin)
+                image.save(path)
             except Exception as e:
-                self.hint.configure(text='could not read %s: %s' % (origin.name, type(e).__name__))
+                self.status.configure(text='could not write %s: %s' % (path.name, type(e).__name__))
                 return
-        else:
-            image = got                                  # a bitmap
+            meta = {'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
+                    'width': image.size[0], 'height': image.size[1], 'prompt': ''}
+            if origin is not None:
+                meta['source_image'] = str(Path(origin).resolve())
+                meta['prompt'] = (read_meta(origin) or {}).get('prompt', '')
+            path.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
+            written.append(path)
 
-        out = Path(self.args.out)
-        out.mkdir(parents=True, exist_ok=True)
-        path = out / ('pasted-%s.png' % datetime.now().strftime('%Y%m%d-%H%M%S'))
-        image.convert('RGB').save(path)
-        meta = {'created': datetime.now().isoformat(timespec='seconds'), 'source': 'clipboard',
-                'width': image.size[0], 'height': image.size[1]}
-        if origin is not None:
-            meta['source_image'] = str(origin.resolve())
-            meta['prompt'] = (read_meta(origin) or {}).get('prompt', '')
+        first = written[0]
+        width, height = pictures[0][0].size
+        self.selected = [Path(first)]
+        self._anchor = Path(first)
+        self.refresh_gallery(select=first)      # the folder, repainted with the new file in it and picked
+        self.use_as_base()                      # the existing arm-the-base path, not a second one
+        if len(written) == 1:
+            self.status.configure(text='pasted %s - %dx%d, now the new base' % (first.name, width, height))
+            self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to '
+                                     '%s px' % (first.name, width, height, self.denoise.get(), self.size_var.get()))
         else:
-            meta['prompt'] = ''
-        path.with_suffix('.json').write_text(json.dumps(meta), encoding='utf-8')
-        self.refresh_gallery()
-        self.select_file(path)
-        self._set_base(path, from_gallery=True)
-        self.status.configure(text='pasted reference %dx%d is the new base' % image.size)
-        self.hint.configure(text='%s at %dx%d - Enter edits it at strength %.2f; the size selector rescales it to %s px'
-                            % (path.name, image.size[0], image.size[1], self.denoise.get(), self.size_var.get()))
+            self.status.configure(text='pasted %d pictures into %s - %s is the new base'
+                                  % (len(written), self._short_name(folder.name), first.name))
+            self.hint.configure(text='%d files written, each with a sidecar; only the first is armed, so the next render '
+                                     'edits %s. Pick the others and press Use as Base to combine them.'
+                                % (len(written), first.name))
 
     # -- mask and expand, on the picture itself ---------------------------------
     def toggle_mask_mode(self, on=None):
@@ -9190,6 +10498,11 @@ class App:
         Ctrl toggles, shift extends from the anchor in whichever list the click came from.
         """
         path = Path(path)
+        usage.record('picture.select', pane=bool(pane), name=Path(path).name)
+        # In folders-only there is no picture column to look at, so a click is the drill-down step: the picture takes the
+        # window (reported 2026-11-03 as "selecting an image does nothing" - it was loading into a hidden column).
+        if getattr(self, 'view_mode', 'columns') in ('folders', 'images'):
+            self._later(10, lambda: self.set_view_mode('image'))
         if pane:
             # the pane keeps its own cursor and its own keyboard: a click here must not hand the arrows to the strip
             self._pane_cur = path
@@ -10410,7 +11723,8 @@ class App:
             lo, hi = matrix_module.window(current, low=int(round(STRENGTH_MIN * 100)),
                                           high=int(round(STRENGTH_MAX * 100)))
         return {'from': int(raw.get('from', lo)), 'to': int(raw.get('to', hi)),
-                'step': int(raw.get('step', 1)), 'sheet': bool(raw.get('sheet', False))}
+                'step': int(raw.get('step', 1)), 'sheet': bool(raw.get('sheet', False)),
+                'descending': bool(raw.get('descending', False))}
 
     def _matrix_card(self):
         """This machine's card key, so the estimate and the warning use its own measurements."""
@@ -10419,11 +11733,13 @@ class App:
         except Exception:
             return None
 
-    def matrix_plan_from(self, lo, hi, step, bases):
+    def matrix_plan_from(self, lo, hi, step, bases, descending=False):
         """[(base path, strength fraction)] from dialog percentages - the shape `_matrix_next` already consumes."""
         # matrix.plan() speaks in whole percentages (it is also the form the sheet labels use); the render queue wants
         # the 0.20-0.95 fraction the strength control uses, so the division happens here and in exactly one place.
         values = matrix_module.values(lo, hi, step)
+        if descending:
+            values = list(reversed(values))     # the ladder read from the top: highest strength first
         return [(path, value / 100.0) for path, value in matrix_module.plan(values, bases)]
 
     def open_matrix_dialog(self):
@@ -10431,7 +11747,7 @@ class App:
         import estimate as estimate_module
         from tkinter import Toplevel, StringVar, BooleanVar
         settings = self.matrix_settings()
-        window = Toplevel(self.root)
+        window = self._closing_raises_main(Toplevel(self.root))
         window.title('Strength × base matrix')
         window.transient(self.root)
         body = ttk.Frame(window, padding=12)
@@ -10439,6 +11755,7 @@ class App:
 
         lo_var, hi_var, step_var = StringVar(value=str(settings['from'])), StringVar(value=str(settings['to'])), StringVar(value=str(settings['step']))
         sheet_var = BooleanVar(value=settings['sheet'])
+        order_var = BooleanVar(value=settings['descending'])
         summary = ttk.Label(body, text='', font=('Segoe UI', 9, 'bold'), justify='left')
         summary.grid(row=0, column=0, columnspan=6, sticky='w', pady=(0, 8))
         cost = ttk.Label(body, text='', justify='left', wraplength=460)
@@ -10451,6 +11768,8 @@ class App:
             ttk.Entry(body, textvariable=var, width=5).grid(row=3, column=column * 2 + 1, sticky='w', padx=(0, 12))
         ttk.Checkbutton(body, text='also compose a contact sheet', variable=sheet_var).grid(
             row=3, column=6, columnspan=2, sticky='w')
+        ttk.Checkbutton(body, text='descending (highest first)', variable=order_var).grid(
+            row=4, column=6, columnspan=2, sticky='w')
 
         def numbers():
             def one(var, default):
@@ -10469,9 +11788,10 @@ class App:
             per = estimate_module.wall_seconds(self._matrix_card(), self.model_var.get(), self._size_px())
             total = estimate_module.total(len(values) * max(1, len(bases)), per)
             cells = matrix_module.sheet_cells(len(values) * max(1, len(bases)))
-            summary.configure(text='%d strengths × %d base%s = %d renders · %d→%d by %d%s'
+            summary.configure(text='%d strengths × %d base%s = %d renders · %d→%d by %d%s%s'
                                    % (len(values), max(1, len(bases)), '' if len(bases) == 1 else 's',
                                       len(values) * max(1, len(bases)), lo, hi, step,
+                                      ' (descending)' if order_var.get() else '',
                                       '' if not bases else ' · base: %s' % Path(bases[0]).name))
             if per is None:
                 cost.configure(text='cost unknown on this machine (no measurement for this card, model and size)')
@@ -10485,10 +11805,12 @@ class App:
 
         for var in (lo_var, hi_var, step_var):
             var.trace_add('write', refresh)
+        order_var.trace_add('write', refresh)
 
         def start():
             (lo, hi), step = numbers()
-            plan = self.matrix_start(lo, hi, step, sheet=bool(sheet_var.get()), parent=window)
+            plan = self.matrix_start(lo, hi, step, sheet=bool(sheet_var.get()), parent=window,
+                                     descending=bool(order_var.get()))
             if plan:
                 window.destroy()
             else:
@@ -10514,7 +11836,7 @@ class App:
             return None
 
     def _save_settings_best_effort(self):
-        for name in ('_save_settings', 'save_settings', '_persist_settings'):
+        for name in ('_persist', '_save_settings', 'save_settings'):
             fn = getattr(self, name, None)
             if callable(fn):
                 try:
@@ -10534,7 +11856,8 @@ class App:
         ladder = [v / 100.0 for v in matrix_module.values(lo, hi, step)]
         return [max(STRENGTH_MIN, min(STRENGTH_MAX, v)) for v in ladder] or list(MATRIX_STRENGTHS)
 
-    def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None):
+    def matrix_start(self, lo, hi, step, sheet=False, ask=None, parent=None, descending=False):
+        usage.record('matrix.start', lo=lo, hi=hi, step=step, sheet=bool(sheet), descending=bool(descending))
         """Queue the matrix for explicit parameters; the dialog's Start calls this, and so can a test.
 
         `ask` is the confirmation the hunt warning uses, injected so the decision can be exercised without a pointer.
@@ -10546,7 +11869,7 @@ class App:
             self.hint.configure(text='arm a base first: the matrix renders each armed picture through the ladder')
             return []
         values = matrix_module.values(lo, hi, step)
-        plan = self.matrix_plan_from(lo, hi, step, bases)
+        plan = self.matrix_plan_from(lo, hi, step, bases, descending=descending)
         advice = estimate_module.hunt_advice(self._matrix_card(), self.model_var.get(), self._size_px(), self.steps_now(),
                                              len(plan), largest_size=self.MATRIX_FULL_SIZE)
         if advice.get('warn'):
@@ -10564,7 +11887,8 @@ class App:
             if not confirm(question, parent=parent):
                 self.hint.configure(text='matrix cancelled')
                 return []
-        self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet)}
+        self._settings['matrix'] = {'from': lo, 'to': hi, 'step': step, 'sheet': bool(sheet),
+                                    'descending': bool(descending)}
         self._save_settings_best_effort()
         self._matrix_queue = list(plan)
         self._matrix_last_base = None
@@ -10892,7 +12216,7 @@ class App:
         t(self.more_btn, 'Browse every saved image. The selection is shared with the strip.')
         t(self.clear_base_btn, 'Forget the base image; the next run is text to image.')
         t(self.refresh_btn, 'Re-read the folder, for example after files changed outside the window.')
-        t(self.folder_btn, 'Open the output folder in Explorer.')
+        # the folder button lives on the folder menus now; its tip went with it
         t(self.sel_all_btn, 'Select every tile in the strip; press again to clear.')
         t(self.del_btn, 'Send the selected images, their metadata and thumbnails to the Recycle Bin.')
 
@@ -10985,7 +12309,18 @@ class App:
                 self._steps_by_model[self._model_now] = str(int(self.steps_var.get()))
         except (TypeError, ValueError):
             pass
-        self._settings = {'size': self.size_var.get(), 'steps': self.steps_var.get(),
+        # Which folder the reader is inside, by name rather than by index: the plan is recomputed on every start and
+        # every render, and an index would reopen whatever moved into that slot.
+        open_label = None
+        try:
+            if self._active_folder is not None and self._plan:
+                open_label = (self._plan['groups'][self._active_folder] or {}).get('label')
+        except Exception:
+            open_label = None
+        self._settings = {'screen': getattr(self, 'view_mode', 'folders'),   # the layout choice has to survive a save
+                          'sort': (self.sort_var.get() if hasattr(self, 'sort_var') else 'Wins'),
+                          'last_folder': open_label,
+                          'size': self.size_var.get(), 'steps': self.steps_var.get(),
                           'steps_by_model': dict(getattr(self, '_steps_by_model', {})),
                           'sampler': self.sampler_var.get(), 'layout': self.layout_var.get(),
                           'history': self._history[-20:], 'style': self.style_var.get(),

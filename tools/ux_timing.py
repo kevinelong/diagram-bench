@@ -99,6 +99,8 @@ def main():
                     help='the gallery to open (read-only)')
     ap.add_argument('--size', default='1600x1000', help='window WxH - fixed, so two machines compare the same layout')
     ap.add_argument('--json', default='', help='write the result here as well as printing it')
+    ap.add_argument('--folders', type=int, default=5,
+                    help='how many of the biggest folders to open per pass (a big gallery needs more than a job timeout)')
     a = ap.parse_args()
 
     tmp = Path(tempfile.mkdtemp(prefix='ux-timing-'))
@@ -127,7 +129,7 @@ def main():
 
     # p50 and p90 need repetitions, not one gesture: five folder opens and four resizes, and the first pass is the
     # cold one (scans, thumbnail cache) which is reported separately rather than averaged into the warm numbers.
-    order = sorted(range(len(groups)), key=lambda i: -len(groups[i]['items']))[:5]
+    order = sorted(range(len(groups)), key=lambda i: -len(groups[i]['items']))[:max(1, a.folders)]
     cold = None
     passes = []
     for attempt in range(2):
@@ -151,6 +153,15 @@ def main():
             cold = block
         else:
             passes = block
+    # Reported by the 4060 box 2026-11-02: the warm pass can record nothing, because re-opening the same five folders
+    # re-uses what the first pass built, so no render is timed. A silently half-empty report is worse than a loud one, so
+    # the second pass now says so and the cold numbers are what the reader gets.
+    warm_empty = not passes.get('events')
+    note = ''
+    if warm_empty:
+        note = ('the warm pass measured no events: the folders opened in the first pass were already built, so the '
+                'numbers below are the cold pass')
+        passes = dict(passes, events=cold.get('events') or {}, open_wall_ms=cold.get('open_wall_ms'))
     summary = passes['events']
 
     events = dict(summary)
@@ -175,8 +186,17 @@ def main():
             'repeat_count': min([v['n'] for v in events.values()] or [0]),
         },
         'cold_pass': cold,
+        'warm_pass_empty': warm_empty,
+        'note': note,
     }
     text = json.dumps(report, indent=2)
+    # Written *before* anything else can destroy the window: the last run measured everything, then died in teardown
+    # (`can't invoke "winfo": application has been destroyed`) and lost the whole result.
+    if a.json:
+        try:
+            Path(a.json).write_text(text, encoding='utf-8')
+        except OSError as e:
+            print('could not write %s: %s' % (a.json, e))
     print(text)
     if a.json:
         Path(a.json).write_text(text, encoding='utf-8')

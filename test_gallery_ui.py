@@ -179,6 +179,12 @@ def main():
 
     tmp = Path(tempfile.mkdtemp(prefix='gal-test-'))
     os.environ['LOCALAPPDATA'] = str(tmp / 'appdata')   # settings must not touch the real profile
+    # This suite is about the all-columns layout; the app now opens on folders-only, so the shape is fixed at construction
+    # (ZIMAGE_VIEW) rather than switched afterwards, which left the prompt column's layout stale.
+    os.environ['ZIMAGE_VIEW'] = 'columns'
+    # Usage from a suite is not usage: tag it and keep it out of the real file entirely.
+    os.environ['ZIMAGE_USAGE_SOURCE'] = 'test'
+    os.environ['ZIMAGE_USAGE_DIR'] = str(tmp / 'usage')
 
     # NO TEST IN THIS FILE MAY LAUNCH AN APPLICATION (2026-10-31). A media player opening on the desktop in the middle
     # of a suite is not something a test should ever produce, and it was reported while the clip tests ran. The clip
@@ -192,6 +198,12 @@ def main():
 
     files = make_gallery(tmp, 26)   # more than the strip holds, so the cap is exercised
     root = tk.Tk()
+    # Off-screen, so a test run does not take the focus from whatever the reader is doing: the checks only need the window to be
+    # *mapped*, not visible, and Windows will happily map one at negative coordinates (2026-11-03).
+    try:
+        root.geometry('%dx%d+%d+%d' % (1600, 950, -3000, -1200))
+    except Exception:
+        pass
     try:
         ttk.Style().theme_use('vista')
     except Exception:
@@ -2727,6 +2739,13 @@ def main():
     app.text.delete('1.0', 'end')
     app.text.insert('1.0', LONG)
     root.update()
+    # The rows under the box ask for more height than a 1200x700 window has once the action family is padded, so the
+    # box is re-sized by the geometry manager - and that reaches Tk as a WM Configure after the idle pass that asked for
+    # it. Read one loop later (the sleep-and-update idiom the rest of this suite already uses), the numbers are the
+    # settled layout; reading them early once reported a 7 px overlap that was not there.
+    time.sleep(0.1)
+    root.update()
+    root.update_idletasks()
     check('the rephrase button sits under the prompt box',
           app.rephrase_btn.winfo_rooty() >= app.text.winfo_rooty() + app.text.winfo_height() - 4,
           'button y=%d, prompt bottom=%d' % (app.rephrase_btn.winfo_rooty(),
@@ -2948,6 +2967,189 @@ def main():
     ig.grabclipboard = real_grab
     app.clear_base(); app.select_file(src); root.update()
 
+    print('\n-- paste lands in the folder on screen, picked and armed, and never overwrites')
+    elsewhere = tmp / 'elsewhere'
+    elsewhere.mkdir()
+    app.set_source(str(elsewhere))
+    root.update()
+    ig.grabclipboard = lambda: Image.new('RGB', (160, 120), (9, 9, 200))
+    app.paste_base(); root.update()
+    written = sorted(elsewhere.glob('pasted-*.png'))
+    check('the picture is written into the folder on screen, not the render folder', len(written) == 1,
+          str([f.name for f in written]))
+    if written:
+        name = written[0].name
+        check('the name is the app\'s own shape (stamp, id, size)',
+              name.startswith('pasted-') and re.search(r'_\d+x\d+\.png$', name) is not None, name)
+        check('the new file is the pick', [Path(p_).name for p_ in app.selected] == [name],
+              str([Path(p_).name for p_ in app.selected]))
+        check('and it is the base, through use_as_base', app.base_path is not None
+              and Path(app.base_path).name == name, str(app.base_path))
+        check('the status line names the file', name in app.status['text'], app.status['text'])
+        check('a sidecar records where it came from',
+              json.loads(written[0].with_suffix('.json').read_text(encoding='utf-8')).get('source') == 'clipboard')
+    # the same clipboard twice: the second one must not land on the first
+    app.paste_base(); root.update()
+    again = sorted(elsewhere.glob('pasted-*.png'))
+    check('a second paste is a second file, never an overwrite', len(again) == 2 and len({f.name for f in again}) == 2,
+          str([f.name for f in again]))
+    # the collision rule itself, deterministically: `free_path` is what a paste calls when its name is taken
+    probe = elsewhere / 'collision-probe.png'
+    probe.write_bytes(b'x')
+    taken = zui.free_path(elsewhere, probe.name)
+    check('and a taken name is settled with the app\'s own _N suffix, beside the file',
+          (not taken.exists()) and taken.name == 'collision-probe_2.png', taken.name)
+    probe.unlink()
+    # a folder that is gone is a reason, not a silent no-op
+    app.set_source(str(tmp)); root.update()
+    real_source = app._source
+    app._source = tmp / 'gone-folder'
+    app._refresh_paste_state()
+    check('with no folder to paste into the button is greyed', 'disabled' in app.paste_top_btn.state(),
+          str(app.paste_top_btn.state()))
+    check('and the reason is on the status line', 'no folder is open' in app.status['text'], app.status['text'])
+    before = sorted(elsewhere.glob('pasted-*.png'))
+    app.paste_base(); root.update()
+    check('pressing it anyway writes nothing and still says why',
+          sorted(elsewhere.glob('pasted-*.png')) == before and 'no folder is open' in app.status['text'],
+          app.status['text'])
+    app._source = real_source
+    app._refresh_paste_state(); root.update()
+    check('and it comes back when the folder does', 'disabled' not in app.paste_top_btn.state(),
+          str(app.paste_top_btn.state()))
+    # a clipboard with nothing pasteable on it
+    ig.grabclipboard = lambda: None
+    root.clipboard_clear(); root.clipboard_append('nothing here'); root.update()
+    app.paste_base(); root.update()
+    check('an empty clipboard is a sentence, not an exception', 'clipboard holds no picture' in app.status['text'],
+          app.status['text'])
+    ig.grabclipboard = real_grab
+    app.clear_base(); app.select_file(src); root.update()
+
+    print('\n-- the picture menu greys what it cannot do, and says why')
+    app.clear_selection(); root.update()
+    menu = app._picture_menu(app._files[0])
+
+    def _labels(menu):
+        """Every entry's label, separators included - `entrycget` on a separator is not worth trusting."""
+        out = []
+        for i in range(menu.index('end') + 1):
+            try:
+                out.append(str(menu.entrycget(i, 'label') or ''))
+            except Exception:
+                out.append('')
+        return out
+
+    labels = _labels(menu)
+    create_entries = [i for i, text in enumerate(labels)
+                      if 'Create New Image based on Selected Images' in text]
+    check('the menu offers "Create New Image based on Selected Images"', len(create_entries) == 1, str(labels))
+    if create_entries:
+        i = create_entries[0]
+        check('with nothing picked it is greyed', str(menu.entrycget(i, 'state')) == 'disabled',
+              str(menu.entrycget(i, 'state')))
+        check('and the status line says what to do', 'pick at least one picture' in app.status['text'],
+              app.status['text'])
+    labels = _labels(menu)
+    paste_entries = [i for i, text in enumerate(labels) if 'Paste a picture from the clipboard' in text]
+    check('the menu offers Paste too', len(paste_entries) == 1, str(labels))
+    if paste_entries:
+        check('and Paste is live while a folder is open', str(menu.entrycget(paste_entries[0], 'state')) == 'normal',
+              str(menu.entrycget(paste_entries[0], 'state')))
+    menu.destroy()
+    click(app, app._files[0])
+    click(app, app._files[1], ctrl=True)
+    menu = app._picture_menu(app._files[0])
+    if create_entries:
+        check('with pictures picked it is live', str(menu.entrycget(create_entries[0], 'state')) == 'normal',
+              str(menu.entrycget(create_entries[0], 'state')))
+    menu.destroy()
+
+    print('\n-- the pick is in click order, which is the order the references are numbered')
+    app.clear_selection(); root.update()
+    order = [app._files[2], app._files[0], app._files[3]]
+    click(app, order[0])
+    click(app, order[1], ctrl=True)
+    click(app, order[2], ctrl=True)
+    check('the pick keeps the order the pictures were clicked',
+          [Path(p_).name for p_ in app._pick_order_now()] == [p_.name for p_ in order],
+          str([Path(p_).name for p_ in app._pick_order_now()]))
+    check('which is not the order the file names would give',
+          [p_.name for p_ in order] != sorted(p_.name for p_ in order),
+          str([p_.name for p_ in order]))
+    calls_before = len(app.engine.calls)
+    app._create_from_selected()
+    root.update()
+    check('the picked set becomes the bases, in that order',
+          [Path(b).name for b in (app._bases or [])] == [p_.name for p_ in order],
+          str([Path(b).name for b in (app._bases or [])]))
+    check('the generator is the screen it opens', app.view_mode == 'image', app.view_mode)
+    check('and the count is on the status line', '3 selected pictures' in app.status['text'], app.status['text'])
+    check('and opening it renders nothing', len(app.engine.calls) == calls_before,
+          '%d -> %d' % (calls_before, len(app.engine.calls)))
+    app.set_view_mode('columns'); app.clear_base(); app.clear_selection(); root.update()
+    check('with nothing picked the same command refuses, in a sentence',
+          app._create_from_selected() is None and 'pick at least one picture' in app.status['text'],
+          app.status['text'])
+
+    print('\n-- the grid keeps click order beside its chosen set (a set has no order)')
+    def _tile(parent, item, size):
+        return tk.Label(parent, text=item['key'], width=6, height=3)
+    # its own toplevel: the window itself is laid out with grid, and a packed child in it is a TclError
+    holder = tk.Toplevel(root)
+    holder.geometry('420x260+-3000+-1200')
+    grid = zui.ScrollGrid(holder, _tile, tile_target=90, batch=20)
+    grid.pack(fill='both', expand=True)
+    grid.set_items([{'key': k, 'path': Path(k)} for k in ('a', 'b', 'c', 'd')])
+    root.update()
+    for key in ('c', 'a', 'd'):
+        grid._mark(key, 'toggle')
+    check('picked_order() is the order they were picked', grid.picked_order() == ['c', 'a', 'd'],
+          str(grid.picked_order()))
+    check('the set is still a set of the same members',
+          isinstance(grid.chosen, set) and grid.chosen == {'a', 'c', 'd'}, str(grid.chosen))
+    check('and the two agree after a toggle drops one',
+          (grid._mark('a', 'toggle'), grid.picked_order() == ['c', 'd'])[1], str(grid.picked_order()))
+    holder.destroy(); root.update()
+
+    print('\n-- the actions are buttons, and the family is measured in one place')
+    check('the action family is padded 12 across and 6 down, written once and read by both toolkits',
+          (zui.ACTION_PAD_X, zui.ACTION_PAD_Y) == (12, 6), (zui.ACTION_PAD_X, zui.ACTION_PAD_Y))
+    padded = str(ttk.Style().lookup('Action.TButton', 'padding') or '')
+    check('the ttk action style carries the padding',
+          '12' in padded and '6' in padded, padded or '(no padding)')
+    for name in ('title_open_btn', 'options_btn', 'contents_all_btn', 'contents_gal_btn', 'contents_ab_btn',
+                 'contents_rec_btn', 'contents_cap_btn'):
+        widget = getattr(app, name)
+        check('%s is an action' % name, str(widget.cget('style')) == 'Action.TButton', str(widget.cget('style')))
+    check('a ttk button of the family is a real ttk button', isinstance(app.paste_top_btn, ttk.Button))
+    for name in ('gen_btn', 'use_base_btn', 'clear_base_btn', 'clip_btn', 'clip_open_btn'):
+        widget = getattr(app, name)
+        check('%s is padded 12x6, at rest and with an edge' % name,
+              int(widget['padx']) == zui.ACTION_PAD_X and int(widget['pady']) == zui.ACTION_PAD_Y
+              and int(widget['bd']) >= 1 and str(widget['relief']) == 'raised',
+              '%sx%s bd=%s relief=%s' % (widget['padx'], widget['pady'], widget['bd'], widget['relief']))
+    check('the hover tone is a different colour from the resting one',
+          app.gen_btn._hover_bg != app.gen_btn._rest_bg,
+          '%s vs %s' % (app.gen_btn._hover_bg, app.gen_btn._rest_bg))
+    check('and the press is darker than the hover, so the two cannot be confused',
+          app.gen_btn._press_bg != app.gen_btn._hover_bg,
+          '%s vs %s' % (app.gen_btn._press_bg, app.gen_btn._hover_bg))
+    was = root.state()
+    root.state('normal'); root.geometry('1200x700+30+30')
+    root.update(); root.update_idletasks()
+    for name in ('source_row', 'contents_btns'):
+        widget = getattr(app, name)
+        check('the padded %s still fits its column' % name,
+              widget.winfo_reqwidth() <= widget.winfo_width(),
+              '%d needs %d' % (widget.winfo_reqwidth(), widget.winfo_width()))
+    check('the generator panel still fits the smallest window',
+          app.clip_actions.winfo_rooty() + app.clip_actions.winfo_height()
+          <= root.winfo_rooty() + root.winfo_height(),
+          '%d vs %d' % (app.clip_actions.winfo_rooty() + app.clip_actions.winfo_height(),
+                        root.winfo_rooty() + root.winfo_height()))
+    root.geometry('1600x950+30+30'); root.state(was or 'normal'); root.update()
+
     print('\n-- crop a region and use it as the base for the next run')
     app.clear_base()
     src = app._files[0]
@@ -3009,7 +3211,11 @@ def main():
           'hint=%r grouping=%s' % (app.hint['text'][:120], app._grouping))
     after = sorted((f.name, f.stat().st_mtime) for f in Path(tmp).glob('*')
                    if not f.is_dir())          # the .thumbs cache is written by rendering, not by grouping
-    check('and writes nothing to disk', listing == after)
+    # Grouping writes no picture data - the one deliberate exception is its own plan store, which exists so a launch can
+    # reuse the folders instead of re-clustering 75 s worth of pictures (2026-11-03).
+    check('and writes nothing to disk except its own plan store',
+          [x for x in listing if x[0] != '.zimage-groups.json'] == [x for x in after if x[0] != '.zimage-groups.json'],
+          (listing, after))
     if app._plan:
         real = [g for g in app._plan['groups'] if not g.get('synthetic')]
         labels = [g['label'] for g in real]
@@ -4921,9 +5127,17 @@ def main():
     args2 = argparse.Namespace(**vars(args))
     args2.out = str(empty)
     root2 = tk.Tk()
+    try:
+        root2.geometry('1600x950-3000-1200')
+    except Exception:
+        pass
     app2 = zui.App(root2, StubEngine(), args2)
     root2.update()
-    check('starters appear when nothing has been made', bool(app2.starters.winfo_ismapped()))
+    # Guidance for an empty gallery, in whichever shape the window is showing: the prompt column's starters in all-columns
+    # mode, the pane's own notice in folders-only mode (where that column is hidden by design).
+    check('the window tells you it is empty when nothing has been made',
+          bool(app2.starters.winfo_ismapped()) or bool(app2.notice.winfo_ismapped()),
+          (app2.view_mode, app2.starters.winfo_ismapped(), app2.notice.winfo_ismapped()))
     app2.use_starter(zui.STARTER_PROMPTS[0][1])
     check('a starter fills the prompt box', 'fox' in app2.text.get('1.0', 'end'))
     check('and the strip stays empty', len(app2._tile_widgets) == 0)
@@ -4943,6 +5157,10 @@ def main():
     root2.destroy()
 
     root3 = tk.Tk()
+    try:
+        root3.geometry('1600x950-3000-1200')
+    except Exception:
+        pass
     app3 = zui.App(root3, StubEngine(), args2)
     root3.update()
     check('a new window restores the size', app3.size_var.get() == '768', app3.size_var.get())
@@ -4950,7 +5168,9 @@ def main():
     check('... the sampler', app3.sampler_var.get() == 'euler_ancestral', app3.sampler_var.get())
     check('... the layout', app3.layout_var.get() == '4-up (2x2)', app3.layout_var.get())
     check('but the chain box is still off for this window', app3.chain_var.get() is False)
-    check('starters still shown for the still-empty folder', bool(app3.starters.winfo_ismapped()))
+    check('and still says so on the next launch, in the shape that is showing',
+          bool(app3.starters.winfo_ismapped()) or bool(app3.notice.winfo_ismapped()),
+          (app3.view_mode, app3.starters.winfo_ismapped(), app3.notice.winfo_ismapped()))
     print('\n-- a clip: the motion line is what gets sent, and two selections mean first -> last frame')
     gal_clip = tmp / 'clipgal'
     make_gallery(gal_clip, 4)
@@ -4990,6 +5210,35 @@ def main():
 
     root3.destroy()
 
+
+    # --- the startup screen, which six reports were about ------------------------------------------------
+    # Nothing above tested what the app shows a second after launch: the suite pins ZIMAGE_VIEW=columns for the layout checks,
+    # so every startup bug (screen applied too late, a stale preference honoured, the folder view reloaded off, a crash while
+    # grouping) was invisible here and visible to the user. This launches the real default and asserts the first screen.
+    print('\n-- the first screen after launch')
+    _saved_view = os.environ.pop('ZIMAGE_VIEW', None)
+    root5 = tk.Tk()
+    root5.geometry('1600x950-3000-1200')
+    app5 = zui.App(root5, StubEngine(), args)
+    end = time.time() + 10.0
+    while time.time() < end:
+        app5._poll()
+        root5.update()
+        time.sleep(0.02)
+        if getattr(app5, '_view_cells', None) or app5.group_var.get():
+            if app5._plan or len(getattr(app5, '_view_cells', {}) or {}) >= 5:
+                break
+    mapped = {c: any(w.winfo_ismapped() for w in app5._view_cells.get(c, ())) for c in range(5)}
+    check('a plain launch opens on the folders screen', app5.view_mode == 'folders', app5.view_mode)
+    check('and the prompt and picture columns are not on screen', not mapped.get(2) and not mapped.get(3) and not mapped.get(4),
+          mapped)
+    check('the folder view is on, not the picture list', app5.group_var.get() is True, app5.group_var.get())
+    picture_tiles = [w for w in app5.recent.winfo_children() if getattr(w, 'winfo_class', lambda: '')() == 'Frame']
+    check('nothing painted picture tiles on it', not picture_tiles or bool(app5._plan),
+          (len(picture_tiles), bool(app5._plan)))
+    root5.destroy()
+    if _saved_view is not None:
+        os.environ['ZIMAGE_VIEW'] = _saved_view
 
     _wp_backstop.launch = _REAL_LAUNCH          # leave the module as we found it
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
