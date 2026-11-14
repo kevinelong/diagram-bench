@@ -1,4 +1,9 @@
-# State: the layout's decisions, and what the suite now encodes (0.32.1, 2026-11-14)
+# State
+
+**The suite is 1315 checks** (1314 passed, 0 failed, 1 skipped) across the three window
+suites - `test_gallery_ui.py` 1074, `test_sizing.py` 213, `test_tiles.py` 28 - and
+`check_doc_counts.py` fails when this sentence and the run disagree.
+: the layout's decisions, and what the suite now encodes (0.32.1, 2026-11-14)
 
 This page is the durable half of the state record. The dated `STATE-YYYY-MM-DD.md` files at the root are the running
 log of what was done on a day and what it measured; this one lists the **decisions the tests now enforce**, so a change
