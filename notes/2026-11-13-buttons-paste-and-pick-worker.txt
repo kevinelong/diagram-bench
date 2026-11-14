@@ -107,19 +107,28 @@ TESTS AND WHAT THEY SAY
 
     ALL PASS
 
-`python test_sizing.py` - **not completed inside this worker's time budget**, and it is the one suite whose state is
-reported as a partial run rather than a verdict. Two facts, both quoted rather than summarised:
-- the suite is far slower than its own `timeout 600` on this box: a run stopped at the cap printed
-  `Wall time: 600.07 seconds`, `EXIT=124`, having reached block B3 of the file;
-- that partial run failed **four environment-dependent tile-size checks** - `the tile takes the width it has, rounded
-  down to a rung` (112, 145, 1244, 8), `a full row of tiles is laid out` (0, 0, 8), `the columns and the tile are what
-  the rule asks for` (8, 112, 8, 145), `and the smallest window still shows a full row` (0, 1164) - which are the
-  canvas-measurement family this environment has always failed (STATE-2026-11-03.md records six such failures on an
-  unmodified tree).
-- The three **recorded pre-existing failures** live in later blocks this run never reached, so they are neither
-  re-confirmed nor cleared here: `a real press-and-drag pans the picture`, `the same real drag with crop armed ...`,
-  `and a tile widget was built for it` (STATE-2026-11-03.md, "3 failures, all pre-existing and environment-dependent").
-  No test was weakened and no threshold moved; the run continues in the background past this note.
+`python test_sizing.py` - **it does not finish on this box, at 600 s or at 1800 s**: it stalls inside its own B3
+block ("the open-folder pane keeps its pictures inside the canvas"), so the run is a partial report rather than a
+verdict. Quoted from the 1800 s attempt (`EXIT` never printed; the harness stopped it at `Wall time: 1800.02 seconds`;
+the file holds 88 lines, 52 of them PASS, and stops at the B3 header):
+
+    and a sash at every boundary between them                        FAIL [('strip', 'grid'), ('gallery', 'grid'), ('prompt', '')]
+    each sash sits between the two columns it separates              FAIL [('gallery', 1272, 8), ('prompt', 0, 1), ('strip', 0, 8)]
+    the root grid carries the same numbers as the columns plus their padding FAIL [423, 0, 0]
+    and the pane is the one at its own cap, which is stated rather than accidental FAIL ({'strip': 618, 'pane': 618,
+        'prompt': 617, 'picture': 617}, 480)
+    strip|pane stops with the pane at its stated minimum             FAIL (120, 180)
+    Left/Right move the strip|pane boundary 16 px each way           FAIL (120, 136, 120)
+    ...
+    -- B3: the open-folder pane keeps its pictures inside the canvas
+
+Those are the sash / bound-measurement family this environment has always failed - STATE-2026-11-03.md records six such
+failures on an **unmodified** tree, under the same "environment-dependent" heading - and they are about the sashes and
+the column arithmetic, none of which this change edits (it edits the title/source row, the pane's action row, the
+`ActionButton` family and the picture menu; the only geometry it owns is `ACTION_PAD_X/Y`, asserted directly).
+The three **recorded pre-existing failures** - `a real press-and-drag pans the picture`, `the same real drag with crop
+armed ...`, `and a tile widget was built for it` (STATE-2026-11-03.md) - live in blocks after B3, which no run here
+reaches, so they are neither re-confirmed nor cleared: recorded as still-open.
 - What the change *could* break there - the strip's tile metrics and the sashes - is untouched by it: the four edited
   rows are the gallery's title/source row, the folder pane's action row, the `ActionButton` family and the picture menu,
   and the only geometry they own is `ACTION_PAD_X/Y`, asserted directly by the new checks.
