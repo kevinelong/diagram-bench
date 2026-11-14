@@ -41,10 +41,12 @@ import pair_review  # noqa: E402
 pair_review.STATE_DIR = Path(tempfile.mkdtemp(prefix='zimage-review-'))
 
 FAILS = []
+CHECKS = [0]     # every check() that ran, so the suite can print its own size
 SHOTS = None
 
 
 def check(name, cond, detail=''):
+    CHECKS[0] += 1
     print('%-52s %s%s' % (name, 'PASS' if cond else 'FAIL',
                           ('  ' + str(detail)) if detail and not cond else ''))
     if not cond:
@@ -5241,6 +5243,7 @@ def main():
         os.environ['ZIMAGE_VIEW'] = _saved_view
 
     _wp_backstop.launch = _REAL_LAUNCH          # leave the module as we found it
+    print('\n%d checks: %d passed, %d failed' % (CHECKS[0], CHECKS[0] - len(FAILS), len(FAILS)))
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: %s' % ', '.join(FAILS)))
     print('gallery was %s' % tmp)
     return 1 if FAILS else 0

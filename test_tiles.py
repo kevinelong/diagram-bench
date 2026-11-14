@@ -36,10 +36,12 @@ import zimage_ui as zui  # noqa: E402
 
 zui.RECENT_POLICY = 0
 FAILS = []
+CHECKS = [0]     # every check() that ran, so the suite can print its own size
 
 
 def check(label, ok, detail=''):
     print('%-66s %s %s' % (label, 'PASS' if ok else 'FAIL', detail))
+    CHECKS[0] += 1
     if not ok:
         FAILS.append(label)
 
@@ -213,6 +215,7 @@ def main():
           '%d + %d of %d' % (sum(sizes), len(leftovers), len(rows)))
 
     root.destroy()
+    print('\n%d checks: %d passed, %d failed' % (CHECKS[0], CHECKS[0] - len(FAILS), len(FAILS)))
     print('\n%s' % ('ALL PASS' if not FAILS else 'FAILURES: ' + ', '.join(FAILS)))
     return 0 if not FAILS else 1
 

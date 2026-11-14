@@ -97,6 +97,22 @@ python check_ace_geometry.py hard/pooltable-v3-bare.svg hard/pooltable-v4-bare.s
 python check_containment.py hard/pooltable-qwen3-coder_30b.svg
 ```
 
+**The window's own suites, and the counts the documents state.** `test_gallery_ui.py`, `test_sizing.py` and
+`test_tiles.py` each drive the real window and end with their own total (`<N> checks: <N> passed, 0 failed`).
+`check_doc_counts.py` runs those three once each, adds their totals, and reads every check count the documents
+state about them - `README.md`, `docs/*.md` and `CONTINUE-HERE.md` - failing with the file, the line, the number
+claimed and the number measured. It is a script and not a habit because a count drifts silently: the sibling
+repositories were quoting 342 for a 509-test suite and 105 for a 168-test one, each caught by running the
+instrument and never by reading again. Nothing states this repository's count yet, so the run prints a NOTICE
+naming `docs/STATE.md` as the file that most needs the line; the first sentence that does state it is checked
+from then on. A suite that fails, or that prints no total, fails the run: a total taken from a red suite is not a
+number to hold a document to.
+
+```bash
+python check_doc_counts.py                                # the three window suites, then the documents
+python check_doc_counts.py --test-output logs\suites.log   # parse a saved run, run nothing
+```
+
 **What needs a model (not part of maintenance work).** `svg_arm.py` and the `hard_*.py` generators need a local
 Ollama; `klein_arm.py`, `flux_arm.py`, `zimage_arm.py` and `generic_arm.py` need ComfyUI and its weights;
 `cad_arm.py` needs KiCad 10's own Python; `vlm_score.py` needs `DEEPSEEK_API_KEY`. Those were run once, serially,

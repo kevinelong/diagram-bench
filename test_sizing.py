@@ -45,10 +45,12 @@ import zimage_ui as zui  # noqa: E402
 pair_review.STATE_DIR = Path(tempfile.mkdtemp(prefix='sizing-state-'))
 
 FAILS = []
+CHECKS = [0]     # every check() that ran, so the suite can print its own size
 
 
 def check(label, ok, detail=''):
     print('%-64s %s %s' % (label, 'PASS' if ok else 'FAIL', detail))
+    CHECKS[0] += 1
     if not ok:
         FAILS.append(label)
 
@@ -1417,6 +1419,7 @@ def main():
         print('\n%d block(s) could not be run to completion on this box' % len(BLOCKED))
         for name, what in BLOCKED:
             print('  BLOCKED: %s - %s' % (name, what))
+    print('%d checks: %d passed, %d failed' % (CHECKS[0], CHECKS[0] - len(FAILS), len(FAILS)))
     print('\n%d failure(s)' % len(FAILS))
     for f in FAILS:
         print('  FAILED: %s' % f)

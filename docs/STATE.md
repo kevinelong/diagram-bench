@@ -1,4 +1,4 @@
-# State: the layout's decisions, and what the suite now encodes (0.31.0, 2026-11-14)
+# State: the layout's decisions, and what the suite now encodes (0.32.0, 2026-11-14)
 
 This page is the durable half of the state record. The dated `STATE-YYYY-MM-DD.md` files at the root are the running
 log of what was done on a day and what it measured; this one lists the **decisions the tests now enforce**, so a change
@@ -14,6 +14,7 @@ of policy has one place to be noticed in. It is deliberately short and is meant 
 | **no caps** where the reader is steering - a column grows until the window stops it, and the tile grid reflows | 2026-11-02 | `_column_caps` | `and no column is held by a cap: the pane takes the same share as the other three` |
 | floors that would together exceed the window are **scaled to fit** so a drag cannot jam at low == high | 2026-11-02 | `_column_floors(width=)` | `test_gallery_ui.py`: `floors shrink to fit a narrow window instead of exceeding it` |
 | a remembered width of **0 is a width**, not "never set" | 2026-11-14 | `_px_setting` | `a fresh start reads the same three boundaries back`, `so a window that opens on that file starts with a layout the reader set` |
+| the documents' counts are **measured against the suites**, never remembered | 2026-11-14 | `check_doc_counts.py` | the three window suites print their own total, the checker sums them and fails on a doc whose number disagrees; today no document states one, and the run says so |
 
 The pane's `CONTENTS_W_MIN` (180) and `CONTENTS_W_MAX` (480) survive only as the **stored default** width and as the
 starting value on a bad argument. They are not limits any more, and any clamp that still reads them is a bug: the

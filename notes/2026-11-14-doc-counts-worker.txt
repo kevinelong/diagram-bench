@@ -1,0 +1,96 @@
+NOTE 2026-11-14 - the documents' counts are measured against the three window suites (0.32.0)
+
+WHAT WAS ASKED
+Add a documented-counts checker that measures the real total instead of trusting a number, wire it where the other
+checks run, and prove it fails on a stale number and passes on a correct one. The measurement here is the suites'
+own: `test_gallery_ui.py`, `test_sizing.py` and `test_tiles.py` are run once each and each prints its total.
+
+WHAT WAS BUILT
+- `check_doc_counts.py` runs the three suites (through `winproc.run`, which is this repository's rule and its own
+  suite says so), reads the `<N> checks: <P> passed, <F> failed` line each now prints, adds them, then reads every
+  count the documents state - `N checks`, `N tests`, `N passing`, `the suite is N` - in `README.md`, `docs/*.md` and
+  `CONTINUE-HERE.md`. A disagreement prints the file, the line, the claim and the measured number with the offset,
+  and exits 1. `--test-output <file>` reads a saved transcript instead (no suite is run at all), `--save <file>`
+  keeps the transcript the totals came from, `--quiet` prints only what disagrees.
+- The three suites print their own total, which they did not before: a `CHECKS` counter beside `FAILS`, and a line
+  `%d checks: %d passed, %d failed` next to ALL PASS / the failure list. Counting PASS lines outside the suite was
+  the alternative, and it would have been a second implementation of each suite's own arithmetic.
+- A suite that fails or prints no total fails the run: a total taken from a red suite is not a number to hold a
+  document to. That is why the run below ends 1.
+- Wiring: README's "Running the toolchain" (the documented check list) has the two commands and says why the gate
+  exists; `docs/STATE.md` - the durable record of what the tests enforce - gains the row that names it, so it is a
+  decision on the page rather than a script nobody calls. `docs_check.py` still passes over the edited README
+  (58 relative links, 0 failures, no forbidden marker).
+- `version.py`: 0.31.0 -> 0.32.0 (a gate added = feature = minor).
+
+WHAT IT FOUND, AND WHAT THAT COST
+1. My first version called `subprocess.run` directly, and `test_gallery_ui.py`'s own check - "every subprocess call
+   goes through winproc", which greps every root `*.py` - failed on it: `FAILURES: every subprocess call goes
+   through winproc`. The gate caught the gate. Fixed by importing `winproc` and calling `winproc.run`.
+2. `test_sizing.py` reports 1 failure of 209 on this box, in the checker's run and in a standalone run:
+   `every pixel of the hit area belongs to the sash, and neither neighbour takes one`, detail
+   `(['None', 'None', 'None'], ['None', 'None'])` - `winfo_containing` answers None for every probed coordinate, so
+   no window of this application is at the sash's own root coordinates on this desktop. `notes/2026-11-14-sash-capture-and-coalescing.txt`
+   records the same check PASSING at 0.31.0 in 77 s, and the only change this turn made to that file is a counter
+   and a summary line, which cannot move a pixel. Not diagnosed further: it is a property of this desktop session,
+   not of the counts, and the ticket was the counts.
+3. Two false positives in the claim patterns, fixed before the run was believed: `18 prompts in 6 check categories`
+   read as "6 checks" (now `checks?` may not be followed by a lowercase noun) and `3/3 passing` read as the suite's
+   passing count (a number after a slash is a fraction of runs, not a count). And one silent FALSE NEGATIVE, which
+   is the worse kind: `quoted()` counted apostrophes as quotation marks, so the first stale claim I planted in
+   `docs/STATE.md` - on a line that begins "the documents' counts" - was invisible. It now counts only `"` and
+   backticks.
+
+WHAT THIS REPOSITORY HAS, TODAY: NO COUNT ANYWHERE, AND THE GATE SAYS SO
+No sentence in `README.md` or `docs/*.md` states how big the suites are, so the run prints a NOTICE and exits 0 -
+there is nothing to compare. The counts that do exist are records of a day (`PIN-20261021.md` "484 checks";
+`STATE-2026-11-02-4060.md` "182 passes / 11 failures"; `docs/BUGS-20261030-tile-size.md` "883 checks"), they were
+true when written, and `docs/BUGS-20261030-tile-size.md` is the one under `docs/` that the checker skips by name,
+with the reason printed on every run. The file that most needs the line is **`docs/STATE.md`**: it is the durable
+record of what the tests enforce, it is edited rather than appended to, and it names the suites without ever saying
+how many checks they hold. One sentence there - "the three window suites are 1311 checks" - makes the gate live on
+the next run; the checker prints the measured number for exactly that purpose.
+
+THE RUNS, VERBATIM
+Whole suite, three suites, one each:
+
+    running test_gallery_ui.py (the gallery window) ...
+    running test_sizing.py (the four columns and their boundaries) ...
+      test_sizing.py exited 1; last lines:
+        209 checks: 208 passed, 1 failed
+        1 failure(s)
+          FAILED: every pixel of the hit area belongs to the sash, and neither neighbour takes one
+    running test_tiles.py (the tiles and the prompt grouping) ...
+    transcript: suites-latest.log
+
+    measured: 1311 checks: 1310 passed, 1 failed (from 3 suites)
+
+    NOTICE: no document states a count, so there is nothing to compare yet.
+    ... docs/STATE.md is the file that most needs the line ...
+                                                                            exit 1 (a suite is red)
+
+Per suite, from that transcript: `1074 checks: 1074 passed, 0 failed` (gallery), `209 checks: 208 passed, 1 failed`
+(sizing), `28 checks: 28 passed, 0 failed` (tiles) = 1311.
+
+A stale claim planted in `docs/STATE.md` (`... disagrees; `test_sizing.py`: 189 checks, all passing |` - PIN's
+2026-10-21 figure), read back from the same transcript so no suite was run twice:
+
+    measured: 1311 checks: 1310 passed, 1 failed (from 3 suites)
+
+    docs/STATE.md:17               claims  189 (checks ) - MEASURED 1311 (-1122)
+                                     line: | the documents' counts are **measured against the suites**, never
+                                     remembered | 2026-11-14 | `check_doc_counts.py` | ... `test_sizing.py`:
+                                     189 checks, all passing |
+
+    stale count in 1 of 1 claims. The measured numbers are: 1311 checks, 1310 passing
+      docs/STATE.md:17                                                      exit 1
+
+Reverted, same command: `NOTICE: no document states a count ...`, exit 0.
+
+WHAT IS STILL OPEN
+- The sizing hit-area check above. It is red on this desktop and green in the 0.31.0 note; the counts gate will
+  keep exiting 1 until the suite is green, which is the intended coupling and not a count regression.
+- `PIN-20261021.md` and the root `STATE-*.md` files still carry their own numbers, untouched: they are dated
+  records, and the checker does not read them, by design and with that reason in its header.
+- No CI in this repository, so the wiring is the documented check list (README) and the decision row (docs/STATE.md);
+  there is no server that could run it for you.
