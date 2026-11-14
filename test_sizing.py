@@ -14,6 +14,11 @@ Covers `docs/BUGS-20261030-tile-size.md` and the two follow-ups of the same day:
 * the folder grid - three tiles per row rather than two, and every tile size derived from the column it is in.
 
 It builds its own window and its own gallery under `tempfile.mkdtemp`, so nothing touches a real gallery or profile.
+
+Every wait in here is bounded. `pump()` drives Tk's own event loop (`drain`) instead of calling `update()`, because
+`update()` runs the queue until it is empty and a window that re-queues work for ever never comes back from it - which
+is what B3 did on this box until 2026-11-14 (see `notes/2026-11-14-test_sizing-B3-diagnosed.txt`). A queue still busy
+at `DRAIN_CAP` is reported as `<block> blocked: <what>` and the suite goes on, so a run is always quotable as a whole.
 """
 
 import json
@@ -25,6 +30,9 @@ import time
 import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace as NS
+
+import _tkinter                # Tk's own event pump: what `update()` runs is `dooneevent()` in a loop, and this suite
+                               # drives that loop itself so a step can be given a budget (2026-11-14, B3 below)
 
 from PIL import Image
 
@@ -78,16 +86,89 @@ def make_gallery(folder, n=40):
     return paths
 
 
+#: How long the event queue may take to empty before the suite gives up on one paint. A healthy paint here is 20-60 ms
+#: of it; a zoomed 2400x1600 picture measured 1.5 s once, so the cap is generous rather than tight - what it has to
+#: catch is a queue that never empties (1800 s, 2026-11-14), not a frame that is merely slow.
+DRAIN_CAP = 4.0
+
+#: The same for one round of a wait loop that repeats anyway: a stormed window would otherwise pay the full cap per
+#: round (80 rounds x 4 s measured 2026-11-14), and a loop of 80 short drains is a better wait than one long one.
+LOOP_CAP = 0.5
+
+#: Steps that could not be run to completion, as (block, what). A pump that cannot empty the queue is reported here
+#: rather than waited on, so the suite can always be quoted whole.
+BLOCKED = []
+
+#: The block the suite is in, so a pump that cannot finish says which one it was (`step` sets it).
+SECTION = ['the suite']
+
+
+def step(text):
+    """Print a block's heading, and remember it: a pump that cannot finish names the block it was in."""
+    SECTION[0] = text.strip().lstrip('-').strip()
+    print(text)
+
+
+def drain(widget, budget=DRAIN_CAP):
+    """Process pending Tk events for at most `budget` seconds - an `update()` with a bound.
+
+    `widget.update()` runs the queue until it is *empty*, so a window that re-queues work as fast as it is dispatched
+    never returns from it. That is not hypothetical: on this box (2026-11-14) the open-folder pane did exactly that and
+    this suite sat inside one `update()` for 1800 s. `update()` is `dooneevent()` in a loop, and this is that loop with
+    a bound. Any widget will do: they share one interpreter.
+
+    Returns (events, seconds, emptied). `emptied` False means events were still pending at the budget: one paint was
+    longer than `DRAIN_CAP`, or the window never stops re-queueing work - the caller reports it either way instead of
+    waiting longer.
+    """
+    start = time.time()
+    events = 0
+    while time.time() - start < budget:
+        if not widget.tk.dooneevent(_tkinter.DONT_WAIT | _tkinter.ALL_EVENTS):
+            return events, time.time() - start, True
+        events += 1
+    return events, time.time() - start, False
+
+
+def blocked(where, what):
+    """Say a step could not be run to completion - once per block: a loop repeats for every pump after it."""
+    name = (where or 'the suite').split(':')[0].strip() or 'the suite'
+    if any(name == seen for seen, _ in BLOCKED):
+        return
+    BLOCKED.append((name, what))
+    print('\n%s blocked: %s' % (name, what))
+
+
+def settle(widget, budget=DRAIN_CAP):
+    """One Tk update, accounted for: a queue that does not empty is reported as a blocked step, never waited on.
+
+    Two things look the same from here and are named as the fact rather than as a diagnosis: one paint that is long
+    (a 2400x1600 zoom measured 1.5 s) and a layout loop that never ends (the B3 stall, 1800 s). The report says how
+    long and how many events, so the log says which of the two it was.
+    """
+    events, took, emptied = drain(widget, budget)
+    if not emptied:
+        blocked(SECTION[0], 'the event queue did not empty within %.1f s (%d events dispatched), so this step could '
+                            'not be measured to the end' % (took, events))
+    return emptied
+
+
 def pump(root, app, seconds=0.4):
+    """Let the app run for `seconds` - but never wait on an event queue that does not empty.
+
+    The bound is Tk's own update (see `drain`): a queue that has not emptied at `DRAIN_CAP` is reported against the
+    block being run (`step` named it) and the pump returns, so the suite goes on and can be run and quoted whole.
+    """
     end = time.time() + seconds
     while time.time() < end:
         try:
             app._poll()
         except Exception:
             pass
-        root.update()
+        if not settle(root):
+            return
         time.sleep(0.02)
-    root.update()
+    settle(root, 0.3)
 
 
 def wipe_records(paths):
@@ -152,7 +233,7 @@ def main():
     pump(root, app, 0.6)
 
     # ---- the layout: N columns, a sash between each pair, an even first split, the pane never collapsed
-    print('\n-- layout: four adjacent columns with a sash between every pair')
+    step('\n-- layout: four adjacent columns with a sash between every pair')
     # Enumerated from the grid rather than assumed: the strip and the open-folder pane share the gallery column, and the
     # gallery, prompt and picture columns are the root's 0/2/4. The folded sidebar's rail replaces the gallery column,
     # it is not a fifth one.
@@ -226,7 +307,7 @@ def main():
           and tile_2560 == 206, (wide[zui.COL_STRIP], tile_2560))
 
     # each boundary drags independently: 1:1, its own pair only, remembered on release
-    print('\n-- layout: each boundary drags 1:1 and moves only its own pair')
+    step('\n-- layout: each boundary drags 1:1 and moves only its own pair')
     start = column_widths(app)
     drag(app, app.contents_sash, 40)
     pump(root, app, 0.6)
@@ -266,7 +347,7 @@ def main():
         check('and the two on its left do not move', prompt[:2] == gallery[:2], (gallery, prompt))
 
     # clamps at both ends, keys and defaults
-    print('\n-- layout: every boundary clamps at both ends, and Home/End/keys/double-click obey')
+    step('\n-- layout: every boundary clamps at both ends, and Home/End/keys/double-click obey')
     drag(app, app.contents_sash, 10 ** 4)
     pump(root, app, 0.5)
     check('strip|pane stops with the pane at its stated minimum',
@@ -356,7 +437,7 @@ def main():
           (column_widths(app), app._even_widths()))
 
     # the pane is present with no folder open, and no redraw changes its width (idempotence, like L1)
-    print('\n-- layout: the folder pane is never collapsed, so no redraw re-lays anything')
+    step('\n-- layout: the folder pane is never collapsed, so no redraw re-lays anything')
     app._layout_user = False
     app._apply_layout()
     pump(root, app, 0.6)
@@ -373,7 +454,7 @@ def main():
         pump(root, app, 2.2)
         for _ in range(40):
             app._poll()
-            root.update()
+            settle(root, LOOP_CAP)          # the loop repeats, so one round needs no more than a frame of the cap
             time.sleep(0.03)
         check('a refresh and a re-group leave the four columns exactly where they were',
               column_widths(app) == at_start, (at_start, column_widths(app)))
@@ -381,7 +462,7 @@ def main():
               (app.contents_canvas.winfo_width(), at_start[1]))
 
     # a drag is a burst of re-layouts: count them, the way L2 counts the strip's
-    print('\n-- layout: a synthetic drag queues a bounded number of re-layouts')
+    step('\n-- layout: a synthetic drag queues a bounded number of re-layouts')
     counts = {'refresh': 0, 'tiles': 0, 'resize': 0, 'layout': 0}
     real_refresh, real_tiles, real_resize = (zui.App.refresh_gallery, zui.App._render_folder_tiles,
                                              zui.App._apply_strip_resize)
@@ -413,7 +494,7 @@ def main():
     app._apply_layout()
     pump(root, app, 0.6)
     # ---- B1: the strip is nine pictures at three across, from the canvas it has
-    print('\n-- B1: the strip fits 3 across x 3 down without clipping')
+    step('\n-- B1: the strip fits 3 across x 3 down without clipping')
     canvas = app.gal_canvas
     cw, ch = canvas.winfo_width(), canvas.winfo_height()
     cols, tile = app._strip_metrics()
@@ -457,7 +538,7 @@ def main():
           (cols, tile, want_cols, want_tile))
 
     # a narrower canvas must give up a column rather than clip the last one
-    print('\n-- B1: a narrow canvas gives up a column, not the edge of the last one')
+    step('\n-- B1: a narrow canvas gives up a column, not the edge of the last one')
     root.state('normal')
     root.geometry('1100x700+20+20')     # below the window's own minimum, so the window clamps to it
     pump(root, app, 0.9)
@@ -475,15 +556,26 @@ def main():
     pump(root, app, 0.9)
 
     # ---- B3: the pane reserves its scrollbar and reflows instead of drawing past its edge
-    print('\n-- B3: the open-folder pane keeps its pictures inside the canvas')
+    step('\n-- B3: the open-folder pane keeps its pictures inside the canvas')
     app.toggle_groups(True)
     pump(root, app, 1.6)
     for _ in range(80):
         app._poll()
-        root.update()
+        settle(root, LOOP_CAP)          # the loop repeats, so one round needs no more than a frame of the cap
         if app._plan and app._plan.get('groups'):
             break
         time.sleep(0.05)
+    # The pane is a column of the columns and images screens only: on folders-only `set_view_mode` grid_removes it on
+    # purpose, and its canvas then reports 1x1. Opening a folder there (what this block used to do) built 96 cells into
+    # that 1 px canvas and re-laid them out for ever - the queue never emptied and `update()` never returned: 52 PASS
+    # and then nothing, at 200 s, 600 s and 1800 s, on 0.29.1 and 0.30.0 alike (notes/2026-11-14-test_sizing-B3-
+    # diagnosed.txt). A person opens a folder by clicking it, and `_drill_click` sets the screen to one that has the
+    # pane, so this does too, and then says so rather than measuring a pane nobody is showing.
+    app.set_view_mode('columns', persist=False)
+    pump(root, app, 1.0)
+    check('the pane is on screen, so what it lays out can be measured',
+          app.contents_holder.winfo_manager() == 'grid' and app.contents_canvas.winfo_width() > 1,
+          (app.view_mode, app.contents_holder.winfo_manager(), app.contents_canvas.winfo_width()))
     app._content_shown = 200                     # force enough rows for the pane's scrollbar to appear
     app.select_folder(0)
     pump(root, app, 1.2)
@@ -533,7 +625,7 @@ def main():
     pump(root, app, 0.6)
 
     # ---- B2: the finish screen is the same 4x3 grid, larger, and scrolls
-    print('\n-- B2: "Ranked by wins" is twelve at a time, larger than the strip, and scrolls beyond')
+    step('\n-- B2: "Ranked by wins" is twelve at a time, larger than the strip, and scrolls beyond')
     win = tk.Toplevel(root)
     win.title('sizing finish')
     win.geometry('1600x900+0+0')
@@ -543,14 +635,14 @@ def main():
     left, right = tk.Label(win), tk.Label(win)
     left.grid(row=0, column=0, sticky='nsew')
     right.grid(row=0, column=1, sticky='nsew')
-    win.update()
+    settle(win)
     state = {'paths': [str(p) for p in paths], 'pairs': [], 'deleted': []}
     shell = {'win': win, 'state': state, 'left_lbl': left, 'right_lbl': right, 'buttons': (), 'gallery_buttons': (),
              'badge': None, 'deleted': 0, 'queue': None, 'path': None, 'cur': 0}
     app._review = shell
     app._review_finish(shell, decided=6, total=19, deletes=0)
     for _ in range(60):
-        win.update()
+        settle(win)
         app._poll()
         time.sleep(0.02)
         if shell.get('finish_geom'):
@@ -576,7 +668,7 @@ def main():
     app._review = None
 
     # ---- B4, revised 2026-10-31: rank orders the open folder's pane; the flat strip list is a timeline
-    print('\n-- B4: Wins orders the open folder by wins; the flat list stays newest-first')
+    step('\n-- B4: Wins orders the open folder by wins; the flat list stays newest-first')
     a, b, c = paths[0], paths[1], paths[2]
     pair_rank.record({}, str(c), str(a), 'left_wins')
     pair_rank.record({}, str(c), str(b), 'left_wins')
@@ -592,16 +684,16 @@ def main():
                                         for p in (a, b, c)]}
     app._plan = {'groups': [group], 'recent': [], 'ungrouped': []}
     app._active_folder = 0
-    app._render_contents(); root.update()
+    app._render_contents(); settle(root)
     check('a two-win picture comes first in the pane', Path(app._content_order[0]) == Path(c),
           str(Path(app._content_order[0]).name))
     check('the two it beat come last, fewest losses first',
           [Path(x).name for x in app._content_order[-2:]] == [Path(b).name, Path(a).name],
           [Path(x).name for x in app._content_order])
     app._plan, app._active_folder = saved_plan, saved_active
-    app.refresh_gallery(); root.update()
+    app.refresh_gallery(); settle(root)
 
-    print('\n-- B4: Sequence is film order, Recent still favourites-first by date')
+    step('\n-- B4: Sequence is film order, Recent still favourites-first by date')
     for i, p in enumerate((a, b, c)):
         meta = pair_rank.read_meta(p)
         meta['scene'] = 7
@@ -625,12 +717,12 @@ def main():
     check('the strip still takes the keyboard', bool(app.gal_canvas.cget('takefocus')), app.gal_canvas.cget('takefocus'))
 
     # ---- B5: a tile that lands mid-run is in the list, and a small folder fills its tile
-    print('\n-- B5: a tile that lands mid-run appears in the list with folders on')
+    step('\n-- B5: a tile that lands mid-run appears in the list with folders on')
     app.toggle_groups(True)
     pump(root, app, 1.6)
     for _ in range(100):
         app._poll()
-        root.update()
+        settle(root, LOOP_CAP)
         if app._plan and app._plan.get('groups'):
             break
         time.sleep(0.05)
@@ -650,7 +742,7 @@ def main():
     pump(root, app, 0.5)
     check('the folders come back when the run ends', app._folders_view_active(), app.gal_title['text'])
 
-    print('\n-- B5: a folder with fewer than four pictures fills its tile')
+    step('\n-- B5: a folder with fewer than four pictures fills its tile')
     for n in (1, 2, 3, 4):
         boxes = zui.App._sheet_cells(200, n)
         check('%d picture(s) -> %d cells' % (n, n), len(boxes) == n, boxes)
@@ -665,7 +757,7 @@ def main():
     check('one picture is drawn across the tile, not into one quarter',
           all(tuple(px[p][:3]) != bg_rgb for p in filled),
           [tuple(px[p][:3]) for p in filled])
-    print('\n-- B6: the strip does not oscillate while tiles land')
+    step('\n-- B6: the strip does not oscillate while tiles land')
     app.toggle_groups(False)
     pump(root, app, 0.6)
     seen = []
@@ -692,12 +784,12 @@ def main():
           (app.gal_bar.winfo_manager(), sorted(app.gal_bar.state())))
 
     # ---- L1: a redraw must not leave the folder tiles sized for a canvas they are no longer in
-    print('\n-- L1: folder tiles are composed for the canvas they are drawn in, redrawn or not')
+    step('\n-- L1: folder tiles are composed for the canvas they are drawn in, redrawn or not')
     app.toggle_groups(True)
     pump(root, app, 1.6)
     for _ in range(120):
         app._poll()
-        root.update()
+        settle(root, LOOP_CAP)
         if app._plan and app._plan.get('groups'):
             break
         time.sleep(0.05)
@@ -729,7 +821,7 @@ def main():
     pump(root, app, 3.5)
     for _ in range(80):
         app._poll()
-        root.update()
+        settle(root, LOOP_CAP)
         time.sleep(0.05)
     check('and so does the re-group that follows a render', laid_out() == settled, (laid_out(), settled))
     # the widths move: a pane that closes, and a window that narrows, must re-lay the tiles out - the "folders doubled
@@ -789,7 +881,7 @@ def main():
     pump(root, app, 0.8)
 
     # ---- L2: the same boundary through its *bindings*, which is what a real pointer drives
-    print('\n-- splitter: the bindings move the boundary, and a drag never re-lays the strip out')
+    step('\n-- splitter: the bindings move the boundary, and a drag never re-lays the strip out')
     app.select_folder(0)
     pump(root, app, 1.0)
     app._layout_user = False
@@ -810,15 +902,15 @@ def main():
           (sash.cget('takefocus'), sash.cget('highlightthickness'), sash.cget('highlightcolor')))
     # a focused sash wears the accent by design, so "at rest" means the keyboard is somewhere else
     app.text.focus_set()
-    root.update()
+    settle(root)
     check('the grip is a 2 px line, quiet at rest',
           app.sash_grip.winfo_width() == 2 and str(app.sash_grip.cget('background')) == app.theme.border,
           (app.sash_grip.winfo_width(), app.sash_grip.cget('background')))
     sash.event_generate('<Enter>')
-    root.update()
+    settle(root)
     hovered = str(app.sash_grip.cget('background'))
     sash.event_generate('<Leave>')
-    root.update()
+    settle(root)
     check('hovering tints it and leaving puts it back',
           hovered == app.theme.accent and str(app.sash_grip.cget('background')) == app.theme.border,
           (hovered, app.sash_grip.cget('background')))
@@ -827,9 +919,9 @@ def main():
     pane_before = app.contents_canvas.winfo_width()
     x, y = sash.winfo_rootx() + sash.winfo_width() // 2, sash.winfo_rooty() + 20
     sash.event_generate('<Button-1>', x=2, y=20, rootx=x, rooty=y)
-    root.update()
+    settle(root)
     sash.event_generate('<B1-Motion>', x=2, y=20, rootx=x + 40, rooty=y)
-    root.update()
+    settle(root)
     check('a press and a motion through the binding move the boundary 1:1',
           app._contents_w == app._even_widths()[zui.COL_PANE] - 40, app._contents_w)
     sash.event_generate('<ButtonRelease-1>', x=2, y=20, rootx=x + 40, rooty=y)
@@ -881,7 +973,7 @@ def main():
     pump(root, app, 0.5)
 
     # ---- zoom: 100 % is the picture's own pixels, and a bigger picture pans inside its own bounds
-    print('\n-- zoom: 100 % draws the picture at its own pixels')
+    step('\n-- zoom: 100 % draws the picture at its own pixels')
     zoomdir = tmp / 'zoom'
     zoomdir.mkdir(parents=True, exist_ok=True)
     big = zoomdir / '20261030-160000_2400x1600_seed501.png'
@@ -909,7 +1001,7 @@ def main():
           app._draw[2:] == app._img.size == (2400, 1600), (app._draw[2:], app._img.size))
     check('so it is wider than the canvas it is drawn on', app._draw[2] > cw, (app._draw[2], cw))
 
-    print('\n-- zoom: 400 % pans, and stops at the picture\'s own edge')
+    step('\n-- zoom: 400 % pans, and stops at the picture\'s own edge')
     app._set_zoom('400%')
     pump(root, app, 0.3)
     x0, y0, w, h = app._draw
@@ -960,7 +1052,7 @@ def main():
     check('the canvas asks for the keyboard those keys need', bool(int(app.canvas.cget('takefocus'))),
           app.canvas.cget('takefocus'))
 
-    print('\n-- zoom: Fit is the largest size that fits - it shrinks a big picture and enlarges a small one')
+    step('\n-- zoom: Fit is the largest size that fits - it shrinks a big picture and enlarges a small one')
     app._set_zoom('Fit')
     pump(root, app, 0.3)
     fw, fh = app._draw[2:]
@@ -975,7 +1067,7 @@ def main():
     check('without overflowing the canvas it fits into', fw2 <= cw and fh2 <= ch, (fw2, fh2, cw, ch))
     check('and keeps its proportions while doing it', abs(fw2 / float(fh2) - 200 / 150.0) < 0.04, fw2 / float(fh2))
 
-    print('\n-- zoom: the level is a view setting, so it outlives the picture')
+    step('\n-- zoom: the level is a view setting, so it outlives the picture')
     app._set_zoom('200%')
     pump(root, app, 0.2)
     saved = zui.load_settings()
@@ -989,7 +1081,7 @@ def main():
           app._draw[:2] == ((cw - 4800) // 2, (ch - 3200) // 2),
           (app._draw[:2], ((cw - 4800) // 2, (ch - 3200) // 2)))
 
-    print('\n-- zoom: the pan never fights the three drags that already own this canvas')
+    step('\n-- zoom: the pan never fights the three drags that already own this canvas')
     app._set_zoom('400%')
     pump(root, app, 0.3)
     x0, y0, w, h = app._draw
@@ -1012,7 +1104,7 @@ def main():
     app.compare_var.set(True)
     app._base_img = None
     app._redraw()
-    root.update()
+    settle(root)
     check('compare still draws over a zoomed picture',
           len(app.canvas.find_withtag('compare')) >= 4, len(app.canvas.find_withtag('compare')))
     check('and its drag does not wear the pan cursor', str(app.canvas.cget('cursor')) == '',
@@ -1029,11 +1121,11 @@ def main():
     app.compare_var.set(False)
     app._pinned = None
     app._redraw()
-    root.update()
+    settle(root)
 
     app.mask_var.set(True)
     app.toggle_mask_mode(True)
-    root.update()
+    settle(root)
     check('the mask is the picture\'s own size', app._mask is not None and app._mask.size == app._img.size,
           (app._mask.size if app._mask is not None else None, app._img.size))
     check('painting wears the pencil, not the pan arrow', str(app.canvas.cget('cursor')) == 'pencil',
@@ -1051,7 +1143,7 @@ def main():
 
     app.crop_var.set(True)
     app.toggle_crop_mode(True)
-    root.update()
+    settle(root)
     check('the crop rectangle wears the crosshair, not the pan arrow',
           str(app.canvas.cget('cursor')) == 'crosshair', app.canvas.cget('cursor'))
     before = app._draw
@@ -1070,23 +1162,23 @@ def main():
     # the bindings, not the handlers: the same synthetic drag has to separate by mode on its own
     app._pan_xy = None
     app._redraw()
-    root.update()
+    settle(root)
     before = app._draw
     app.canvas.event_generate('<Button-1>', x=cx, y=cy)
     app.canvas.event_generate('<B1-Motion>', x=cx + 250, y=cy + 250)
-    app.canvas.update()
+    settle(app.canvas)
     check('a real press-and-drag pans the picture', app._draw != before, (before, app._draw))
     app.canvas.event_generate('<ButtonRelease-1>', x=cx + 250, y=cy + 250)
-    app.canvas.update()
+    settle(app.canvas)
     check('and the release ends the pan', app._pan_grab is None, app._pan_grab)
     app._pan_xy = None
     app.crop_var.set(True)
     app.toggle_crop_mode(True)
-    root.update()
+    settle(root)
     before = app._draw
     app.canvas.event_generate('<Button-1>', x=cx, y=cy)
     app.canvas.event_generate('<B1-Motion>', x=cx + 250, y=cy + 250)
-    app.canvas.update()
+    settle(app.canvas)
     check('the same real drag with crop armed arms the rectangle and leaves the picture alone',
           app._draw == before and app._crop_start is not None and app._pan_grab is None,
           (before, app._draw, app._crop_start, app._pan_grab))
@@ -1094,7 +1186,7 @@ def main():
     app.toggle_crop_mode(False)
     app._set_zoom('100%')
 
-    print('\n-- zoom: Alt+Z reaches the control, and a restart opens at the level it was left at')
+    step('\n-- zoom: Alt+Z reaches the control, and a restart opens at the level it was left at')
     check('the zoom control is on the Alt access key', (app._access or {}).get('z') == 'zoom_btn',
           (app._access or {}).get('z'))
     check('the button underlines the key, the way the rest of the toolbar does',
@@ -1114,7 +1206,7 @@ def main():
     check('the key opens that list', callable(getattr(app.zoom_btn, '_access_invoke', None)),
           getattr(app.zoom_btn, '_access_invoke', None))
     menu.invoke(1)                     # 50 %, straight from the menu the access key opens
-    root.update()
+    settle(root)
     check('picking a level from it changes the zoom, and the button says so',
           app.zoom_var.get() == '50%' and app.zoom_btn.cget('text') == 'zoom 50%',
           (app.zoom_var.get(), app.zoom_btn.cget('text')))
@@ -1124,12 +1216,12 @@ def main():
 
     root9 = tk.Tk()
     app9 = zui.App(root9, Stub(), args)
-    root9.update()
+    settle(root9)
     check('a new window opens at the level the last one was left at',
           app9.zoom_var.get() == '200%', app9.zoom_var.get())
     app9.select_file(big)
     for _ in range(30):
-        root9.update()
+        settle(root9)
         time.sleep(0.02)
         if app9._draw and app9._draw[2:] == (4800, 3200):
             break
@@ -1139,7 +1231,7 @@ def main():
     # A finished render must be drawn whatever the folders switch says. Measured before the fix: with folders off, the
     # file appeared at 9.2 s, its thumbnail and PhotoImage were cached, and NO tile widget existed - `_regroup_soon`
     # returns immediately when grouping is off, so a single-image run never refreshed the strip.
-    print('\n-- layout: a finished render is drawn with folders off')
+    step('\n-- layout: a finished render is drawn with folders off')
     render_dir = Path(tempfile.mkdtemp(prefix='render-'))
     for i in range(3):
         q = render_dir / ('seed%d.png' % i)
@@ -1163,6 +1255,10 @@ def main():
           list(app_r._tile_widgets)[:2])
     root_r.destroy()
 
+    if BLOCKED:
+        print('\n%d block(s) could not be run to completion on this box' % len(BLOCKED))
+        for name, what in BLOCKED:
+            print('  BLOCKED: %s - %s' % (name, what))
     print('\n%d failure(s)' % len(FAILS))
     for f in FAILS:
         print('  FAILED: %s' % f)

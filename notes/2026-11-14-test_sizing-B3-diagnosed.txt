@@ -1,0 +1,240 @@
+NOTE 2026-11-14 - test_sizing.py's B3 stall: what the stack says, and the test-only fix (0.30.1)
+
+WHAT WAS ASKED
+`python test_sizing.py` stalled in its B3 block ("the open-folder pane keeps its pictures inside the canvas"): 52
+PASS lines and then nothing, at 200 s, 600 s and 1800 s, identically at 0.29.1 and 0.30.0 (recorded in
+`notes/2026-11-13-test_sizing-stall-is-pre-existing.txt`). Diagnose the hang, then fix it or make it fail fast with a
+named reason - without weakening an assertion and without deleting a block - and record whether the three
+pre-existing failures of 2026-11-03 become reachable.
+
+THE STACK, AT THE MOMENT OF THE STALL
+Instrumented exactly as the ticket asked: `faulthandler.dump_traceback_later(100, repeat=True)` wrapped around the
+test, so the dump lands inside the stall rather than after it. Nothing in the repo was edited for this: a throwaway
+runner at `C:\Users\kevin\tkdiag\run_sizing.py` did `runpy.run_path(.../test_sizing.py, run_name='__main__')`.
+`timeout 150` on the command; the dump below is the run's own, at 100 s (the process was still inside it at 150 s,
+exit 124, and only that one stack was ever printed - the same one every 100 s):
+
+    -- B3: the open-folder pane keeps its pictures inside the canvas
+    Timeout (0:01:40)!
+    Thread 0x00002528 (most recent call first):
+      File "C:\Program Files\Python311\Lib\tkinter\__init__.py", line 1372 in update
+      File "C:\Users\kevin\ai_bench\image-models-20261020\test_sizing.py", line 88 in pump
+      File "C:\Users\kevin\ai_bench\image-models-20261020\test_sizing.py", line 489 in main
+      File "C:\Users\kevin\ai_bench\image-models-20261020\test_sizing.py", line 1173 in <module>
+      File "<frozen runpy>", line 88 in _run_code
+      File "<frozen runpy>", line 98 in _run_module_code
+      File "<frozen runpy>", line 291 in run_path
+      File "C:\Users\kevin\tkdiag\run_sizing.py", line 4 in <module>
+
+(Line numbers are the pre-change file: `pump`'s `root.update()` was line 88 and the `pump(root, app, 1.2)` after
+`app.select_folder(0)` was line 489.)
+
+So it is a **single `Tk.update()` that never returns**, three lines into B3: not a `mainloop`, not a dialog waiting for
+input, not a `wait_window` on a window that fails to map (a `wait_window` would show `tkinter/__init__.py ... wait_window`
+and a further `mainloop` frame), and not the 80-iteration `_poll` loop before it (that loop is bounded and had already
+finished). The frame is Tk's own event pump: `update` = *run the queue until it is empty*. Nothing ever empties it.
+
+WHAT THE QUEUE IS DOING - INSTRUMENTED, NOT GUESSED
+`zimage_ui` was pre-imported and its methods wrapped (counters, caller frame, and the pane's geometry sampled every
+second) before the test ran. One second inside that `update()`, then the steady state it settles into:
+
+      [update 1.0s] 27 events
+         handlers: {'_show_pane': 13, '_on_strip_resize': 32, '_poll': 1150, '_apply_layout': 126,
+                    '_apply_window_min': 126, '_on_contents_resize': 48, '_on_layout_resize': 1254,
+                    '_contents_settle': 46, '_apply_strip_resize': 11, '_paint': 4, '_fill_view': 16, '_grow': 3,
+                    '_render_contents': 12, '_apply_contents_reflow': 10}
+         callers : [('_on_layout_resize <- __call__:1967', 1254), ('_poll <- pump:85', 1010),
+                    ('_apply_window_min <- _apply_layout:8068', 126), ('_poll <- main:375', 120),
+                    ('_apply_layout <- _sash_move:8196', 77), ('_contents_settle <- _on_contents_resize:8293', 46)]
+         geometry: {'root': (2560, 1417, 'zoomed'), 'contents_canvas': (1, 1),
+                    'contents_frame': (1, 9184, 292, 9184), 'contents_holder': (1, ''),
+                    'gal_canvas': 2524, 'bar': 1, 'on_screen': (0, 1), 'scroll': '0 0 1 9184'}
+      [update 2.1s] ... handlers: {'_show_pane': 5, '_on_contents_resize': 20, '_on_layout_resize': 610,
+                    '_contents_settle': 20, '_fill_view': 5, '_render_contents': 5, '_apply_contents_reflow': 5}
+         callers : [('_on_layout_resize <- __call__:1967', 610), ...]
+         geometry: identical to the line above, and identical again at 3.1, 4.2, 5.2, 6.3, 7.3 and 8.4 s
+
+Read that steady state: the window is *frozen* - root 2560x1417 zoomed, pane canvas **1x1**, pane frame **1 x 9184**,
+scrollregion `0 0 1 9184`, the scrollbar 1 px, and `contents_holder` reports **no geometry manager at all**
+(`(1, '')`). Nothing is moving, and yet `<Configure>` events keep arriving: `_on_layout_resize` is a `<Configure>`
+binding and it is dispatched 610 times a second, every time early-returning through its own guard
+(`self._root_w() == self._layout_w`, so `_apply_layout` is not even called). The work that feeds the queue is the pane
+rebuilding itself: `_render_contents` 5/s destroying and re-creating 96 cells (CONTENT_PAGE_CAP) *into a 1 px canvas*,
+each rebuild scheduling `_on_contents_resize` and `_fill_view` again, each `_apply_contents_reflow` finding that the
+lay-out it just did does not match the metrics the 1 px canvas now gives it, and rebuilding again 60 ms later.
+
+WHY THE PANE IS 1 PX: THE SCREEN, NOT THE DESKTOP
+`contents_holder` has no manager because `set_view_mode` grid_removes it - by design - on every screen except
+`columns` and `images` (`zimage_ui.py:5610`). A fresh profile opens on `view_mode = ... or 'folders'`
+(`zimage_ui.py:2904`), and on the folders-only screen the pane, the prompt column, the picture column and two of the
+three sashes are all removed on purpose. B3 then called `select_folder(0)` **on that screen**: a person cannot do that
+- clicking a folder goes through `_drill_click`, which opens the folder *and* switches to the pictures screen - so the
+block was opening a folder whose pane is not on screen, laying 96 cells into a 1 px canvas, and waiting for a window
+that has nothing to settle. `_show_pane` does not rescue it: it re-grids the holder only for `images`/`columns`
+(`zimage_ui.py:8268`), so on `folders` the rebuild is invisible, unmeasurable, and endless.
+
+That is also why the stall is pre-existing at 0.29.1: the *test* never put the pane on screen, at either version, and
+the app's default screen has been `folders` since the screens were introduced (2026-11-03).
+
+THE FIX - TEST-ONLY, TWO PARTS
+1. **B3 opens on a screen that has the pane**, the way a person does, and says so before it measures anything:
+
+       app.set_view_mode('columns', persist=False)
+       pump(root, app, 1.0)
+       check('the pane is on screen, so what it lays out can be measured',
+             app.contents_holder.winfo_manager() == 'grid' and app.contents_canvas.winfo_width() > 1,
+             (app.view_mode, app.contents_holder.winfo_manager(), app.contents_canvas.winfo_width()))
+
+   No assertion was weakened and no block was dropped: the ten checks B3 already had are unchanged and now run against
+   a pane that is really there (canvas 618 px, bar 14 px, 2 columns of 295 px tiles).
+
+2. **Every wait in the file is bounded.** `update()` cannot be bounded from outside, so the suite no longer calls it:
+   `drain()` is the same loop with a budget (`dooneevent(DONT_WAIT|ALL_EVENTS)` until the queue is empty or
+   `DRAIN_CAP = 4.0` s pass), `settle()` is one accounted-for drain, and `pump()` uses it - plus the 26 other places
+   that called `root.update()`/`win.update()`/`app.canvas.update()` directly. A queue that has not emptied at the cap
+   is reported once per block, as the *fact* rather than as a diagnosis (a long paint and a loop look the same from
+   there, and the numbers say which it was):
+
+       <block> blocked: the event queue did not empty within 4.1 s (98 events dispatched), so this step could not be
+       measured to the end
+
+   with a `block(s) could not be run to completion` summary beside the failure list at the end. `step()` (the block
+   headings, which used to be `print('\n-- ...')`) supplies the block's name, so the message says *where*, not just
+   *that*.
+
+   The cap is 4 s and not 1.5 s because one *honest* paint is long: at `DRAIN_CAP = 1.5` a clean run (2026-11-14,
+   75 s) reported `zoom blocked: ... within 1.5 s (139 events dispatched)` on the 2400x1600 zoom, whose own checks
+   then passed anyway - slow, not looping. What the bound has to catch is the other case: the stall dispatched 42
+   events in 1.5 s while its geometry did not move at all, and 98 in 4.1 s when re-measured.
+
+PROOF THAT THE NEW CHECK AND THE BOUND CAN FAIL
+Run with the fix's own switch neutered - `App.set_view_mode` patched to ignore `'columns'` only, everything else real
+(`C:\Users\kevin\tkdiag\prove_can_fail.py`: pre-imported `zimage_ui`, one patched method, `runpy` for the test - the
+repo is not edited for this):
+
+    [adversarial] set_view_mode('columns') ignored: the pane stays off screen
+    the pane is on screen, so what it lays out can be measured       FAIL ('folders', '', 1)
+
+    B3 blocked: the event queue did not empty within 4.0 s (99 events dispatched), so this step could not be measured
+    to the end
+    the pane lays out the columns its width allows                   FAIL (1, 48, 1)
+    ...
+      BLOCKED: L1 - the event queue did not empty within 4.0 s (127 events dispatched), ...
+      BLOCKED: splitter - the event queue did not empty within 4.1 s (92 events dispatched), ...
+
+    38 failure(s)
+      FAILED: a sash at every boundary between them
+      ...
+      FAILED: a real press-and-drag pans the picture
+    exit=1, wall 183 s
+
+So: the new check fails when the pane is not on screen (it passes when it is), the bound names the blocks it gave up on
+instead of hanging, and that run **finished on its own** in 183 s against 1800 s and no end before. The same
+experiment is worth reading as a measure of the guard's limits too, because four attempts at it behaved differently:
+
+    attempt  cap     outcome
+    1        1.5 s   finished, exit 1, 213 s, B3/L1/splitter blocked
+    2        4.0 s   still inside the L1 block when the harness stopped it at 420 s
+    3        4.0 s   still inside the L1 block at 700 s (faulthandler: inside `drain`, called from `settle`, from the
+                      80-round loop at test_sizing.py:824 - i.e. inside the *bounded* wait, not the app)
+    4        4.0 s   finished, exit 1, 183 s, B3/L1/splitter blocked   <- quoted above
+
+and one attempt at 4.0 s died with a Windows access violation (exit 0xC0000005, 153 s, after printing two faulthandler
+stacks). That is a storming window being hammered from Python, not a path the fixed suite takes: the fixed suite puts
+the pane on screen and never reaches this state. The bound is a net under the suite, not a way to keep a storming
+window running - which is why the fix is the screen switch and the bound is the safety line beside it.
+
+THE RUN ON THIS BOX, WHOLE
+`cd C:\Users\kevin\ai_bench\image-models-20261020 && timeout 540 .venv\Scripts\python.exe test_sizing.py`, one Tk test at
+a time: **exit 1, wall time 74.9 s**. Run five times while this was written (74.2, 74.9, 74.9, 75.2 s and one at 74 s
+by the harness's own clock); the first and the last runs' failure lists are identical, line for line. The tail:
+
+    -- B3: the open-folder pane keeps its pictures inside the canvas
+    the pane is on screen, so what it lays out can be measured       PASS ('columns', 'grid', 618)
+    the pane lays out the columns its width allows                   PASS (2, 295, 618)
+    its cells sit inside the canvas                                  PASS (609, 618)
+    the scrollbar is a real width, queried from the widget           PASS 14
+    the canvas is exactly the width the sash promised it, so the pictures keep their column PASS (618, 618)
+    and the bar has its own column beside it rather than a slice of the canvas PASS (14, 1260, 1260)
+    a resized pane reflows inside its new width                      PASS (609, 618)
+    closing the folder leaves the pane gridded, not collapsed         PASS ('grid', True)
+    with its empty state in it, not a blank column                   PASS (True, 1)
+    and the strip did not gain the width back, so it has nothing to re-lay out PASS (604, 604, 618, 618)
+    ...
+    -- layout: a finished render is drawn with folders off
+    the new picture is in the strip list                             PASS ['finished_render.png', 'seed2.png', 'seed1.png']
+    and a tile widget was built for it                               FAIL []
+
+    22 failure(s)
+      FAILED: and a sash at every boundary between them
+      FAILED: each sash sits between the two columns it separates
+      FAILED: prompt: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip
+      FAILED: the root grid carries the same numbers as the columns plus their padding
+      FAILED: and the pane is the one at its own cap, which is stated rather than accidental
+      FAILED: and the strip is then wide enough for a 206 px tile
+      FAILED: the strip|pane sash widens the strip by the drag and narrows the pane by it
+      FAILED: strip|pane stops with the pane at its stated minimum
+      FAILED: Left/Right move the strip|pane boundary 16 px each way
+      FAILED: Shift moves it 64, or to the end of its range when that is nearer
+      FAILED: which is what its control rows need, so nothing in it is clipped
+      FAILED: and at the other end the gallery column is its two floors and the prompt has the rest
+      FAILED: with no folder open the pane is still gridded
+      FAILED: and the pane is the same width it was            (x3)
+      FAILED: a full row of tiles is laid out
+      FAILED: the columns and the tile are what the rule asks for
+      FAILED: the smallest window still shows a full row
+      FAILED: a press and a motion through the binding move the boundary 1:1
+      FAILED: and the pane canvas follows it
+      FAILED: and a tile widget was built for it
+
+All 21 blocks ran; no `blocked:` line appeared at `DRAIN_CAP = 4.0`, so nothing was given up on (at the earlier 1.5 s
+cap one honest long paint was reported - `zoom blocked: ... 139 events` - and that block's own checks passed anyway).
+The remaining failures are *not* the stall and *not* the desktop: they are the four-column screen. 9 of the 22 are the
+pane being grid_removed; the rest are the prompt column and two sashes being removed with it, plus the two `strip|pane`
+measurements and the strip's first-page tile checks that follow from a folder-list screen. Measured, rather than
+assumed: the same file run with `set_view_mode` patched to do nothing at all leaves the app on its four-column screen
+from `__init__`, and those 9 checks stop failing (22 -> 15 failures, `C:\Users\kevin\tkdiag\prove.txt`, exit 1, 74 s).
+That family is a test that assumes the columns screen while the app opens on `folders` - it predates this change and is
+not this ticket; the one place B3 needs the columns screen, it now asks for it.
+
+THE THREE PRE-EXISTING FAILURES OF 2026-11-03 - REACHABLE AT LAST
+`STATE-2026-11-03.md` recorded three, and every run since has stopped before them. They are now reached and run:
+
+    a real press-and-drag pans the picture                           PASS ((-4492, -2603, 9600, 6400),
+                                                                            (-4242, -2353, 9600, 6400))
+    and the release ends the pan                                     PASS None
+    the same real drag with crop armed arms the rectangle and leaves the picture alone
+                                                                     PASS ((-4242, -2353, ...), (308, 597), None)
+    and a tile widget was built for it                               FAIL []
+
+Two of the three **pass** - the drag and the crop drag pan/arm as recorded - so the "environment-dependent" reading of
+2026-11-03 was wrong about them: they were unreachable, not broken. The third, `and a tile widget was built for it`
+(the finished-render probe, last block of the file), **still fails**: `app_r._tile_widgets` is `[]` while the file
+*is* in `_files` (the check above it passes). That is now a real, reachable, named failure and it is left named.
+
+THE OTHER TWO SUITES, RE-RUN (one at a time, this box)
+    python test_gallery_ui.py   -> exit 0, ALL PASS, 78.52 s (last lines: "ALL PASS", "gallery was ...")
+    python test_tiles.py        -> exit 0, ALL PASS,  2.99 s ("nothing is lost in the split PASS 180 + 0 of 180")
+
+WHAT AN APP-SIDE FIX WOULD BE, FOR WHOEVER OWNS zimage_ui.py
+Not done here - this change is confined to `test_sizing.py` + `version.py` - but the loop is the app's, not the test's:
+opening a folder while the open-folder pane is not on screen (`view_mode == 'folders'`) builds a page of cells into a
+1 px canvas and reflows it for ever, because `_show_pane` only re-grids the holder on `images`/`columns`
+(`zimage_ui.py:8256-8271`) and nothing else tells `_render_contents` that its pane is not on screen. Either
+`select_folder` should refuse/defer when the pane is not mapped, or `_render_contents` should not page into a 0-1 px
+canvas.
+
+Two further notes for that owner, read rather than measured at this point: `_render_contents` calls
+`contents_canvas.update_idletasks()` (a nested, unbounded Tk wait *inside* the app, which no test-side bound can
+reach), and the pane's rebuild is scheduled from both a timer (`_contents_settle`, 60 ms) and idle
+(`_idle(self._on_contents_resize)`), which is how one 1 px pane can keep the queue fed without anybody asking it to.
+With the pane on screen neither is a problem on this box - five clean runs, no `blocked:` line - but the app can still
+spin if that state is ever reached in a person's window.
+
+VERSION
+`version.py` only: 0.30.0 -> **0.30.1** (a fix, so patch +1). A test that hangs is a bug in the suite and a patch is
+what the rule asks for; no feature moved, so the minor does not.
+
+FILES
+`test_sizing.py` (the bounded pump/drain/settle, `step()` block names, B3's screen, the blocked summary), `version.py`,
+`notes/2026-11-14-test_sizing-B3-diagnosed.txt` (this file).
