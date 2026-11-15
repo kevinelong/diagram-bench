@@ -3,7 +3,7 @@
 **The suite is 1319 checks** (1319 passed, 0 failed, 0 skipped on this desktop) across the three window
 suites - `test_gallery_ui.py` 1078, `test_sizing.py` 213, `test_tiles.py` 28 - and
 `check_doc_counts.py` fails when this sentence and the run disagree.
-: the layout's and the ranking's decisions, and what the suite now encodes (0.33.0, 2026-11-14)
+: the layout's and the ranking's decisions, and what the suite now encodes (0.33.1, 2026-11-14)
 
 This page is the durable half of the state record. The dated `STATE-YYYY-MM-DD.md` files at the root are the running
 log of what was done on a day and what it measured; this one lists the **decisions the tests now enforce**, so a change
@@ -27,7 +27,7 @@ starting value on a bad argument. They are not limits any more, and any clamp th
 `480` clamp left in `_sash_apply` after the caps were removed is what snapped the first motion of every drag on the
 strip|pane boundary back to 480 px (found 2026-11-14 by driving the drag through the binding, fixed in 0.31.0).
 
-## The rank order: one function, and the evidence beside it (0.33.0)
+## The rank order: one function, and the evidence beside it (0.33.1)
 
 `order: Wins` used to be two hand-written sort keys - one in `_sheet_paths` (the strip's folder tile) and one in
 `_render_contents` (the pane) - and both ranked on raw wins. They are gone. The tile, the pane and the strip's flat list

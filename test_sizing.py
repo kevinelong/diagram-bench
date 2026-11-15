@@ -316,13 +316,22 @@ def main():
         and app.text.master.winfo_rootx() + app.text.master.winfo_width() <= app.prompt_sash.winfo_rootx()
         and app.prompt_sash.winfo_rootx() + app.prompt_sash.winfo_width() <= app.canvas.master.winfo_rootx()),
         [(s.name, s.winfo_rootx(), s.winfo_width()) for s in app.sashes])
+    # The grip's colour is *state*, not layout: a pointer resting over a sash tints it to the hover tone, so a machine
+    # whose mouse happened to sit at (1280, 720) read a hovered grip and called the layout wrong (2026-11-14). Drive the
+    # resting state the sash sets on Leave, then assert - and put the two colours in the detail, because the old tuple
+    # printed only the grip width and hid which term had failed.
     for s in app.sashes:
+        s.event_generate('<Leave>')
+    pump(root, app, 0.15)
+    for s in app.sashes:
+        grip_bg = str(s.grip.cget('background'))
+        ring = str(s.cget('highlightcolor'))
         check('%s: 8 px hit area, resize cursor, tab stop with an accent ring, a quiet 2 px grip' % s.name,
               6 <= s.winfo_width() <= 8 and s.cget('cursor') == 'sb_h_double_arrow' and bool(s.cget('takefocus'))
               and int(s.cget('highlightthickness')) > 0
-              and str(s.cget('highlightcolor')) == app.theme.accent
-              and s.grip.winfo_width() == 2 and str(s.grip.cget('background')) == app.theme.border,
-              (s.winfo_width(), s.cget('cursor'), s.cget('takefocus'), s.grip.winfo_width()))
+              and ring == app.theme.accent
+              and s.grip.winfo_width() == 2 and grip_bg == app.theme.border,
+              (s.winfo_width(), s.cget('cursor'), s.cget('takefocus'), s.grip.winfo_width(), grip_bg, ring))
 
     # the split is even, subject to each column's own floor, and the leftover pixels go to the left on purpose
     content = app._content_w()
