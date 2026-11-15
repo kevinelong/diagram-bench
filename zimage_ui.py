@@ -6777,6 +6777,7 @@ class App:
         a, b = history.pop()
         undone = pair_rank.unrecord(r['state'], a, b)
         pair_review.save_state(r['state'])
+        self._rank_cache = None        # the standing changed, so the cached strip order is from the wrong records
         r['pair'] = None
         r['queue'] = None          # re-derive: the undone pair sorts first again
         self._review_show_next()
@@ -7191,12 +7192,26 @@ class App:
             winner = {'left_wins': a, 'right_wins': b}.get(choice)
             to_delete = pair_rank.record(r['state'], a, b, choice)
             if winner:
-                rec = pair_rank.record_of(winner)
-                self.hint.configure(text='%s now %dW-%dL (rank %d)' % (
-                    Path(winner).name, rec['wins'], rec['losses'], int(rec['wins'])))
+                # The badge's own text, so the window and the tile say the same thing: wins, losses, and the bouts the
+                # claim rests on. The place in the order comes from `pair_rank.order`, the one order the surfaces use -
+                # it used to print the win count and call it a rank.
+                pool = [str(p) for p in (r['state'].get('paths') or [])]
+                place = 0
+                try:
+                    if winner in pool:
+                        place = pair_rank.order(pool).index(winner) + 1
+                except Exception:
+                    place = 0
+                self.hint.configure(text='%s now %s%s' % (
+                    Path(winner).name, pair_rank.badge(winner),
+                    (' - rank %d of %d' % (place, len(pool))) if place else ''))
             else:
                 self.hint.configure(text='tie recorded')
             pair_review.save_state(r['state'])
+            # The strip's rank order is cached against the picture *set*, and a bout changes nobody's membership - only
+            # their standing - so the cache has to be dropped by hand or the strip would keep the order from before the
+            # win while the pane and the tiles already show the new one.
+            self._rank_cache = None
             r.setdefault('history', []).append((a, b))     # what Up retracts
             r['pair'] = None
             if r['queue']:
@@ -7463,11 +7478,11 @@ class App:
         return grey_bits >= FOLDER_DISTINCT or colour_delta >= FOLDER_COLOUR
 
     def _record_of(self, path):
-        """This picture's standing - wins, losses, ties, bouts - memoised by mtime.
+        """This picture's standing - wins, losses, ties, bouts - memoised by the mtimes of the picture and its sidecar.
 
-        `_wins_of` was the only memoised reader, but the list's rank order needs losses as well, and a sidecar read
-        per picture on every refresh is exactly what the memo exists for. Same cache, same stamp: a rewritten sidecar
-        changes the mtime, so the entry is dropped.
+        Every rank order now comes from `pair_rank.order`, which reads the sidecars itself, so this memo exists for the
+        tile's wins stamp and for `_wins_of`. Same cache, same stamp: a rewritten sidecar changes the mtime, so an entry
+        is dropped when the record it describes changes.
         """
         cache = getattr(self, '_wins_cache', None)
         if cache is None:
@@ -7506,23 +7521,18 @@ class App:
         window = items[-FOLDER_SCAN:] if len(items) > FOLDER_SCAN else items
         # A folder with recorded winners shows them: after an A/B review the folder's best is a measured thing, and a tile
         # that still showed the newest would hide the very result the review produced. Folders with no wins keep the old
-        # rule exactly, because the sort falls back to newest-first when every win count is 0.
-        # wins first, and among equal wins the plan's own order newest-first - the tile has always trusted the list
-        # rather than the filesystem's mtimes, which are coarse and lie after a copy
+        # rule exactly, because the rank leaves everyone level and the newest-first tie-break decides.
         try:
-            # The same key the open folder's pane uses: wins desc, losses asc, then newest, then name. The tile used
-            # to rank by wins alone and break ties by plan position, so a featured picture could sit at position 11 in
-            # the pane while the tile showed it and skipped the two ranked above it (reported 2026-10-31: "why is one
-            # of four featured images ... not in the top ranked folder items"). Stable two-pass: newest first, then
-            # rank, so ties keep the newest.
-            # wins desc, losses asc, then the plan's own position - which is oldest-first in `items`, so -position is
-            # newest-first. The same three keys the pane uses, and the tile can never feature a picture that outranks
-            # nothing: measured 2026-10-31, a W4/L2 picture sat at pane position 11 yet was featured, because this
-            # ranked on wins alone and broke ties by position.
-            def _rank(t):
-                rec = self._record_of(Path(t[1]['path']))
-                return (-rec['wins'], rec['losses'], -t[0])
-            ranked = [row for _pos, row in sorted(enumerate(window), key=_rank)]
+            # One order, in pair_rank: fitted strength first, then wins, losses and the name (`pair_rank.order`). The
+            # pane asks the same function, so the tile can never feature a picture the pane ranks lower - and both used
+            # to spell the key out by hand, twice, which is how they drifted apart before (reported 2026-10-31).
+            # Two-pass, newest first and then rank, kept as one argument: the plan's own order is oldest-first in
+            # `items`, so reversed it is newest-first, and it settles whatever the rank cannot separate. The tile has
+            # always trusted the plan rather than the filesystem's mtimes, which are coarse and lie after a copy.
+            import pair_rank
+            paths = [row['path'] for row in window]
+            by_rank = {p: i for i, p in enumerate(pair_rank.order(paths, tie_break=paths[::-1]))}
+            ranked = sorted(window, key=lambda row: by_rank.get(row['path'], len(window)))
         except Exception as exc:
             log_error('rank order in a folder tile', exc)             # newest-first, as if nobody had won
             ranked = list(window)
@@ -7833,17 +7843,18 @@ class App:
         self.contents_title.set_title(caption, width_px=max(200, width - 6))
         if self._sort_wins():
             try:
-                # Wins desc, losses asc, then newest, then name - the same key the flat list uses. This used to be
-                # pair_rank's fitted strength, which is the better order when bouts exist but has no tie-break at
-                # all for pictures that never faced one, so the first order of a fresh folder read as random
-                # (reported 2026-10-31). One ordering everywhere is also the reason a tile's best matches the pane's
-                # first picture.
-                # Stable two-pass, exactly as the folder tiles do it: newest first, then rank. One key, one order -
-                # the pane and a tile in the strip must never disagree about which pictures are the best four.
-                items.sort(key=lambda r: r['path'])                    # name ascending within a tie
-                items.sort(key=lambda r: row_stamp(r), reverse=True)   # newest first
-                items.sort(key=lambda r: (-self._record_of(Path(r['path']))['wins'],
-                                          self._record_of(Path(r['path']))['losses']))
+                # One order everywhere: `pair_rank.order` - fitted strength, then wins, losses, then the name. It used
+                # to be spelled out here as (-wins, -losses), in a second copy of the tile's key, so the two could drift
+                # apart and did (reported 2026-10-31). Strength was tried here once and reverted because it had no
+                # tie-break for pictures that never faced a bout; `order` answers that with the thin-record rule and a
+                # name last, which is why it is back.
+                # Stable two-pass, newest first then rank, kept as one argument: the newest-first pass settles whatever
+                # the rank cannot separate, so two pictures a folder lists side by side stay in the order they landed.
+                import pair_rank
+                paths = [r['path'] for r in items]
+                newest_first = [r['path'] for r in sorted(items, key=row_stamp, reverse=True)]
+                by_rank = {p: i for i, p in enumerate(pair_rank.order(paths, tie_break=newest_first))}
+                items.sort(key=lambda r: by_rank.get(r['path'], len(items)))
             except Exception as exc:
                 # A rank that cannot be computed must not empty the pane. Reported 2026-10-31 as a pass where the folder
                 # list worked and the pictures did not; this is the one path that could produce exactly that, so it now
@@ -8958,7 +8969,8 @@ class App:
         elif self._sort_wins():
             import pair_rank
             with timed('refresh.sort_wins'):
-                files = pair_rank.sort_by_wins(files)
+                # the list arrives newest-first, and that order settles whatever the rank cannot separate
+                files = pair_rank.order(files, tie_break=files)
         elif self._sort_sequence():
             with timed('refresh.sequence_order'):
                 files = self._sequence_order(files)

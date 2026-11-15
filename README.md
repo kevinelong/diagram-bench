@@ -1541,10 +1541,14 @@ its prompt:
 
 Because it sits on the file, a picture keeps its record when the gallery is regrouped, when it is moved to another
 folder, and across restarts - and it **sorts first wherever it is shown next**, which is what "winners go first even
-when moved to a different folder" needs. `order: Wins` in the gallery panel sorts the strip and the folder pane by
-**most wins, then the better win rate, then fewer losses, then newest** (raw wins alone would let a picture that was
-compared twenty times outrank one that won every bout it entered). The folder pane shows each picture's tally as a small
-badge (`4W`, `4W 1L`).
+when moved to a different folder" needs. `order: Wins` in the gallery panel asks one function, `pair_rank.order`, from
+the strip, the folder pane and the folder tiles, so the three cannot disagree. It ranks by **fitted Bradley-Terry
+strength** - a win over a picture that never wins is not worth a win over the one that beats everybody, which raw win
+counts cannot express - and then by **most wins, fewest losses, newest, then the name**, which is what settles pictures
+whose strength is level. A picture with **fewer than three decided bouts** (`MIN_DECIDED_BOUTS`) has no fit worth
+trusting, so it is ordered after the pictures that have one, by its record instead. The folder pane shows each picture's
+tally as a small badge: **wins, losses, and the bouts behind them** (`12W-1L (13)`, `1W (2)`), so two wins out of two
+cannot pass for twelve out of thirteen.
 
 Records accumulate; `Reset wins in this folder` in the window is the one explicit way to start over, and it clears only
 the record, never the prompt or the file. It **asks first** (2026-10-30): a yes/no naming how many pictures are about

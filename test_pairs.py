@@ -8,6 +8,7 @@ differ by a lot, and one unrelated, so the correct first pair is knowable.
 """
 import argparse
 import json
+import os
 import sys
 import tempfile
 import time
@@ -156,15 +157,16 @@ def main():
     check('the comparison is remembered so it is not asked again',
           len(st['decisions']) == 3 and pr.remaining(st) == [], len(st['decisions']))
 
-    # ranking: wins, then rate, then fewer losses
+    # ranking: wins, then fewer losses, then the name
     for _ in range(3):
         rank.record(st, c, a, 'left_wins')          # c: 3W 1T, a: 1W 4L
     rank.record(st, b, a, 'left_wins')              # b: 1W 1T 1L
     order = [Path(p_).name for p_ in rank.sort_by_wins([a, b, c])]
     check('most wins come first', order[0] == 'c.png', order)
     check('the tail is ordered by record', order[1] == 'b.png' and order[2] == 'a.png', order)
-    check('a badge says what a picture has done',
-          rank.badge(c).startswith('%dW' % rank.record_of(c)['wins']), (rank.badge(c), rank.record_of(c)))
+    check('a badge says what a picture has done, and how many bouts that is',
+          rank.badge(c) == '%dW (%d)' % (rank.record_of(c)['wins'], rank.record_of(c)['bouts']),
+          (rank.badge(c), rank.record_of(c)))
     check('an untouched picture has no badge', rank.badge(pic('d', 'uncompared')) == '', rank.badge(pic('d', 'uncompared')))
 
     # moved to another folder: the record goes with the file, so it ranks first in its new home
@@ -317,6 +319,81 @@ def main():
           str(order))
     check('no bouts at all leaves everyone level', len(set(pair_rank.bt_strength([a]).values())) == 1,
           str(pair_rank.bt_strength([a])))
+
+    print('\n-- one order: the fit decides, thin records follow, and the input order never shows')
+    # 2. is not here: "the pane and the tile agree" needs the window, and lives in test_gallery_ui.py.
+    rank_dir = Path(tempfile.mkdtemp(prefix='order-'))
+
+    def standing(name, wins, losses, ties=0, vs=None, when=None):
+        """A picture with a record and the per-opponent tallies the fit reads. `when` stamps both files, for ties."""
+        p = rank_dir / (name + '.png')
+        p.write_bytes(b'x')
+        p.with_suffix('.json').write_text(_json.dumps({'image': str(p), 'wins': wins, 'losses': losses,
+                                                       'ties': ties, 'bouts': wins + losses + ties,
+                                                       'vs': vs or {}}), encoding='utf-8')
+        if when is not None:
+            os.utime(p, (when, when))
+            os.utime(p.with_suffix('.json'), (when, when))
+        return str(p)
+
+    def names(paths):
+        return [Path(p).name for p in paths]
+
+    # 1. the pair the raw win count was cheapest on: a 3W-0L whose three wins are all against the picture that always
+    #    loses, beside a 12W-1L that beat that same picture eleven times and the folder's best once. The perfect record
+    #    must not present itself above the earned one.
+    weak = standing('weak', 0, 15, vs={'farm3.png': [0, 3, 0], 'earn12.png': [0, 11, 0]})
+    farm3 = standing('farm3', 3, 0, vs={'weak.png': [3, 0, 0]})
+    best = standing('best', 6, 4, vs={'earn12.png': [3, 1, 0]})
+    earn12 = standing('earn12', 12, 1, vs={'weak.png': [11, 0, 0], 'best.png': [1, 1, 0]})
+    crew = [weak, farm3, best, earn12]
+    ranked = names(pair_rank.order(crew))
+    check('a 3W-0L does not outrank a 12W-1L', ranked.index('earn12.png') < ranked.index('farm3.png'), ranked)
+    strong = pair_rank.bt_strength(crew)
+    check('and the fit is why: beating only the picture that always loses earns no strength',
+          strong[farm3] < strong[earn12],
+          'farm3 %.4f, earn12 %.4f' % (strong[farm3], strong[earn12]))
+
+    # 3. determinism: three equal records written inside one second, so nothing but the rule can separate them
+    tied = [standing(n, 1, 1, when=1_700_000_000) for n in ('tie_c', 'tie_a', 'tie_b')]
+    once = names(pair_rank.order(tied))
+    check('the same set comes back in the same order twice', names(pair_rank.order(tied)) == once, once)
+    check('and shuffling the input changes nothing',
+          names(pair_rank.order([tied[2], tied[0], tied[1]])) == once,
+          (once, names(pair_rank.order([tied[2], tied[0], tied[1]]))))
+
+    # 4. the point of the whole change: a beats b, b beats c, a beats c; d wins five bouts against a picture that
+    #    never wins. Raw wins put d first and cannot say what those wins were worth - the fit can.
+    nobody = standing('nobody', 0, 5, vs={'d.png': [0, 5, 0]})
+    a_ = standing('a', 3, 0, vs={'b.png': [2, 0, 0], 'c.png': [1, 0, 0]})
+    b_ = standing('b', 1, 2, vs={'a.png': [0, 2, 0], 'c.png': [1, 0, 0]})
+    c_ = standing('c', 0, 2, vs={'a.png': [0, 1, 0], 'b.png': [0, 1, 0]})
+    d_ = standing('d', 5, 0, vs={'nobody.png': [5, 0, 0]})
+    seen = [nobody, a_, b_, c_, d_]
+    by_count = names(pair_rank.sort_by_wins(seen))
+    by_rank = names(pair_rank.order(seen))
+    check('raw wins put the farmed picture first - which is what the counts cannot tell apart',
+          by_count[0] == 'd.png', by_count)
+    check('strength beats count: five wins over a picture that never wins do not outrank winning the head-to-heads',
+          by_rank[0] == 'a.png' and by_rank.index('a.png') < by_rank.index('d.png'), by_rank)
+
+    # the thin-record rule: two decided bouts is not a ranking, so such a picture follows the ones that have a fit
+    thin2 = standing('thin2', 2, 0, vs={'sure.png': [2, 0, 0]})
+    sure = standing('sure', 4, 1, vs={'thin2.png': [0, 2, 0], 'other.png': [4, 0, 0]})
+    other = standing('other', 0, 4, vs={'sure.png': [0, 4, 0]})
+    check('a picture with fewer than %d decided bouts is ordered after the ones that have a fit'
+          % pair_rank.MIN_DECIDED_BOUTS,
+          names(pair_rank.order([thin2, sure, other])).index('thin2.png') == 2,
+          names(pair_rank.order([thin2, sure, other])))
+
+    # 5. the badge carries the evidence: wins, losses, and the bouts behind them
+    one_win = standing('onewin', 1, 0, ties=1)
+    check('a badge with no loss reads as wins and the bout count', pair_rank.badge(one_win) == '1W (2)',
+          pair_rank.badge(one_win))
+    check('a full record reads wins, losses, and the bouts behind them',
+          pair_rank.badge(earn12) == '12W-1L (13)', pair_rank.badge(earn12))
+    check('and no bout at all means no badge', pair_rank.badge(standing('fresh', 0, 0)) == '',
+          pair_rank.badge(standing('fresh', 0, 0)))
 
     print('\n-- undo: going back must retract exactly what it added')
     u = win_dir = Path(tempfile.mkdtemp(prefix='undo-'))

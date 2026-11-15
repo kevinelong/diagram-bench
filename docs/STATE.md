@@ -1,9 +1,9 @@
 # State
 
-**The suite is 1315 checks** (1314 passed, 0 failed, 1 skipped) across the three window
-suites - `test_gallery_ui.py` 1074, `test_sizing.py` 213, `test_tiles.py` 28 - and
+**The suite is 1319 checks** (1319 passed, 0 failed, 0 skipped on this desktop) across the three window
+suites - `test_gallery_ui.py` 1078, `test_sizing.py` 213, `test_tiles.py` 28 - and
 `check_doc_counts.py` fails when this sentence and the run disagree.
-: the layout's decisions, and what the suite now encodes (0.32.1, 2026-11-14)
+: the layout's and the ranking's decisions, and what the suite now encodes (0.33.0, 2026-11-14)
 
 This page is the durable half of the state record. The dated `STATE-YYYY-MM-DD.md` files at the root are the running
 log of what was done on a day and what it measured; this one lists the **decisions the tests now enforce**, so a change
@@ -19,13 +19,40 @@ of policy has one place to be noticed in. It is deliberately short and is meant 
 | **no caps** where the reader is steering - a column grows until the window stops it, and the tile grid reflows | 2026-11-02 | `_column_caps` | `and no column is held by a cap: the pane takes the same share as the other three` |
 | floors that would together exceed the window are **scaled to fit** so a drag cannot jam at low == high | 2026-11-02 | `_column_floors(width=)` | `test_gallery_ui.py`: `floors shrink to fit a narrow window instead of exceeding it` |
 | a remembered width of **0 is a width**, not "never set" | 2026-11-14 | `_px_setting` | `a fresh start reads the same three boundaries back`, `so a window that opens on that file starts with a layout the reader set` |
-| the documents' counts are **measured against the suites**, never remembered | 2026-11-14 | `check_doc_counts.py` | the three window suites print their own total, the checker sums them and fails on a doc whose number disagrees; today no document states one, and the run says so |
+| the documents' counts are **measured against the suites**, never remembered | 2026-11-14 | `check_doc_counts.py` | the three window suites print their own total, the checker sums them and fails naming the file, the line, the number claimed and the number measured; the sentence at the top of this page is one it reads |
 | a check this box **cannot answer** is `SKIP`ped with its reason, and is in neither count | 2026-11-14 | `test_sizing.py`: `skip()`, `hit_area()` | the summary line prints the skip count and the tail names every skipped check and why; the screen-coordinate hit-area probe skips, rather than failing, on a desktop that answers `winfo_containing` for nothing |
 
 The pane's `CONTENTS_W_MIN` (180) and `CONTENTS_W_MAX` (480) survive only as the **stored default** width and as the
 starting value on a bad argument. They are not limits any more, and any clamp that still reads them is a bug: the
 `480` clamp left in `_sash_apply` after the caps were removed is what snapped the first motion of every drag on the
 strip|pane boundary back to 480 px (found 2026-11-14 by driving the drag through the binding, fixed in 0.31.0).
+
+## The rank order: one function, and the evidence beside it (0.33.0)
+
+`order: Wins` used to be two hand-written sort keys - one in `_sheet_paths` (the strip's folder tile) and one in
+`_render_contents` (the pane) - and both ranked on raw wins. They are gone. The tile, the pane and the strip's flat list
+now ask `pair_rank.order(paths, tie_break=<their own newest-first pass>)`, so there is one definition of "best" and no
+surface can drift from another. The order is **fitted Bradley-Terry strength first** (`bt_strength`, fitted from the
+per-opponent tallies in the sidecars), then the plain record: **most wins, fewest losses, then the name**. Strength is
+what raw counts cannot express - five wins over a picture that never wins must not outrank winning a head-to-head
+against the picture that beats everyone - which `test_pairs.py` now pins directly ("strength beats count: five wins over
+a picture that never wins do not outrank winning the head-to-heads").
+
+**The thin-record rule.** A picture with fewer than `MIN_DECIDED_BOUTS` (**3**) decided bouts - `wins + losses`, not
+`bouts`, which counts ties - has no fit worth trusting: one or two results can drive a fitted strength to the floor. Such
+a picture is ordered *after* every picture that has a fit, by its own record. One comparison is therefore never
+presented as a ranking, and a thin record never sinks below a picture nobody has compared at all.
+
+| what it settles | why |
+|---|---|
+| the tile/pane badge: `12W-1L (13)`, `1W (2)`, `''` | the parenthesis is the evidence: two wins out of two is not twelve out of thirteen. No bout at all means no badge, and the window's review hint speaks the same text |
+| `rank_key` = `(-wins, losses, name)` | the *tail* of `order`, not an order of its own. Its old docstring claimed the win rate "protects against participation bias": it never did - the rate was the second key, so a 12W-1L beat a 3W-0L on wins alone, and with wins equal the rate and the loss count agree. The name is last because pictures written inside one second tie on mtime, and a stable sort then keeps whatever order the caller passed in |
+| pairing is **untouched** | `pair_review.pair_up` and `EXHAUSTIVE_MAX` are exactly as they were. This changes what "best" means after a review, never which pictures a review offers |
+
+The two keys were also the reason the tile and the pane could disagree (reported 2026-10-31), so the surface test is
+about agreement rather than about a number: `test_gallery_ui.py`, "the pane and a folder tile ask one function, so they
+cannot disagree about the best four" - a five-picture ladder whose strength runs oldest-first, so recency, raw counts and
+the input list each give a different answer from the fit.
 
 ## The boundary itself (the four properties of a good divider)
 

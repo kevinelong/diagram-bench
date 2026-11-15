@@ -1,0 +1,57 @@
+NOTE 2026-11-14 - the rank order is one function now: fitted strength, then the record (0.33.0)
+
+WHAT WAS ASKED
+`order: Wins` ranked on raw wins, and it ranked on raw wins in two places at once: `_sheet_paths` (the strip's folder
+tile) spelled out `(-rec['wins'], rec['losses'], -t[0])` and `_render_contents` (the pane) spelled out
+`(-wins, -losses)`. The two copies are what let the tile feature a picture the pane ranked 11th (reported 2026-10-31).
+`pair_rank` already held the better method - `bt_strength`, a Bradley-Terry fit over the per-opponent tallies in the
+sidecars - and nothing in the window called it. `rank_key`'s docstring claimed the win rate "protects against
+participation bias", which it cannot: the rate was the *second* key.
+
+WHAT CHANGED
+- `pair_rank.order(paths, tie_break=None)` is the one answer to "what is the rank order": fitted strength first, then
+  `rank_key` - most wins, fewest losses, then the name. `tie_break` is the caller's own newest-first pass (the tile's
+  plan order, the pane's `row_stamp` pass, the strip's timeline), so the stable two-pass each surface documented stays
+  meaningful instead of being overwritten by an alphabetical last key.
+- `MIN_DECIDED_BOUTS = 3`: fewer than three decided bouts (wins + losses, not `bouts`, which counts ties) is no fit, so
+  such a picture is ordered after the pictures that have one, by its record.
+- Both hand-written keys are gone; the tile, the pane and the strip's flat list call `order`. `sort_by_strength` is now
+  `order`; `sort_by_wins` stays as the raw-count order (it is what the strength-beats-count test compares against).
+- `badge` -> `12W-1L (13)` / `1W (2)` / `''`, and the review window's hint speaks the same text. It used to say
+  "(rank N)" while printing the *win count* as N; N is now the actual place in `order`.
+- A recorded win (or an undo) drops `_rank_cache`: the strip's order is cached against the picture *set*, and a bout
+  changes nobody's membership, so the strip would have kept the order from before the win while the pane and the tiles
+  already showed the new one. The folder tile already had this defence (its `_heads` key carries a wins stamp).
+- `rank_key` -> `(-wins, losses, name)`, docstring corrected to say what it does now and why the rate and then the
+  mtime are not in it.
+- Pairing untouched: `pair_review.pair_up` and `EXHAUSTIVE_MAX = 6` are exactly as they were.
+
+WHAT THE FIXTURES SAID, MEASURED (HEAD's `pair_rank.py` in a scratch dir vs the new one)
+- strength beats count (test 4: a beats b twice and c once, b beats c, d farms five wins over a picture that never
+  wins). Old `sort_by_wins`: d, a, b, c, nobody. Old hand-written tile/pane key: d first. New `order`:
+  a, d, b, nobody, c. The raw-count order puts the farmer first; the fit puts the head-to-head winner first.
+- determinism (test 3: three pictures, equal records, both files stamped to one mtime). Old key, input as given:
+  tie_c, tie_a, tie_b. Old key, input shuffled: tie_b, tie_c, tie_a - the old key was input-order-dependent because
+  `-mtime` tied and `sorted` is stable. New: tie_a, tie_b, tie_c both times.
+- pane against tile (test 2's ladder: c0 beats c1 beats c2 beats c3 beats c4, three wins each, so strength runs
+  oldest-first while recency runs the other way and the three middle pictures tie on raw wins and losses). Old pane:
+  c0, c3, c2, c1, c4. Old tile: c0, c3, c2, c1, c4. New, both: c0, c1, c2, c3, c4.
+
+THE HONEST PART: TWO OF THE FIVE ARE GUARDS, NOT REGRESSIONS
+The brief's test 1 - "a picture at 3W-0L must not outrank one at 12W-1L, and prove it red on the old key" - cannot go
+red on a wins-first key: 12 > 3, so every old key put the 12W-1L picture first. Measured on the fixture (3W-0L whose
+three wins are all against the picture that always loses, 12W-1L that beat it eleven times and the folder's best once):
+old `sort_by_wins` = earn12, best, farm3, weak; old hand-written tile and pane keys = the same first two; new `order` =
+best, earn12, farm3, weak. The requirement held before the change and holds after, so the test is a guard on it, and the
+thing it really pins is the reason: the fit gives the farming 3W-0L no strength at all (0.0000 against 0.2301). A pure
+rate-first key would have failed it, but no such key existed - that was the docstring's claim, and the docstring was
+wrong. The pane/tile *agreement* check is a guard for the same reason: the old pane and the old tile agreed on the
+ladder fixture, by resolving the same ties the same (recency) way; what they got wrong was the order, and that is the
+check that goes red on the old keys.
+The genuinely red-before tests are therefore 3 (shuffle), 4 (strength beats count), and the "not recency and not the
+counts" check inside test 2. Test 5 (the badge) is red before by construction: the old formatter returned `1W` and
+`12W 1L` for the two cases, so `1W (2)` and `12W-1L (13)` both fail against it.
+
+WHAT WAS NOT TOUCHED
+`pair_review.pair_up`, its similarity-greedy walk and `EXHAUSTIVE_MAX`. The web server's own `recordText` in
+`web/app.js` is a separate formatter for a separate surface and still prints `nW nL`; nothing here asserts they match.

@@ -1744,13 +1744,58 @@ def main():
           str(app._content_order[0].name))
     # Reported 2026-10-31: "initial order seems almost random not date or alpha or ranked". Fitted strength had no
     # tie-break for pictures that never faced a bout, so a fresh folder's order was whatever the fitting returned.
-    # Wins is now one key everywhere: wins, losses, then newest, then name. Rows without `created` fall back to the
-    # file's mtime, so ties in this fixture are broken newest-first, by name. The point is that it is a rule and not an
+    # Wins asks one function now - `pair_rank.order` - with this folder's newest-first pass as the tie-break, so the
+    # rule is: strength, wins, losses, newest, name. Rows without `created` fall back to the file's mtime, and these
+    # pictures were written a second apart, so ties here are newest-first. The point is that it is a rule and not an
     # accident, so the expectation is computed the same way rather than guessed.
     expect = [victim] + sorted((p for p in made if p != victim), key=lambda p: p.name, reverse=True)
     check('and equal ranks are broken by a stated rule, not by the fitting',
           [Path(p) for p in app._content_order] == expect,
           str([Path(p).name for p in app._content_order]))
+
+    print("\n-- the pane and a folder tile ask one function, so they cannot disagree about the best four")
+    agree_dir = Path(tempfile.mkdtemp(prefix='agree-'))
+    ladder = []
+    records = [{'wins': 0, 'losses': 0, 'vs': {}} for _ in range(5)]
+    for i in range(5):
+        p = agree_dir / ('20261101-1200%02d_512x512_seed%d.png' % (i, 700 + i))
+        Image.new('RGB', (64, 64), (40 * i, 210 - 40 * i, 90)).save(p)     # five plainly different colours
+        ladder.append(p)
+    for i in range(4):                       # ladder[i] beat ladder[i + 1] three times: strength runs oldest-first
+        records[i]['wins'] = 3
+        records[i]['vs'][ladder[i + 1].name] = [3, 0, 0]
+        records[i + 1]['losses'] = records[i + 1].get('losses', 0) + 3
+        records[i + 1]['vs'][ladder[i].name] = [0, 3, 0]
+    items = []
+    for i, p in enumerate(ladder):
+        rec = records[i]
+        created = '2026-11-01T12:00:0%d' % i
+        p.with_suffix('.json').write_text(json.dumps({
+            'prompt': 'ladder %d' % i, 'seed': 700 + i, 'created': created,
+            'wins': rec['wins'], 'losses': rec['losses'], 'ties': 0,
+            'bouts': rec['wins'] + rec['losses'], 'vs': rec['vs']}), encoding='utf-8')
+        os.utime(p, (1_700_000_000 + i, 1_700_000_000 + i))
+        items.append({'path': str(p), 'created': created})
+    agree_group = {'label': 'ladder', 'items': items}
+    saved_plan_agree, saved_regroup_agree = app._plan, app._regroup_soon
+    app._regroup_soon = lambda: None
+    app._plan = {'groups': [agree_group], 'recent': [], 'ungrouped': []}
+    app.sort_var.set('Wins')
+    app._render_folder_bar(); app.select_folder(0); root.update()
+    pane_order = [Path(p) for p in app._content_order]
+    tile_order = [Path(p) for p in app._sheet_paths(agree_group)]
+    check('the pane lists the whole folder', len(pane_order) == 5, [p.name for p in pane_order])
+    check('the pane and the folder tile agree about the best four',
+          tile_order == pane_order[:zui.FOLDER_CELLS],
+          'pane=%s tile=%s' % ([p.name for p in pane_order], [p.name for p in tile_order]))
+    # the ladder's strength runs oldest-first and its recency newest-first, and its three middle pictures tie on raw
+    # wins and losses. A surface that fell back to "newest first", or that ranked on the counts alone, gives
+    # c0, c3, c2, c1, c4 - the deleted hand-written key measured exactly that on this fixture. The fit gives the ladder.
+    check('and that order is the fitted strength, not recency and not the counts',
+          pane_order == ladder, [p.name for p in pane_order])
+    app._plan, app._regroup_soon = saved_plan_agree, saved_regroup_agree
+    app.sort_var.set('Recent')
+    app.select_folder(None); root.update()
 
     # finishing a review switches the order on, and drops the cached ranks
     import pair_review
@@ -3287,7 +3332,11 @@ def main():
         left3, right3 = r3['pair']
         was_left, was_right = prank.record_of(left3), prank.record_of(right3)
         rec.clear()
+        stale_order = ('stale-rank', [])
+        app._rank_cache = stale_order        # the strip's cached order, from the standings before this bout
         app.review_decide('left'); root.update()
+        check('a recorded win drops the cached strip order, which nobody\'s membership would have invalidated',
+              getattr(app, '_rank_cache', None) != stale_order, app._rank_cache)
         after_left, after_right = prank.record_of(left3), prank.record_of(right3)
         check('a win is recorded on the winner', after_left['wins'] == was_left['wins'] + 1,
               (was_left, after_left))
@@ -3297,7 +3346,9 @@ def main():
         meta = json.loads(Path(left3).with_suffix('.json').read_text(encoding='utf-8'))
         check('the win lives in the picture\'s own sidecar', meta.get('wins') == after_left['wins'], meta.get('wins'))
         check('and the prompt is untouched', bool(meta.get('prompt')), meta.get('prompt'))
-        check('the hint reports the standing', 'W-' in app.hint['text'], app.hint['text'])
+        check('the hint reports the standing, with the bouts behind it',
+              prank.badge(left3) in app.hint['text'] and 'rank' in app.hint['text'],
+              '%r badge=%r' % (app.hint['text'], prank.badge(left3)))
 
         # switching mode keeps the same window and restores the destructive buttons
         app._review_mode.set('delete'); app._review_relabel(); root.update()
@@ -3324,7 +3375,8 @@ def main():
         app.select_folder(big); root.update(); time.sleep(0.2)
         marks = [w.cget('text') for cell in app.contents.winfo_children()
                  for w in cell.winfo_children() if w.winfo_class() == 'TLabel']
-        check('the folder pane shows what each picture has done', any(m.endswith('W') for m in marks),
+        check('the folder pane shows what each picture has done, bouts in parentheses',
+              prank.badge(left3) in marks,
               'marks=%r cells=%d' % (marks[:4], len(app.contents.winfo_children())))
         app.sort_var.set('Recent'); app._resort(); root.update()
         check('and the default order is back', app._sort_wins() is False)

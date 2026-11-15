@@ -22,6 +22,11 @@ WIN_CHOICES = ('left_wins', 'right_wins', 'tie')
 DELETE_CHOICES = ('keep_both', 'delete_left', 'delete_right')
 CHOICES = DELETE_CHOICES + WIN_CHOICES
 
+#: Decided bouts (wins + losses) a picture needs before its fitted strength is trusted. Below it the fit rests on one
+#: or two results - a single win over a weak picture can drive a strength to the floor - so a picture with a thin
+#: record is ordered after the pictures that have a fit, by its plain record instead of by a number that means nothing.
+MIN_DECIDED_BOUTS = 3
+
 
 def sidecar(path):
     """The .json that carries a picture's prompt - and now its record."""
@@ -156,19 +161,20 @@ def record_of(path):
 
 
 def rank_key(path):
-    """Sort key: most wins first, then the better win rate, then fewer losses, then the newer file.
+    """The plain record as a sort key: most wins, then fewest losses, then the file's name.
 
-    Raw wins alone would let a picture that was compared twenty times outrank one that won every bout it entered, so the
-    rate is the second term; losses before date stops a 3-5 from tying a 3-0.
+    This is the tail of `order` - the part that settles pictures the fitted strength cannot separate - never the order
+    itself. It is deterministic to the last key: the name, because pictures written inside one second tie on mtime (a
+    16-up run writes sixteen files inside one second) and a stable sort would then keep whatever order the caller handed
+    in. Two equal pictures never swap places between runs.
+
+    The docstring this replaces claimed the win rate "protects against participation bias". It did not, and could not:
+    the rate was the *second* key, so it only ever chose between equal win counts, and a 12W-1L came out ahead of a 3W-0L
+    on wins alone. With wins equal the rate and the loss count give the same answer (rate = w / (w + l)), so the rate was
+    redundant as well. What is left is the honest chain.
     """
     r = record_of(path)
-    decided = r['wins'] + r['losses']
-    rate = (r['wins'] / decided) if decided else 0.0
-    try:
-        mtime = Path(path).stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    return (-r['wins'], -rate, r['losses'], -mtime)
+    return (-r['wins'], r['losses'], Path(path).name)
 
 
 def bt_strength(paths, iterations=200, tol=1e-9):
@@ -220,29 +226,74 @@ def bt_strength(paths, iterations=200, tol=1e-9):
     return {by_name[n]: strength[n] for n in by_name}
 
 
+def order(paths, tie_break=None):
+    """The rank order - best first. This is the one answer to "what is the order", and every surface asks for it.
+
+    Fitted Bradley-Terry strength decides, because a win over a picture that always loses is not worth a win over the
+    one that beats everybody: raw counts cannot tell those apart. `rank_key` settles pictures whose strength is level -
+    more wins, fewer losses, then the name - so a bare `order(some_set)` is the same list whatever order the set
+    arrived in, and two equal pictures never swap places between runs.
+
+    Pictures with fewer than MIN_DECIDED_BOUTS decided bouts have no fit worth trusting, so they follow the ones that do,
+    ordered by that same record. Thin records therefore never sink below untouched pictures either: the group, not the
+    fitted number, decides that.
+
+    `tie_break` is the caller's own order among pictures the rank cannot separate: the folder tile's plan order, the
+    pane's newest-first pass, the strip's timeline. Passed as a list of the same paths, it takes the place of the name -
+    a folder is read from its newest picture down, and that pass must survive, or "wins, then newest" would quietly
+    become "wins, then alphabetical". Without it the order is complete on its own.
+    """
+    paths = list(paths)
+    scores = bt_strength([str(p) for p in paths])
+    where = {str(p): i for i, p in enumerate(tie_break)} if tie_break is not None else None
+
+    def key(path):
+        rec = record_of(path)
+        if where is not None:
+            tail = (-rec['wins'], rec['losses'], where.get(str(path), len(where)), Path(path).name)
+        else:
+            tail = rank_key(path)
+        if rec['wins'] + rec['losses'] < MIN_DECIDED_BOUTS:
+            return (1, 0.0) + tail           # no fit: after every picture that has one, by the plain record
+        return (0, -scores.get(str(path), 1.0)) + tail
+
+    # the caller's own objects come back - the window hands this function Paths and reads Paths out of it again
+    return sorted(paths, key=key)
+
+
 def sort_by_strength(paths):
-    """Rank order by fitted strength; raw wins and then recency break ties, so sparse data still behaves."""
-    paths = [str(p) for p in paths]
-    scores = bt_strength(paths)
-    return sorted(paths, key=lambda p: (-scores.get(p, 1.0), rank_key(p)))
+    """Rank order by fitted strength - `order`, under the name the review test knows it by."""
+    return order(paths)
 
 
 def sort_by_wins(paths):
-    """The paths in rank order - this is what makes a winner first in whatever folder it is shown in."""
+    """The plain record order: most wins, fewest losses, then name. No fitting, so no opponent is weighed.
+
+    `order` is the rank order and the window asks for that one. This is kept for the question the counts alone can
+    answer - what would raw wins say - which is what the strength test measures the fit against.
+    """
     return sorted(paths, key=rank_key)
 
 
 def badge(path):
-    """A short label for a tile: '4W', '4W 1L', or '' when the picture has no record."""
+    """A tile's label: wins, losses, and the bouts behind them - '12W-1L (13)', '1W (2)' - or '' with no bouts.
+
+    The count in parentheses is the evidence: two wins out of two and twelve out of thirteen are not the same claim,
+    and the number of bouts says which one the record is. A record with no decided bout but with ties reports the ties
+    ('3T (3)'), because a tie is still something that happened.
+    """
     r = record_of(path)
     if not r['bouts']:
         return ''
-    out = '%dW' % r['wins'] if r['wins'] else ''
-    if r['losses']:
-        out += (' ' if out else '') + '%dL' % r['losses']
-    if r['ties'] and not out:
-        out = '%dT' % r['ties']
-    return out
+    if r['wins'] and r['losses']:
+        record = '%dW-%dL' % (r['wins'], r['losses'])
+    elif r['wins']:
+        record = '%dW' % r['wins']
+    elif r['losses']:
+        record = '%dL' % r['losses']
+    else:
+        record = '%dT' % r['ties']
+    return '%s (%d)' % (record, r['bouts'])
 
 
 def reset_wins(paths):
